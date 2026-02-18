@@ -328,7 +328,7 @@ run_implementation_loop() {
         
         # Check if tests pass
         log_info "Running tests..."
-        if cargo test --test '*' -- --test-threads=1 2>&1 | tee -a "$PHASE_DIR/test-results.log" | grep -q "test result: ok"; then
+        if "$ARC_SCRIPTS_DIR/run-phase-tests.sh" "$PLAN_NAME" "$PHASE" 2>&1 | tee -a "$PHASE_DIR/test-results.log" | grep -q '"failed": 0'; then
             log_ok "Tests passing"
             
             # If all chunks done and tests pass, attempt completion
