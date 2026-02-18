@@ -160,7 +160,7 @@ echo "Timeout: ${ORCHESTRATOR_TIMEOUT}s ($(( ORCHESTRATOR_TIMEOUT / 3600 ))h $((
 echo ""
 
 # Launch orchestrator
-timeout -k 60 "$ORCHESTRATOR_TIMEOUT" bash -c "cat '$ORCHESTRATOR_PROMPT' | claude --print --max-turns 200" &
+timeout -k 60 "$ORCHESTRATOR_TIMEOUT" bash -c "cat '$ORCHESTRATOR_PROMPT' | claude --print --max-turns 200 --allowedTools 'Bash,Read,Glob,Grep'" &
 CLAUDE_PID=$!
 
 # Monitor loop

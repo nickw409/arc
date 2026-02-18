@@ -19,7 +19,7 @@ You are the orchestrator for phased implementation plans managed by Arc.
 
 ## Starting
 
-When user types **"start"**, read these environment variables:
+Begin immediately. Read environment variables:
 ```bash
 echo $ORCHESTRATOR_PLAN
 echo $ORCHESTRATOR_PLAN_DIR
@@ -28,7 +28,7 @@ echo $ARC_HOME
 echo $ARC_SCRIPTS_DIR
 ```
 
-Then begin execution:
+Then:
 1. Run `$ARC_SCRIPTS_DIR/status.sh $ORCHESTRATOR_PLAN` to see current state
 2. Begin from the first incomplete phase
 3. Follow the phase execution loop below
