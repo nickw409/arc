@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Lock files
+.orchestrator.lock
+
+# Temp files
+*.tmp
+*.tmp.*

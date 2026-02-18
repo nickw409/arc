@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# arc - AI-powered orchestration for multi-phase development tasks
+#
+# Usage: arc <command> [args...]
+#
+# Commands:
+#   init                  Initialize arc in the current project
+#   plan <name> [phases]  Create a new plan with phases
+#   review <plan>         Run adversarial review on a plan
+#   run <plan>            Execute a plan through the orchestrator
+#   status [plan] [phase] Show plan/phase status
+#   iterate <plan> <phase> [mode]  Run one iteration on a phase
+#   help                  Show this help message
+#
+# Project config: .arc.yaml
+# Plans directory: .plans/
+
+set -euo pipefail
+
+# Resolve ARC_HOME — where arc is installed
+# Follow symlinks to find the real location
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ARC_HOME="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+export ARC_HOME
+
+# Project root is the current working directory
+export ARC_PROJECT_ROOT="$(pwd)"
+export ARC_PLANS_DIR="${ARC_PLANS_DIR:-$ARC_PROJECT_ROOT/.plans}"
+export ARC_SCRIPTS_DIR="$ARC_HOME/scripts"
+
+# Version
+ARC_VERSION="0.1.0"
+
+usage() {
+    echo "arc v${ARC_VERSION} — AI-powered orchestration for multi-phase development"
+    echo ""
+    echo "Usage: arc <command> [args...]"
+    echo ""
+    echo "Commands:"
+    echo "  init                       Initialize arc in the current project"
+    echo "  plan <name> [--type TYPE] <phase1> [phase2] ...  Create a new plan"
+    echo "  review <plan> [phase]      Run adversarial review committee"
+    echo "  run <plan>                 Execute plan through orchestrator"
+    echo "  status [plan] [phase]      Show plan/phase status"
+    echo "  iterate <plan> <phase> [mode]  Run one iteration (qa|impl|fix|...)"
+    echo "  help                       Show this help"
+    echo ""
+    echo "Project config: .arc.yaml"
+    echo "Plans: .plans/"
+    echo ""
+    echo "Getting started:"
+    echo "  arc init                   # Set up arc in your project"
+    echo "  arc plan my-feature p1 p2  # Create a plan with phases"
+    echo "  arc review my-feature      # Review the plan"
+    echo "  arc run my-feature         # Execute the plan"
+}
+
+COMMAND="${1:-help}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    init)
+        exec "$ARC_SCRIPTS_DIR/init-project.sh" "$@"
+        ;;
+    plan)
+        exec "$ARC_SCRIPTS_DIR/init-plan.sh" "$@"
+        ;;
+    review)
+        exec "$ARC_SCRIPTS_DIR/plan-review-loop.sh" "$@"
+        ;;
+    run)
+        exec "$ARC_SCRIPTS_DIR/run-orchestrator.sh" "$@"
+        ;;
+    status)
+        exec "$ARC_SCRIPTS_DIR/status.sh" "$@"
+        ;;
+    iterate)
+        exec "$ARC_SCRIPTS_DIR/iterate.sh" "$@"
+        ;;
+    version|--version|-v)
+        echo "arc v${ARC_VERSION}"
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $COMMAND" >&2
+        echo "Run 'arc help' for usage." >&2
+        exit 1
+        ;;
+esac

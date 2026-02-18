@@ -1,0 +1,26 @@
+name: investigation
+version: 1
+description: Research and produce findings
+
+states:
+  - name: research
+    description: Examine codebase and gather information
+    prompt: prompts/investigation/research.md
+    next: draft
+  - name: draft
+    description: Write findings document
+    prompt: prompts/investigation/draft.md
+    next: review
+  - name: review
+    description: Review findings for completeness
+    prompt: prompts/investigation/review.md
+    next: complete
+  - name: complete
+    description: Investigation completed
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Investigation blocked
+    prompt: prompts/common/blocked.md
+
+entry_state: research
+terminal_states: [complete, blocked]

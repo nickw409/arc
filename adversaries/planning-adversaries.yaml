@@ -1,0 +1,45 @@
+# Adversary Committee Configuration
+# Used by plan-review-loop.sh to validate plans before orchestration
+
+max_iterations: 5  # Give up after this many rounds
+
+adversaries:
+  - name: coverage
+    prompt: prompts/adversaries/coverage.md
+    required: true  # Plan cannot proceed if this fails
+    cross_phase: false    # Evaluates each phase independently
+    verdicts:
+      pass: coverage_sufficient
+      fail: coverage_gaps
+
+  - name: ambiguity
+    prompt: prompts/adversaries/ambiguity.md
+    required: true
+    cross_phase: false    # Evaluates each phase independently
+    verdicts:
+      pass: unambiguous
+      fail: ambiguous
+
+  - name: scope
+    prompt: prompts/adversaries/scope.md
+    required: false  # Warning only, can proceed
+    cross_phase: true     # Counts metrics across all phases
+    verdicts:
+      pass: scope_appropriate
+      fail: scope_too_large
+
+  - name: consistency
+    prompt: prompts/adversaries/consistency.md
+    required: true
+    cross_phase: true     # Checks cross-phase type alignment
+    verdicts:
+      pass: consistent
+      fail: inconsistent
+
+  - name: executability
+    prompt: prompts/adversaries/executability.md
+    required: true
+    cross_phase: false    # Evaluates each phase independently
+    verdicts:
+      pass: executable
+      fail: blocked
