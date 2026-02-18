@@ -12,6 +12,7 @@
 #   status [plan] [phase] Show plan/phase status
 #   iterate <plan> <phase> [mode]  Run one iteration on a phase
 #   monitor [plan]        Live TUI monitor for orchestration progress
+#   update                Update arc to the latest version
 #   help                  Show this help message
 #
 # Project config: .arc.yaml
@@ -51,6 +52,7 @@ usage() {
     echo "  status [plan] [phase]      Show plan/phase status"
     echo "  iterate <plan> <phase> [mode]  Run one iteration (qa|impl|fix|...)"
     echo "  monitor [plan]             Live TUI monitor for orchestration progress"
+    echo "  update [--version TAG]     Update arc to latest (or specific version)"
     echo "  help                       Show this help"
     echo ""
     echo "Project config: .arc.yaml"
@@ -87,6 +89,82 @@ case "$COMMAND" in
         ;;
     monitor)
         exec "$ARC_SCRIPTS_DIR/monitor-orchestrator.sh" "$@"
+        ;;
+    update)
+        arc_update() {
+            local target_version=""
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --version|-V)
+                        target_version="$2"
+                        shift 2
+                        ;;
+                    --help|-h)
+                        echo "Usage: arc update [--version TAG]"
+                        echo ""
+                        echo "Updates arc to the latest version, or a specific tagged version."
+                        echo ""
+                        echo "Options:"
+                        echo "  --version, -V TAG   Update to a specific version tag (e.g., v0.2.0)"
+                        return 0
+                        ;;
+                    *)
+                        echo "Unknown option: $1" >&2
+                        return 1
+                        ;;
+                esac
+            done
+
+            cd "$ARC_HOME"
+
+            if [[ ! -d ".git" ]]; then
+                echo "Error: arc was not installed via git. Cannot update." >&2
+                echo "Re-install with: git clone <repo> ~/.arc" >&2
+                return 1
+            fi
+
+            local before
+            before=$(git rev-parse HEAD)
+
+            echo "Updating arc..."
+            git fetch --tags --quiet origin
+
+            if [[ -n "$target_version" ]]; then
+                if ! git rev-parse "$target_version" &>/dev/null; then
+                    echo "Error: version '$target_version' not found." >&2
+                    echo "Available versions:"
+                    git tag --sort=-v:refname | head -10
+                    return 1
+                fi
+                git checkout --quiet "$target_version"
+                echo "Switched to $target_version"
+            else
+                local branch
+                branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+                if [[ -z "$branch" ]]; then
+                    echo "Detached HEAD (pinned to a version tag)."
+                    echo "Run 'arc update --version TAG' to switch versions,"
+                    echo "or 'git checkout main' in $ARC_HOME to track latest."
+                    return 0
+                fi
+                git pull --quiet origin "$branch"
+            fi
+
+            local after
+            after=$(git rev-parse HEAD)
+
+            if [[ "$before" == "$after" ]]; then
+                echo "Already up to date. (arc v${ARC_VERSION})"
+            else
+                local count
+                count=$(git rev-list --count "$before".."$after" 2>/dev/null || echo "?")
+                echo "Updated ($count new commits)"
+                echo ""
+                git --no-pager log --oneline "$before".."$after"
+            fi
+        }
+        arc_update "$@"
         ;;
     version|--version|-v)
         echo "arc v${ARC_VERSION}"
