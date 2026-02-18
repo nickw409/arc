@@ -26,7 +26,7 @@ arc init
 This detects your language and test runner, then creates:
 - `.arc.yaml` — project configuration (language, runner, git settings)
 - `.plans/` — plan storage directory
-- `.claude/commands/plan.md` — `/plan` slash command for Claude Code
+- `.claude/commands/arc-plan.md` — `/arc-plan` slash command for Claude Code
 - Git hooks for commit and file boundary enforcement
 - Claude Code hooks for orchestrator/review agent restrictions
 
@@ -313,7 +313,7 @@ your-project/
 └── .claude/
     ├── settings.json  Claude Code hooks (installed by arc init)
     └── commands/
-        └── plan.md    /plan slash command
+        └── arc-plan.md  /arc-plan slash command
 ```
 
 ## Further Reading

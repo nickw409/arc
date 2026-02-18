@@ -249,8 +249,8 @@ echo "Created .plans/"
 # .claude/commands/plan.md
 mkdir -p "$PROJECT_ROOT/.claude/commands"
 if [[ -f "$ARC_HOME/templates/plan-command.md" ]]; then
-    cp "$ARC_HOME/templates/plan-command.md" "$PROJECT_ROOT/.claude/commands/plan.md"
-    echo "Created .claude/commands/plan.md"
+    cp "$ARC_HOME/templates/plan-command.md" "$PROJECT_ROOT/.claude/commands/arc-plan.md"
+    echo "Created .claude/commands/arc-plan.md"
 else
     echo "Warning: plan-command.md template not found, skipping slash command"
 fi
