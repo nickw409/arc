@@ -1,0 +1,15 @@
+name: test-no-terminal
+version: 1
+
+states:
+  - name: qa
+    prompt: prompts/feature/qa.md
+    next: loop
+  - name: loop
+    prompt: prompts/feature/impl.md
+    next: loop
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: qa
+terminal_states: [complete]

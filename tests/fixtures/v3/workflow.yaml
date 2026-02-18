@@ -1,0 +1,35 @@
+name: test-workflow
+version: 3
+description: Test workflow for V3 integration tests
+
+defaults:
+  max_iterations: 10
+  timeout: 600
+
+variables:
+  crate: test-package
+  test_pattern: "qa_*"
+
+states:
+  - name: impl
+    prompt: prompts/feature/impl.md
+    next: impl_review
+    params:
+      focus_area: "Core implementation"
+      allow_test_changes: false
+
+  - name: impl_review
+    prompt: prompts/feature/impl-review.md
+    verdicts: [approved, concerns]
+    next:
+      approved: complete
+      concerns: impl
+
+  - name: complete
+    prompt: prompts/common/complete.md
+
+  - name: blocked
+    prompt: prompts/common/blocked.md
+
+entry_state: impl
+terminal_states: [complete, blocked]

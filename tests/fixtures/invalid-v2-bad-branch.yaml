@@ -1,0 +1,17 @@
+name: test-v2-bad-branch
+version: 2
+
+states:
+  - name: qa
+    prompt: prompts/feature/qa.md
+    next:
+      approved: impl
+      rejected: nonexistent_state
+  - name: impl
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: qa
+terminal_states: [complete]

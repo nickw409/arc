@@ -1,0 +1,15 @@
+name: test-duplicate
+version: 1
+
+states:
+  - name: qa
+    prompt: prompts/feature/qa.md
+    next: qa
+  - name: qa
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: qa
+terminal_states: [complete]

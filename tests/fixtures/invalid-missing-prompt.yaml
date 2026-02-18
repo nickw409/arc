@@ -1,0 +1,12 @@
+name: test-missing-prompt
+version: 1
+
+states:
+  - name: qa
+    prompt: prompts/nonexistent/does-not-exist.md
+    next: complete
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: qa
+terminal_states: [complete]

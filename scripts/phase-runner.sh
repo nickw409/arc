@@ -16,7 +16,8 @@ set -euo pipefail
 
 ARC_SCRIPTS_DIR="${ARC_SCRIPTS_DIR:-$ARC_HOME/scripts}"
 ENFORCEMENT_DIR="$ARC_SCRIPTS_DIR/../enforcement/scripts"
-COORDINATION_DIR="${COORDINATION_DIR:-.claude/phase-automation/coordination}"
+ARC_PHASES_DIR="${ARC_PHASES_DIR:-}"
+[[ -z "$ARC_PHASES_DIR" ]] && { echo "ERROR: ARC_PHASES_DIR must be set" >&2; exit 1; }
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,8 +57,8 @@ fi
 # Configuration
 BRANCH="phase-$PHASE"
 QA_BRANCH="phase-$PHASE-qa"
-STATE_FILE="$COORDINATION_DIR/phases/$PHASE/state.json"
-PHASE_DIR="$COORDINATION_DIR/phases/$PHASE"
+STATE_FILE="$ARC_PHASES_DIR/$PHASE/state.json"
+PHASE_DIR="$ARC_PHASES_DIR/$PHASE"
 MAX_ITERATIONS="${MAX_ITERATIONS:-25}"
 
 # Generate session ID for all agent messages to go to a single folder

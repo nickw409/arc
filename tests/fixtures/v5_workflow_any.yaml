@@ -1,0 +1,27 @@
+name: test-parallel-any
+version: 5
+defaults:
+  timeout: 60
+states:
+  - name: parallel_step
+    parallel:
+      strategy: any
+      branches:
+        - name: branch_a
+          prompt: prompts/v5_prompts/branch_pass.md
+        - name: branch_b
+          prompt: prompts/v5_prompts/branch_fail.md
+    verdicts:
+      - first_complete
+      - all_failed
+    next:
+      first_complete: done
+      all_failed: blocked
+  - name: done
+    description: Success
+  - name: blocked
+    description: Failure
+entry_state: parallel_step
+terminal_states:
+  - done
+  - blocked

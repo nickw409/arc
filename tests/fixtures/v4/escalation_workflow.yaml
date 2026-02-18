@@ -1,0 +1,20 @@
+name: test_v4_escalation
+version: 4
+
+states:
+  - name: impl
+    prompt: prompts/feature/impl.md
+    escalation:
+      - at_iteration: 3
+        action: analyze_stuck
+      - at_iteration: 5
+        action: switch_model
+        params:
+          model: opus
+    next: complete
+
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: impl
+terminal_states: [complete]

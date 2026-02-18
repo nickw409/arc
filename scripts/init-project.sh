@@ -224,6 +224,27 @@ else
     echo "Warning: plan-command.md template not found, skipping slash command"
 fi
 
+# Install git hooks (if in a git repo)
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    GIT_HOOKS_DIR="$(git rev-parse --git-dir)/hooks"
+    ARC_HOOKS_DIR="$ARC_HOME/enforcement/hooks"
+
+    if [[ -d "$ARC_HOOKS_DIR" ]]; then
+        for hook in "$ARC_HOOKS_DIR"/*; do
+            [[ -f "$hook" ]] || continue
+            HOOK_NAME=$(basename "$hook")
+            TARGET="$GIT_HOOKS_DIR/$HOOK_NAME"
+
+            if [[ -f "$TARGET" ]]; then
+                echo "Warning: git hook '$HOOK_NAME' already exists, skipping (backup and delete it to use arc's)"
+            else
+                ln -sf "$hook" "$TARGET"
+                echo "Installed git hook: $HOOK_NAME"
+            fi
+        done
+    fi
+fi
+
 # Add .plans to .gitignore if not already there
 if [[ -f "$PROJECT_ROOT/.gitignore" ]]; then
     if ! grep -q '^\.plans/' "$PROJECT_ROOT/.gitignore" 2>/dev/null; then

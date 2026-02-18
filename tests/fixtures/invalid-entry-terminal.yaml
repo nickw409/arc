@@ -1,0 +1,10 @@
+name: test-entry-is-terminal
+version: 1
+description: Invalid - entry state cannot be terminal
+
+states:
+  - name: only
+    prompt: prompts/common/complete.md
+
+entry_state: only
+terminal_states: [only]

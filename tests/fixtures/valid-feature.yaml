@@ -1,0 +1,13 @@
+name: test-feature
+version: 1
+description: Minimal valid feature workflow for testing
+
+states:
+  - name: qa
+    prompt: prompts/feature/qa.md
+    next: complete
+  - name: complete
+    prompt: prompts/common/complete.md
+
+entry_state: qa
+terminal_states: [complete]

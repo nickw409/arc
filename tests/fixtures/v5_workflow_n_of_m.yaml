@@ -1,0 +1,30 @@
+name: test-parallel-n-of-m
+version: 5
+defaults:
+  timeout: 60
+states:
+  - name: parallel_step
+    parallel:
+      strategy: n_of_m
+      n: 1
+      branches:
+        - name: branch_a
+          prompt: prompts/v5_prompts/branch_pass.md
+        - name: branch_b
+          prompt: prompts/v5_prompts/branch_fail.md
+        - name: branch_c
+          prompt: prompts/v5_prompts/branch_fail.md
+    verdicts:
+      - n_complete
+      - insufficient
+    next:
+      n_complete: done
+      insufficient: blocked
+  - name: done
+    description: Success
+  - name: blocked
+    description: Failure
+entry_state: parallel_step
+terminal_states:
+  - done
+  - blocked
