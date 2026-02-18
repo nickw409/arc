@@ -11,3 +11,6 @@ __pycache__/
 # Temp files
 *.tmp
 *.tmp.*
+
+# Arc orchestration plans
+.plans/

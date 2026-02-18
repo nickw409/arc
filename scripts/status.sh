@@ -142,6 +142,54 @@ else
 
     echo "Progress: $complete/$total phases complete"
 
+    # Show review status if available
+    review_status=$(jq -r '.review_status // empty' "$PLAN_DIR/plan.json" 2>/dev/null)
+    if [[ -n "$review_status" ]]; then
+        review_iters=$(jq -r '.review_iterations // 0' "$PLAN_DIR/plan.json" 2>/dev/null)
+        reviewed_at=$(jq -r '.reviewed_at // empty' "$PLAN_DIR/plan.json" 2>/dev/null)
+
+        echo ""
+        echo "=== Review Status ==="
+
+        # Status with color
+        case "$review_status" in
+            approved)
+                echo -e "  Status: \033[0;32m$review_status\033[0m (iteration $review_iters/5)" ;;
+            needs_review)
+                echo -e "  Status: \033[0;31m$review_status\033[0m (iteration $review_iters/5)" ;;
+            conditional)
+                echo -e "  Status: \033[1;33m$review_status\033[0m (iteration $review_iters/5)" ;;
+            regression_detected)
+                echo -e "  Status: \033[0;31m$review_status\033[0m (iteration $review_iters/5)" ;;
+            *)
+                echo "  Status: $review_status (iteration $review_iters/5)" ;;
+        esac
+
+        [[ -n "$reviewed_at" ]] && echo "  Last reviewed: $reviewed_at"
+
+        # Per-adversary results
+        review_results=$(jq -r '.review_results // empty' "$PLAN_DIR/plan.json" 2>/dev/null)
+        if [[ -n "$review_results" && "$review_results" != "null" ]]; then
+            echo "  Adversaries:"
+            jq -r '.review_results | to_entries[] | "    \(.key): \(.value)"' "$PLAN_DIR/plan.json" 2>/dev/null | \
+            while read -r line; do
+                if echo "$line" | grep -q "passed"; then
+                    echo -e "\033[0;32m$line\033[0m"
+                elif echo "$line" | grep -q "failed\|error"; then
+                    echo -e "\033[0;31m$line\033[0m"
+                elif echo "$line" | grep -q "warning"; then
+                    echo -e "\033[1;33m$line\033[0m"
+                else
+                    echo "$line"
+                fi
+            done
+        fi
+
+        # Show review note if present (e.g., auto-approved message)
+        review_note=$(jq -r '.review_note // empty' "$PLAN_DIR/plan.json" 2>/dev/null)
+        [[ -n "$review_note" ]] && echo "  Note: $review_note"
+    fi
+
     echo ""
     echo "=== Git Status ==="
     git status --short 2>/dev/null | head -10 || echo "(not a git repo)"
