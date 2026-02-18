@@ -245,6 +245,83 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
     fi
 fi
 
+# Install Claude Code hooks
+install_claude_hooks() {
+    local settings_dir="$PROJECT_ROOT/.claude"
+    local settings_file="$settings_dir/settings.json"
+
+    mkdir -p "$settings_dir"
+
+    # Define the hooks arc needs
+    local hooks_json
+    hooks_json=$(cat << 'HOOKS_EOF'
+[
+  {
+    "matcher": "PreToolUse",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "$ARC_HOME/hooks/arc-block-orchestrator-writes.sh",
+        "description": "arc: Block orchestrator from writing files directly"
+      },
+      {
+        "type": "command",
+        "command": "$ARC_HOME/hooks/arc-restrict-review-writes.sh",
+        "description": "arc: Restrict review agents to their output file"
+      }
+    ]
+  }
+]
+HOOKS_EOF
+)
+
+    if [[ ! -f "$settings_file" ]]; then
+        # No settings file — create one with just hooks
+        python3 -c "
+import json, sys
+hooks = json.loads(sys.argv[1])
+settings = {'hooks': hooks}
+print(json.dumps(settings, indent=2))
+" "$hooks_json" > "$settings_file"
+        echo "Created .claude/settings.json with arc hooks"
+    else
+        # Settings file exists — merge hooks (skip if already installed)
+        local output
+        output=$(python3 -c "
+import json, sys
+
+hooks_to_add = json.loads(sys.argv[1])
+with open(sys.argv[2], 'r') as f:
+    settings = json.load(f)
+
+existing_hooks = settings.get('hooks', [])
+
+# Check if arc hooks are already installed (by description prefix)
+arc_descriptions = {h['description'] for entry in hooks_to_add for h in entry.get('hooks', [])}
+for entry in existing_hooks:
+    for h in entry.get('hooks', []):
+        if h.get('description', '') in arc_descriptions:
+            print('SKIP')
+            sys.exit(0)
+
+# Merge: add arc hook entries to existing hooks list
+settings['hooks'] = existing_hooks + hooks_to_add
+with open(sys.argv[2], 'w') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+print('OK')
+" "$hooks_json" "$settings_file")
+
+        if [[ "$output" == "SKIP" ]]; then
+            echo "Claude Code hooks already installed"
+        else
+            echo "Installed Claude Code hooks in .claude/settings.json"
+        fi
+    fi
+}
+
+install_claude_hooks
+
 # Add .plans to .gitignore if not already there
 if [[ -f "$PROJECT_ROOT/.gitignore" ]]; then
     if ! grep -q '^\.plans/' "$PROJECT_ROOT/.gitignore" 2>/dev/null; then

@@ -11,6 +11,7 @@
 #   run <plan>            Execute a plan through the orchestrator
 #   status [plan] [phase] Show plan/phase status
 #   iterate <plan> <phase> [mode]  Run one iteration on a phase
+#   monitor [plan]        Live TUI monitor for orchestration progress
 #   help                  Show this help message
 #
 # Project config: .arc.yaml
@@ -49,6 +50,7 @@ usage() {
     echo "  run <plan>                 Execute plan through orchestrator"
     echo "  status [plan] [phase]      Show plan/phase status"
     echo "  iterate <plan> <phase> [mode]  Run one iteration (qa|impl|fix|...)"
+    echo "  monitor [plan]             Live TUI monitor for orchestration progress"
     echo "  help                       Show this help"
     echo ""
     echo "Project config: .arc.yaml"
@@ -82,6 +84,9 @@ case "$COMMAND" in
         ;;
     iterate)
         exec "$ARC_SCRIPTS_DIR/iterate.sh" "$@"
+        ;;
+    monitor)
+        exec "$ARC_SCRIPTS_DIR/monitor-orchestrator.sh" "$@"
         ;;
     version|--version|-v)
         echo "arc v${ARC_VERSION}"
