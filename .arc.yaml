@@ -1,0 +1,49 @@
+# =============================================================================
+# Arc Project Configuration
+# =============================================================================
+#
+# This file configures arc for this project. It is read by arc scripts and
+# agents. All fields are set by 'arc init' but can be edited manually.
+#
+# Fields:
+#   language        - Project language. Used to select runner plugins and
+#                     language-specific behavior.
+#                     Values: rust | typescript | python | go
+#
+#   runner          - Test runner plugin. Must match a directory in arc/runners/.
+#                     Each runner provides run-tests.sh and parse-results.sh.
+#                     Values: cargo-nextest | cargo-test | vitest | jest | pytest | go-test
+#
+#   default_package - Primary package/crate/module name. Used by agents when
+#                     scoping test runs or referring to the project.
+#
+#   build_command   - Command to build the project. Empty string if no build
+#                     step is needed (e.g. Python).
+#
+#   test_command    - Command to run the full test suite. Used as the base
+#                     command by runner plugins and phase scripts.
+#
+#   git.commit_style - Commit message format agents should follow.
+#                      conventional: type(scope): description
+#                      freeform: no enforced format
+#
+#   git.sign        - Whether to GPG-sign commits (true | false).
+#
+#   git.co_author   - Whether to add Co-authored-by trailers (true | false).
+# =============================================================================
+
+language: unknown
+runner: unknown
+default_package: ""
+build_command: ""
+test_command: ""
+
+git:
+  commit_style: conventional
+  sign: false
+  co_author: false
+
+# Review settings for adversarial plan review agents
+review:
+  max_turns: 25     # max agent turns per adversary (default: 15)
+  timeout: 600      # timeout in seconds per adversary (default: 300)
