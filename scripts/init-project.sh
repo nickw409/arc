@@ -195,8 +195,39 @@ echo ""
 
 # .arc.yaml
 cat > "$PROJECT_ROOT/.arc.yaml" << EOF
-# Arc project configuration
-# Docs: https://github.com/your-org/arc
+# =============================================================================
+# Arc Project Configuration
+# =============================================================================
+#
+# This file configures arc for this project. It is read by arc scripts and
+# agents. All fields are set by 'arc init' but can be edited manually.
+#
+# Fields:
+#   language        - Project language. Used to select runner plugins and
+#                     language-specific behavior.
+#                     Values: rust | typescript | python | go
+#
+#   runner          - Test runner plugin. Must match a directory in arc/runners/.
+#                     Each runner provides run-tests.sh and parse-results.sh.
+#                     Values: cargo-nextest | cargo-test | vitest | jest | pytest | go-test
+#
+#   default_package - Primary package/crate/module name. Used by agents when
+#                     scoping test runs or referring to the project.
+#
+#   build_command   - Command to build the project. Empty string if no build
+#                     step is needed (e.g. Python).
+#
+#   test_command    - Command to run the full test suite. Used as the base
+#                     command by runner plugins and phase scripts.
+#
+#   git.commit_style - Commit message format agents should follow.
+#                      conventional: type(scope): description
+#                      freeform: no enforced format
+#
+#   git.sign        - Whether to GPG-sign commits (true | false).
+#
+#   git.co_author   - Whether to add Co-authored-by trailers (true | false).
+# =============================================================================
 
 language: $LANG
 runner: $RUNNER
@@ -205,7 +236,7 @@ build_command: "$BUILD_CMD"
 test_command: "$TEST_CMD"
 
 git:
-  commit_style: conventional  # conventional | freeform
+  commit_style: conventional
   sign: false
   co_author: false
 EOF
@@ -252,26 +283,28 @@ install_claude_hooks() {
 
     mkdir -p "$settings_dir"
 
-    # Define the hooks arc needs
+    # Define the hooks arc needs (matches Claude Code settings format)
     local hooks_json
     hooks_json=$(cat << 'HOOKS_EOF'
-[
-  {
-    "matcher": "PreToolUse",
-    "hooks": [
-      {
-        "type": "command",
-        "command": "$ARC_HOME/hooks/arc-block-orchestrator-writes.sh",
-        "description": "arc: Block orchestrator from writing files directly"
-      },
-      {
-        "type": "command",
-        "command": "$ARC_HOME/hooks/arc-restrict-review-writes.sh",
-        "description": "arc: Restrict review agents to their output file"
-      }
-    ]
-  }
-]
+{
+  "PreToolUse": [
+    {
+      "matcher": "Write|Edit|Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$ARC_HOME/hooks/arc-block-orchestrator-writes.sh",
+          "description": "arc: Block orchestrator from writing files directly"
+        },
+        {
+          "type": "command",
+          "command": "$ARC_HOME/hooks/arc-restrict-review-writes.sh",
+          "description": "arc: Restrict review agents to their output file"
+        }
+      ]
+    }
+  ]
+}
 HOOKS_EOF
 )
 
@@ -294,18 +327,32 @@ hooks_to_add = json.loads(sys.argv[1])
 with open(sys.argv[2], 'r') as f:
     settings = json.load(f)
 
-existing_hooks = settings.get('hooks', [])
+existing_hooks = settings.get('hooks', {})
+if isinstance(existing_hooks, list):
+    existing_hooks = {}
 
-# Check if arc hooks are already installed (by description prefix)
-arc_descriptions = {h['description'] for entry in hooks_to_add for h in entry.get('hooks', [])}
-for entry in existing_hooks:
-    for h in entry.get('hooks', []):
-        if h.get('description', '') in arc_descriptions:
-            print('SKIP')
-            sys.exit(0)
+arc_descriptions = set()
+for event, entries in hooks_to_add.items():
+    for entry in entries:
+        for h in entry.get('hooks', []):
+            arc_descriptions.add(h.get('description', ''))
 
-# Merge: add arc hook entries to existing hooks list
-settings['hooks'] = existing_hooks + hooks_to_add
+# Check if arc hooks are already installed
+for event, entries in existing_hooks.items():
+    for entry in entries:
+        for h in entry.get('hooks', []):
+            if h.get('description', '') in arc_descriptions:
+                print('SKIP')
+                sys.exit(0)
+
+# Merge: append arc hook entries per event
+for event, entries in hooks_to_add.items():
+    if event in existing_hooks:
+        existing_hooks[event].extend(entries)
+    else:
+        existing_hooks[event] = entries
+
+settings['hooks'] = existing_hooks
 with open(sys.argv[2], 'w') as f:
     json.dump(settings, f, indent=2)
     f.write('\n')
