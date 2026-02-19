@@ -1,1 +1,0 @@
-Stub prompt for passing branch

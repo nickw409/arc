@@ -1,5 +1,0 @@
-name: test-syntax
-version: 1
-states:
-  - name: qa
-    prompt: [malformed: yaml: here
