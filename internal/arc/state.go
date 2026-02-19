@@ -1,5 +1,7 @@
 package arc
 
+import "time"
+
 // PhaseState is the runtime state of a single phase, serialized to state.json.
 type PhaseState struct {
 	Phase               string          `json:"phase"`
@@ -37,10 +39,10 @@ type Iteration struct {
 }
 
 type Chunks struct {
-	Total     int            `json:"total"`
-	Completed []ChunkResult  `json:"completed"`
-	Current   *ChunkCurrent  `json:"current"`
-	Remaining []int          `json:"remaining"`
+	Total     int           `json:"total"`
+	Completed []ChunkResult `json:"completed"`
+	Current   *ChunkCurrent `json:"current"`
+	Remaining []int         `json:"remaining"`
 }
 
 type ChunkResult struct {
@@ -93,7 +95,21 @@ type Intervention struct {
 
 // NewPhaseState creates a PhaseState with all slices/maps initialized (never nil).
 func NewPhaseState(plan, phase, workflowType string) *PhaseState {
-	panic("not implemented")
+	return &PhaseState{
+		Phase:               phase,
+		Plan:                plan,
+		WorkflowType:        workflowType,
+		PhaseStatus:         "pending",
+		Iteration:           Iteration{Current: 0, Max: 25},
+		Chunks:              Chunks{Completed: []ChunkResult{}, Remaining: []int{}},
+		Blocked:             BlockedInfo{},
+		Packages:            []string{},
+		Disputes:            []Dispute{},
+		LastClearedDisputes: []Dispute{},
+		VerdictsHistory:     []VerdictEntry{},
+		TestFiles:           []string{},
+		ExecutedEscalations: []string{},
+	}
 }
 
 // PlanMeta is the metadata for a plan, serialized to plan.json.
@@ -111,5 +127,25 @@ type PlanMeta struct {
 
 // NewPlanMeta creates a PlanMeta with all maps/slices initialized.
 func NewPlanMeta(name, workflowType string, phases []string) *PlanMeta {
-	panic("not implemented")
+	phaseOrder := make(map[string]int, len(phases))
+	dependencies := make(map[string][]string)
+	for i, p := range phases {
+		phaseOrder[p] = i + 1
+		if i > 0 {
+			dependencies[p] = []string{phases[i-1]}
+		}
+	}
+	if phases == nil {
+		phases = []string{}
+	}
+	return &PlanMeta{
+		Name:         name,
+		Created:      time.Now().UTC().Format(time.RFC3339),
+		Status:       "active",
+		Phases:       phases,
+		PhaseOrder:   phaseOrder,
+		Dependencies: dependencies,
+		ReviewStatus: "unreviewed",
+		WorkflowType: workflowType,
+	}
 }

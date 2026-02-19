@@ -1,5 +1,14 @@
 package config
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Supported values for validation.
 var (
 	SupportedLanguages = []string{"rust", "go", "typescript", "python", "unknown"}
@@ -26,10 +35,40 @@ type GitConfig struct {
 
 // Load reads .arc.yaml from the given project root.
 func Load(projectRoot string) (*Config, error) {
-	panic("not implemented")
+	data, err := os.ReadFile(filepath.Join(projectRoot, ".arc.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Git.CommitStyle == "" {
+		cfg.Git.CommitStyle = "conventional"
+	}
+	return &cfg, nil
 }
 
 // Validate checks that language is in SupportedLanguages and runner is in SupportedRunners.
 func (c *Config) Validate() error {
-	panic("not implemented")
+	var errs []string
+	if !contains(SupportedLanguages, c.Language) {
+		errs = append(errs, fmt.Sprintf("unsupported language %q", c.Language))
+	}
+	if !contains(SupportedRunners, c.Runner) {
+		errs = append(errs, fmt.Sprintf("unsupported runner %q", c.Runner))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

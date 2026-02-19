@@ -3,5 +3,8 @@ package cli
 import "github.com/spf13/cobra"
 
 func newReviewCmd() *cobra.Command {
-	panic("not implemented")
+	return &cobra.Command{
+		Use:   "review",
+		Short: "Review a plan or phase",
+	}
 }

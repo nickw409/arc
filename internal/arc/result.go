@@ -11,9 +11,20 @@ const (
 	ActionAbort                         // unrecoverable
 )
 
+var resultActionNames = [...]string{
+	ActionContinue:  "continue",
+	ActionRetry:     "retry",
+	ActionEscalate:  "escalate",
+	ActionIntervene: "intervene",
+	ActionAbort:     "abort",
+}
+
 // String returns the human-readable name of the action.
 func (a ResultAction) String() string {
-	panic("not implemented")
+	if int(a) < 0 || int(a) >= len(resultActionNames) {
+		return "unknown"
+	}
+	return resultActionNames[a]
 }
 
 // IterationResult is the outcome of a single iteration.

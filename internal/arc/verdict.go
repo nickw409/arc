@@ -1,7 +1,9 @@
 package arc
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Verdict represents a parsed agent verdict that drives state transitions.
@@ -29,10 +31,38 @@ var identifierRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // ParseVerdict normalizes raw agent output into a known Verdict.
 func ParseVerdict(raw string, validVerdicts []Verdict) (Verdict, error) {
-	panic("not implemented")
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, "**", "")
+	s = strings.ReplaceAll(s, "`", "")
+	s = strings.TrimSpace(s)
+	s = strings.ToLower(s)
+
+	if s == "" {
+		return VerdictUnknown, fmt.Errorf("empty verdict")
+	}
+
+	fields := strings.Fields(s)
+	token := fields[0]
+
+	if !identifierRe.MatchString(token) {
+		return VerdictUnknown, fmt.Errorf("verdict %q is not a valid identifier", token)
+	}
+
+	candidate := Verdict(token)
+	for _, v := range validVerdicts {
+		if candidate == v {
+			return candidate, nil
+		}
+	}
+
+	names := make([]string, len(validVerdicts))
+	for i, v := range validVerdicts {
+		names[i] = string(v)
+	}
+	return VerdictUnknown, fmt.Errorf("verdict %q not in valid set [%s]", token, strings.Join(names, " "))
 }
 
 // IsValid returns true if v is not VerdictUnknown and not empty.
 func (v Verdict) IsValid() bool {
-	panic("not implemented")
+	return v != VerdictUnknown && v != ""
 }

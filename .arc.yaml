@@ -32,9 +32,9 @@
 #   git.co_author   - Whether to add Co-authored-by trailers (true | false).
 # =============================================================================
 
-language: unknown
-runner: unknown
-default_package: ""
+language: go
+runner: go-test
+default_package: arc
 build_command: ""
 test_command: ""
 
