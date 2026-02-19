@@ -43,26 +43,6 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 	phaseState := *statePtr
 
-	// Check pre-constraints
-	if err := checkPreConstraints(&phaseState, nil, phaseDir); err != nil {
-		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("pre-constraint check: %w", err)}
-	}
-
-	// Check intervention
-	if action := checkIntervention(&phaseState, nil); action != "" {
-		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("intervention required: %s", action)}
-	}
-
-	// Check escalation
-	if esc := checkEscalation(&phaseState, nil); esc != nil {
-		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("escalation triggered: %s", esc.Action)}
-	}
-
-	// Check context after state load
-	if ctx.Err() != nil {
-		return &arc.IterationResult{Action: arc.ActionAbort, Err: ctx.Err()}
-	}
-
 	// Load workflow
 	wfBytes, err := resources.WorkflowBytes(phaseState.WorkflowType)
 	if err != nil {
@@ -76,7 +56,36 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 
 	machine := workflow.NewMachine(wf)
 
-	// Check context after workflow load
+	// Get state config (may be nil for unknown states)
+	stateConfig := machine.GetState(phaseState.CurrentState)
+
+	// Extract workflow-defined constraints, escalation rules, hooks, and triggers
+	var constraints *arc.ConstraintConfig
+	var escalationRules []arc.EscalationRule
+	var afterHooks []arc.HookConfig
+	if stateConfig != nil {
+		constraints = stateConfig.Constraints
+		escalationRules = stateConfig.Escalation
+		afterHooks = stateConfig.After
+	}
+	interventionTriggers := wf.InterventionTriggers
+
+	// Check pre-constraints
+	if err := CheckPreConstraints(&phaseState, constraints, phaseDir); err != nil {
+		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("pre-constraint check: %w", err)}
+	}
+
+	// Check intervention
+	if msg := CheckIntervention(&phaseState, interventionTriggers); msg != "" {
+		return &arc.IterationResult{Action: arc.ActionIntervene, Err: fmt.Errorf("intervention required: %s", msg)}
+	}
+
+	// Check escalation
+	if esc := CheckEscalation(&phaseState, escalationRules); esc != nil {
+		return &arc.IterationResult{Action: arc.ActionEscalate, Err: fmt.Errorf("escalation triggered: %s", esc.Action)}
+	}
+
+	// Check context after state load
 	if ctx.Err() != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: ctx.Err()}
 	}
@@ -91,8 +100,6 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: ctx.Err()}
 	}
 
-	// Get state config for the current state
-	stateConfig := machine.GetState(phaseState.CurrentState)
 	if stateConfig == nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("state %q not found in workflow", phaseState.CurrentState)}
 	}
@@ -192,12 +199,12 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 
 	// Check post-constraints after successful iteration
-	if err := checkPostConstraints(nil, phaseDir); err != nil {
+	if err := CheckPostConstraints(constraints, phaseDir); err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("post-constraint check: %w", err)}
 	}
 
 	// Run after hooks
-	if err := runAfterHooks(ctx, nil, verdict, &phaseState, phaseDir); err != nil {
+	if err := RunAfterHooks(ctx, afterHooks, verdict, &phaseState, phaseDir); err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("after hooks: %w", err)}
 	}
 
@@ -233,31 +240,6 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		Verdict:   verdict,
 		Action:    arc.ActionContinue,
 	}
-}
-
-type escalationAction struct {
-	Action string
-	Params map[string]string
-}
-
-func checkIntervention(state *arc.PhaseState, triggers []arc.InterventionTrigger) string {
-	return ""
-}
-
-func checkEscalation(state *arc.PhaseState, rules []arc.EscalationRule) *escalationAction {
-	return nil
-}
-
-func checkPreConstraints(state *arc.PhaseState, constraints *arc.ConstraintConfig, phaseDir string) error {
-	return nil
-}
-
-func checkPostConstraints(constraints *arc.ConstraintConfig, phaseDir string) error {
-	return nil
-}
-
-func runAfterHooks(ctx context.Context, hooks []arc.HookConfig, verdict arc.Verdict, state *arc.PhaseState, phaseDir string) error {
-	return nil
 }
 
 // MapStateToStatus maps a workflow state name to a phase_status value.
