@@ -1,0 +1,26 @@
+name: parallel
+version: 5
+description: Workflow with parallel branches
+entry_state: setup
+terminal_states: [complete]
+states:
+  - name: setup
+    description: Setup parallel execution
+    prompt: setup.md
+    next: work
+    parallel:
+      branches:
+        - name: branch_a
+          prompt: branch_a.md
+        - name: branch_b
+          prompt: branch_b.md
+      strategy: all
+      n: 2
+
+  - name: work
+    description: Do the work
+    prompt: work.md
+    next: complete
+
+  - name: complete
+    description: Done

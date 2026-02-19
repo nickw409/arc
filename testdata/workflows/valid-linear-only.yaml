@@ -1,0 +1,23 @@
+name: linear
+version: 1
+description: Workflow with no verdicts on any state
+entry_state: step1
+terminal_states: [done]
+states:
+  - name: step1
+    description: First step
+    prompt: step1.md
+    next: step2
+
+  - name: step2
+    description: Second step
+    prompt: step2.md
+    next: step3
+
+  - name: step3
+    description: Third step
+    prompt: step3.md
+    next: done
+
+  - name: done
+    description: Complete

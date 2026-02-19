@@ -1,0 +1,8 @@
+name: entry-terminal
+version: 1
+description: Entry state is terminal
+entry_state: done
+terminal_states: [done]
+states:
+  - name: done
+    description: Done
