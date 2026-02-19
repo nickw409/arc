@@ -77,14 +77,19 @@ func InstallClaudeHooks(projectRoot string) error {
 		"hooks": map[string]interface{}{
 			"PreToolUse": []interface{}{
 				map[string]interface{}{
-					"matcher": "Write|Edit",
-					"hook":    "arc-enforce-write",
-				},
-			},
-			"PostToolUse": []interface{}{
-				map[string]interface{}{
-					"matcher": "Bash",
-					"hook":    "arc-enforce-bash",
+					"matcher": "Write|Edit|Bash",
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":        "command",
+							"command":     `[ -z "${ARC_HOME:-}" ] && exit 0; "$ARC_HOME/hooks/arc-block-orchestrator-writes.sh"`,
+							"description": "arc: Block orchestrator from writing files directly",
+						},
+						map[string]interface{}{
+							"type":        "command",
+							"command":     `[ -z "${ARC_HOME:-}" ] && exit 0; "$ARC_HOME/hooks/arc-restrict-review-writes.sh"`,
+							"description": "arc: Restrict review agents to their output file",
+						},
+					},
 				},
 			},
 		},
@@ -147,10 +152,9 @@ func mergeClaudeHooks(settings, arcHooks map[string]interface{}) {
 			continue
 		}
 
-		// Merge: update existing arc hooks in-place, append new ones
+		// Merge: replace existing arc matcher entries in-place, append new ones
 		for _, arcEntry := range arcList {
 			arcMap := arcEntry.(map[string]interface{})
-			arcHookName := arcMap["hook"].(string)
 
 			found := false
 			for i, existingEntry := range existingSlice {
@@ -158,8 +162,7 @@ func mergeClaudeHooks(settings, arcHooks map[string]interface{}) {
 				if !ok {
 					continue
 				}
-				hookName, _ := existingMap["hook"].(string)
-				if strings.HasPrefix(hookName, "arc-") && hookName == arcHookName {
+				if isArcHookEntry(existingMap) {
 					existingSlice[i] = arcMap
 					found = true
 					break
@@ -171,6 +174,26 @@ func mergeClaudeHooks(settings, arcHooks map[string]interface{}) {
 		}
 		existingHooksMap[hookType] = existingSlice
 	}
+}
+
+// isArcHookEntry checks if a Claude hook entry belongs to arc by looking for
+// $ARC_HOME in any sub-hook command.
+func isArcHookEntry(entry map[string]interface{}) bool {
+	hooks, ok := entry["hooks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, h := range hooks {
+		hMap, ok := h.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmd, _ := hMap["command"].(string)
+		if strings.Contains(cmd, "$ARC_HOME/") {
+			return true
+		}
+	}
+	return false
 }
 
 // InstallSlashCommand writes the /arc-plan command to .claude/commands/arc-plan.md.

@@ -295,11 +295,21 @@ func TestInstallClaudeHooksExistingArcHooks(t *testing.T) {
 			"PreToolUse": []interface{}{
 				map[string]interface{}{
 					"matcher": "Write",
-					"hook":    "my-custom-hook",
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": "my-custom-hook",
+						},
+					},
 				},
 				map[string]interface{}{
-					"matcher": "Write|Edit",
-					"hook":    "arc-enforce-write",
+					"matcher": "Write|Edit|Bash",
+					"hooks": []interface{}{
+						map[string]interface{}{
+							"type":    "command",
+							"command": "$ARC_HOME/hooks/arc-block-orchestrator-writes.sh",
+						},
+					},
 				},
 			},
 		},
@@ -325,10 +335,10 @@ func TestInstallClaudeHooksExistingArcHooks(t *testing.T) {
 		t.Fatal("non-arc hooks should be preserved")
 	}
 
-	// Count arc-enforce-write occurrences — should be exactly 1 (overwritten, not duplicated)
-	count := strings.Count(content, "arc-enforce-write")
+	// Count arc-block-orchestrator-writes occurrences — should be exactly 1 (overwritten, not duplicated)
+	count := strings.Count(content, "arc-block-orchestrator-writes")
 	if count != 1 {
-		t.Fatalf("arc-enforce-write appears %d times, want 1 (should be overwritten not duplicated)", count)
+		t.Fatalf("arc-block-orchestrator-writes appears %d times, want 1 (should be overwritten not duplicated)", count)
 	}
 }
 

@@ -7,6 +7,7 @@
 # Activated by: ORCHESTRATOR_MODE=1 (set by run-orchestrator.sh)
 # Trigger: PreToolUse on Bash, Write, Edit
 
+[[ -z "${ARC_HOME:-}" ]] && exit 0
 [[ "$ORCHESTRATOR_MODE" != "1" ]] && exit 0
 
 TOOL_NAME="${CLAUDE_TOOL_NAME:-}"
