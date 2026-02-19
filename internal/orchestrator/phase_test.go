@@ -57,11 +57,14 @@ func setupPhaseTestPlan(t *testing.T, planName, phaseName, workflowType string) 
 }
 
 func TestRunPhaseReachesTerminal(t *testing.T) {
-	// This test requires a mock workflow and agent.
-	// Since RunPhase is not implemented, this verifies the expected behavior.
+	// This test calls RunPhase which spawns agents. Use a short timeout
+	// so it doesn't hang if no agent binary is available.
 	plansDir := setupPhaseTestPlan(t, "test-plan", "test-phase", "feature")
 
-	err := RunPhase(context.Background(), RunPhaseOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -69,14 +72,17 @@ func TestRunPhaseReachesTerminal(t *testing.T) {
 		Logger:    testLogger(),
 	})
 
-	// When implemented: should return nil with state status "complete"
+	// RunPhase will return with context deadline or agent error
 	_ = err
 }
 
 func TestRunPhaseActionRetry(t *testing.T) {
 	plansDir := setupPhaseTestPlan(t, "test-plan", "test-phase", "feature")
 
-	err := RunPhase(context.Background(), RunPhaseOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -89,7 +95,10 @@ func TestRunPhaseActionRetry(t *testing.T) {
 func TestRunPhaseActionEscalate(t *testing.T) {
 	plansDir := setupPhaseTestPlan(t, "test-plan", "test-phase", "feature")
 
-	err := RunPhase(context.Background(), RunPhaseOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -102,7 +111,10 @@ func TestRunPhaseActionEscalate(t *testing.T) {
 func TestRunPhaseActionIntervene(t *testing.T) {
 	plansDir := setupPhaseTestPlan(t, "test-plan", "test-phase", "feature")
 
-	err := RunPhase(context.Background(), RunPhaseOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -115,7 +127,10 @@ func TestRunPhaseActionIntervene(t *testing.T) {
 func TestRunPhaseActionAbort(t *testing.T) {
 	plansDir := setupPhaseTestPlan(t, "test-plan", "test-phase", "feature")
 
-	err := RunPhase(context.Background(), RunPhaseOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
