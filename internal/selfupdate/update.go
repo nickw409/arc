@@ -28,6 +28,7 @@ type release struct {
 type asset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	APIURL             string `json:"url"`
 }
 
 // Update checks for the latest release and updates the binary if a newer
@@ -83,28 +84,28 @@ func fetchUpdate(currentVersion, baseURL, goos, goarch string) (binData []byte, 
 		return nil, "", err
 	}
 
-	var assetURL, checksumURL string
-	for _, a := range rel.Assets {
-		switch a.Name {
+	var tarAsset, checksumAsset *asset
+	for i := range rel.Assets {
+		switch rel.Assets[i].Name {
 		case assetName:
-			assetURL = a.BrowserDownloadURL
+			tarAsset = &rel.Assets[i]
 		case "checksums.txt":
-			checksumURL = a.BrowserDownloadURL
+			checksumAsset = &rel.Assets[i]
 		}
 	}
-	if assetURL == "" {
+	if tarAsset == nil {
 		return nil, "", fmt.Errorf("asset %s not found in release %s", assetName, rel.TagName)
 	}
-	if checksumURL == "" {
+	if checksumAsset == nil {
 		return nil, "", fmt.Errorf("checksums.txt not found in release %s", rel.TagName)
 	}
 
-	checksumData, err := downloadBytes(checksumURL)
+	checksumData, err := downloadAsset(checksumAsset)
 	if err != nil {
 		return nil, "", fmt.Errorf("downloading checksums: %w", err)
 	}
 
-	assetData, err := downloadBytes(assetURL)
+	assetData, err := downloadAsset(tarAsset)
 	if err != nil {
 		return nil, "", fmt.Errorf("downloading asset: %w", err)
 	}
@@ -153,7 +154,7 @@ func atomicReplace(target string, data []byte) error {
 
 func latestRelease(baseURL string) (*release, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", baseURL, repoOwner, repoName)
-	resp, err := http.Get(url)
+	resp, err := authedGet(url)
 	if err != nil {
 		return nil, fmt.Errorf("fetching latest release: %w", err)
 	}
@@ -227,8 +228,33 @@ func extractBinary(tarGzData []byte) ([]byte, error) {
 	return nil, fmt.Errorf("arc binary not found in archive")
 }
 
+// downloadAsset downloads a release asset. For private repos (when a token is
+// available), it uses the GitHub API URL with Accept: application/octet-stream.
+// For public repos it uses the browser download URL directly.
+func downloadAsset(a *asset) ([]byte, error) {
+	token := githubToken()
+	if token != "" && a.APIURL != "" {
+		req, err := http.NewRequest("GET", a.APIURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "token "+token)
+		req.Header.Set("Accept", "application/octet-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("download %s returned %d", a.APIURL, resp.StatusCode)
+		}
+		return io.ReadAll(resp.Body)
+	}
+	return downloadBytes(a.BrowserDownloadURL)
+}
+
 func downloadBytes(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := authedGet(url)
 	if err != nil {
 		return nil, err
 	}
@@ -239,4 +265,25 @@ func downloadBytes(url string) ([]byte, error) {
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// githubToken returns a token from GITHUB_TOKEN or GH_TOKEN if set.
+func githubToken() string {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("GH_TOKEN")
+}
+
+// authedGet performs an HTTP GET, adding an Authorization header if a
+// GitHub token is available. This allows updates from private repos.
+func authedGet(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := githubToken(); token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
+	return http.DefaultClient.Do(req)
 }
