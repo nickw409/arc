@@ -108,6 +108,16 @@ func TestResourcePathTraversalAll(t *testing.T) {
 	}
 }
 
+func TestEmbeddedValidatePromptAccessible(t *testing.T) {
+	data, err := PromptBytes("validate/audit.md")
+	if err != nil {
+		t.Fatalf("PromptBytes(validate/audit.md) error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("PromptBytes(validate/audit.md) returned empty byte slice")
+	}
+}
+
 func TestEmbeddedWorkflowContent(t *testing.T) {
 	// Verify embedded workflows have expected content markers
 	types := []string{"feature", "bugfix", "investigation", "refactor", "performance"}
