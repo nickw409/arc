@@ -43,8 +43,45 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// setupE2E creates a plan directory with phases and returns (plansDir, scriptDir).
-func setupE2E(t *testing.T, planName string, phases []string, workflowType string) (string, string) {
+// initE2EGitRepo creates an isolated git repository in a temp directory.
+func initE2EGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git init cmd %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create an initial commit so the repo is not empty
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "-A")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
+}
+
+// setupE2E creates a plan directory with phases and returns (plansDir, scriptDir, projectDir).
+// projectDir is an isolated git repository that prevents commits from affecting the real repo.
+func setupE2E(t *testing.T, planName string, phases []string, workflowType string) (string, string, string) {
 	t.Helper()
 
 	plansDir := t.TempDir()
@@ -78,7 +115,10 @@ func setupE2E(t *testing.T, planName string, phases []string, workflowType strin
 	scriptDir := t.TempDir()
 	t.Setenv("MOCK_SCRIPT_DIR", scriptDir)
 
-	return plansDir, scriptDir
+	// Create isolated git repo for commits
+	projectDir := initE2EGitRepo(t)
+
+	return plansDir, scriptDir, projectDir
 }
 
 func writeState(t *testing.T, phaseDir string, ps *arc.PhaseState) {
@@ -120,7 +160,7 @@ func e2eLogger() *slog.Logger {
 // TestE2EHappyPath exercises the full happy path:
 // qa → qa_review(approved) → impl → impl_review(approved) → complete
 func TestE2EHappyPath(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-happy", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-happy", []string{"core"}, "feature")
 
 	// Call 0: qa (linear, no verdict needed)
 	writeScript(t, scriptDir, 0, "QA tests written successfully.")
@@ -135,11 +175,12 @@ func TestE2EHappyPath(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-happy",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-happy",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -181,7 +222,7 @@ func TestE2EHappyPath(t *testing.T) {
 // TestE2EQAGapsLoop exercises the QA gaps loop:
 // qa → qa_review(gaps_found) → qa → qa_review(approved) → impl → impl_review(approved) → complete
 func TestE2EQAGapsLoop(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-gaps", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-gaps", []string{"core"}, "feature")
 
 	// Call 0: qa
 	writeScript(t, scriptDir, 0, "QA tests written.")
@@ -200,11 +241,12 @@ func TestE2EQAGapsLoop(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-gaps",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-gaps",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -244,7 +286,7 @@ func TestE2EQAGapsLoop(t *testing.T) {
 // TestE2EImplConcerns exercises the impl concerns loop:
 // qa → qa_review(approved) → impl → impl_review(concerns) → impl → impl_review(approved) → complete
 func TestE2EImplConcerns(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-concerns", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-concerns", []string{"core"}, "feature")
 
 	// Call 0: qa
 	writeScript(t, scriptDir, 0, "QA tests written.")
@@ -263,11 +305,12 @@ func TestE2EImplConcerns(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-concerns",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-concerns",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -307,7 +350,7 @@ func TestE2EImplConcerns(t *testing.T) {
 // TestE2EDisputeApproved exercises the dispute-approved flow:
 // JudgeDispute → APPROVE_DISPUTE → fix iteration → impl continues → impl_review(approved) → complete
 func TestE2EDisputeApproved(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-dispute-ok", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-dispute-ok", []string{"core"}, "feature")
 
 	// Pre-seed state to disputed status in impl state
 	phaseDir := filepath.Join(plansDir, "e2e-dispute-ok", "phases", "core")
@@ -332,11 +375,12 @@ func TestE2EDisputeApproved(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-dispute-ok",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-dispute-ok",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -363,7 +407,7 @@ func TestE2EDisputeApproved(t *testing.T) {
 // TestE2EDisputeRejected exercises the dispute-rejected flow:
 // JudgeDispute → REJECT_DISPUTE → impl continues → impl_review(approved) → complete
 func TestE2EDisputeRejected(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-dispute-no", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-dispute-no", []string{"core"}, "feature")
 
 	// Pre-seed state to disputed status in impl state
 	phaseDir := filepath.Join(plansDir, "e2e-dispute-no", "phases", "core")
@@ -386,11 +430,12 @@ func TestE2EDisputeRejected(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-dispute-no",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-dispute-no",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -421,7 +466,7 @@ func TestE2EDisputeRejected(t *testing.T) {
 // TestE2EMultiPhase exercises multi-phase orchestration with dependencies.
 // Two phases: "core" (no deps) → "api" (depends on "core"). Run via Launch().
 func TestE2EMultiPhase(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-multi", []string{"core", "api"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-multi", []string{"core", "api"}, "feature")
 
 	// Phase "core": calls 0-3 (happy path)
 	writeScript(t, scriptDir, 0, "QA tests for core.")
@@ -439,10 +484,11 @@ func TestE2EMultiPhase(t *testing.T) {
 	defer cancel()
 
 	err := Launch(ctx, LaunchOptions{
-		PlanName: "e2e-multi",
-		PlansDir: plansDir,
-		ArcHome:  t.TempDir(),
-		Logger:   e2eLogger(),
+		PlanName:   "e2e-multi",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("Launch failed: %v", err)
@@ -490,7 +536,7 @@ func TestE2EMultiPhase(t *testing.T) {
 // TestE2EEscalationBlocked verifies that a phase becomes blocked when stuck
 // iterations and rollback count are exhausted via handleEscalation.
 func TestE2EEscalationBlocked(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-blocked", []string{"core"}, "feature")
+	plansDir, scriptDir, _ := setupE2E(t, "e2e-blocked", []string{"core"}, "feature")
 
 	// Pre-seed state with high stuck_iterations and rollback_count
 	phaseDir := filepath.Join(plansDir, "e2e-blocked", "phases", "core")
@@ -539,7 +585,7 @@ func TestE2EEscalationBlocked(t *testing.T) {
 // TestE2EEscalationRollback verifies that handleEscalation performs a rollback
 // when stuck_iterations >= 6 but rollback_count < 2.
 func TestE2EEscalationRollback(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-rollback", []string{"core"}, "feature")
+	plansDir, scriptDir, _ := setupE2E(t, "e2e-rollback", []string{"core"}, "feature")
 
 	phaseDir := filepath.Join(plansDir, "e2e-rollback", "phases", "core")
 	ps := arc.NewPhaseState("e2e-rollback", "core", "feature")
@@ -588,7 +634,7 @@ func TestE2EEscalationRollback(t *testing.T) {
 // TestE2EBlockedPhaseReturnsError verifies that RunPhase returns an error
 // immediately when a phase has phase_status=blocked.
 func TestE2EBlockedPhaseReturnsError(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-preblocked", []string{"core"}, "feature")
+	plansDir, scriptDir, _ := setupE2E(t, "e2e-preblocked", []string{"core"}, "feature")
 
 	phaseDir := filepath.Join(plansDir, "e2e-preblocked", "phases", "core")
 	ps := arc.NewPhaseState("e2e-preblocked", "core", "feature")
@@ -626,7 +672,7 @@ func TestE2EBlockedPhaseReturnsError(t *testing.T) {
 // TestE2EContextCancellation verifies that RunPhase respects context cancellation
 // and returns promptly without hanging.
 func TestE2EContextCancellation(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-cancel", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-cancel", []string{"core"}, "feature")
 
 	// Call 0: qa (this will succeed)
 	writeScript(t, scriptDir, 0, "QA tests written.")
@@ -640,11 +686,12 @@ func TestE2EContextCancellation(t *testing.T) {
 
 	start := time.Now()
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-cancel",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-cancel",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	elapsed := time.Since(start)
 
@@ -660,7 +707,7 @@ func TestE2EContextCancellation(t *testing.T) {
 // TestE2EInvalidVerdictRetries verifies that an agent returning output without
 // a valid verdict section causes a retry (not a crash).
 func TestE2EInvalidVerdictRetries(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-badverdict", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-badverdict", []string{"core"}, "feature")
 
 	// Call 0: qa (linear, succeeds)
 	writeScript(t, scriptDir, 0, "QA tests written.")
@@ -677,11 +724,12 @@ func TestE2EInvalidVerdictRetries(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-badverdict",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-badverdict",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -700,7 +748,7 @@ func TestE2EInvalidVerdictRetries(t *testing.T) {
 // TestE2EEmptyOutputRetries verifies that an agent returning empty output
 // triggers a retry rather than crashing.
 func TestE2EEmptyOutputRetries(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-empty", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-empty", []string{"core"}, "feature")
 
 	// Call 0: qa — empty output → retry
 	writeScript(t, scriptDir, 0, "")
@@ -717,11 +765,12 @@ func TestE2EEmptyOutputRetries(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-empty",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-empty",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err != nil {
 		t.Fatalf("RunPhase failed: %v", err)
@@ -740,7 +789,7 @@ func TestE2EEmptyOutputRetries(t *testing.T) {
 // TestE2ENonZeroExitRetries verifies that an agent exiting with non-zero
 // status triggers a retry.
 func TestE2ENonZeroExitRetries(t *testing.T) {
-	plansDir, scriptDir := setupE2E(t, "e2e-exit", []string{"core"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-exit", []string{"core"}, "feature")
 	t.Setenv("MOCK_EXIT_CODE", "1")
 
 	// Call 0: qa — will exit with code 1 → retry
@@ -753,11 +802,12 @@ func TestE2ENonZeroExitRetries(t *testing.T) {
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
-		PlanName:  "e2e-exit",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
+		PlanName:   "e2e-exit",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	// Expect timeout since every call exits non-zero
 	if err == nil {
@@ -773,7 +823,7 @@ func TestE2ENonZeroExitRetries(t *testing.T) {
 // TestE2EMultiPhaseBlockedDependency verifies that Launch detects when a dependent
 // phase cannot run because its dependency is blocked.
 func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
-	plansDir, _ := setupE2E(t, "e2e-dep-blocked", []string{"core", "api"}, "feature")
+	plansDir, _, projectDir := setupE2E(t, "e2e-dep-blocked", []string{"core", "api"}, "feature")
 
 	// Pre-seed "core" as blocked
 	coreDir := filepath.Join(plansDir, "e2e-dep-blocked", "phases", "core")
@@ -788,10 +838,11 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 	defer cancel()
 
 	err := Launch(ctx, LaunchOptions{
-		PlanName: "e2e-dep-blocked",
-		PlansDir: plansDir,
-		ArcHome:  t.TempDir(),
-		Logger:   e2eLogger(),
+		PlanName:   "e2e-dep-blocked",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
 	})
 	if err == nil {
 		t.Fatal("expected Launch to return error when dependency is blocked")

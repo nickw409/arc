@@ -20,12 +20,13 @@ import (
 
 // RunPhaseOptions configures execution of a single phase.
 type RunPhaseOptions struct {
-	PlanName  string
-	PhaseName string
-	PlansDir  string
-	ArcHome   string
-	Config    *config.Config
-	Logger    *slog.Logger
+	PlanName   string
+	PhaseName  string
+	PlansDir   string
+	ArcHome    string
+	ProjectDir string // working directory for git commits; empty uses process cwd
+	Config     *config.Config
+	Logger     *slog.Logger
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
@@ -151,19 +152,9 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 	currentState := phaseState.CurrentState
 
 	switch {
-	// After QA review approved: commit tests
+	// After QA review approved: log and continue to impl
 	case currentState == "impl" && result.Verdict == arc.VerdictApproved && isComingFromQAReview(phaseState):
 		fmt.Printf("[%s] QA Review: APPROVED\n", opts.PhaseName)
-		hash, err := commitPhase(opts, "test", "add tests from spec")
-		if err != nil {
-			opts.Logger.Warn("failed to commit tests", "error", err)
-		} else if hash != "" {
-			fmt.Printf("[%s] Committed: test(%s): add tests from spec [%s]\n", opts.PhaseName, opts.PhaseName, hash[:7])
-			sf.Update(func(s *arc.PhaseState) error {
-				s.LastCommit = hash
-				return nil
-			})
-		}
 
 	// In impl state: run tests after each iteration
 	case currentState == "impl" || pipeline.MapStateToStatus(currentState) == "implementing":
@@ -239,6 +230,7 @@ func commitPhase(opts RunPhaseOptions, commitType, description string) (string, 
 	msg := gitops.FormatCommitMessage(style, commitType, opts.PhaseName, description)
 	return gitops.Commit(gitops.CommitOptions{
 		Message: msg,
+		Dir:     opts.ProjectDir,
 		Config:  opts.Config,
 	})
 }
