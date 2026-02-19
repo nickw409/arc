@@ -10,10 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 const defaultBaseURL = "https://api.github.com"
@@ -153,19 +156,14 @@ func atomicReplace(target string, data []byte) error {
 }
 
 func latestRelease(baseURL string) (*release, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", baseURL, repoOwner, repoName)
-	resp, err := authedGet(url)
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/releases/latest", baseURL, repoOwner, repoName)
+	data, err := downloadBytes(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetching latest release: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
-	}
 
 	var rel release
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	if err := json.Unmarshal(data, &rel); err != nil {
 		return nil, fmt.Errorf("parsing release JSON: %w", err)
 	}
 	return &rel, nil
@@ -234,56 +232,119 @@ func extractBinary(tarGzData []byte) ([]byte, error) {
 func downloadAsset(a *asset) ([]byte, error) {
 	token := githubToken()
 	if token != "" && a.APIURL != "" {
-		req, err := http.NewRequest("GET", a.APIURL, nil)
-		if err != nil {
-			return nil, err
+		if !isGitHubHost(a.APIURL) {
+			return nil, fmt.Errorf("refusing to send token to non-GitHub URL: %s", a.APIURL)
 		}
-		req.Header.Set("Authorization", "token "+token)
-		req.Header.Set("Accept", "application/octet-stream")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("download %s returned %d", a.APIURL, resp.StatusCode)
-		}
-		return io.ReadAll(resp.Body)
+		return authedGetBytes(a.APIURL, token, "application/octet-stream")
 	}
-	return downloadBytes(a.BrowserDownloadURL)
+	return unauthGet(a.BrowserDownloadURL)
 }
 
-func downloadBytes(url string) ([]byte, error) {
-	resp, err := authedGet(url)
+func downloadBytes(rawURL string) ([]byte, error) {
+	token := githubToken()
+	if token != "" && isGitHubHost(rawURL) {
+		return authedGetBytes(rawURL, token, "")
+	}
+	return unauthGet(rawURL)
+}
+
+// authedGetBytes performs an authenticated GET. The token is only sent if the
+// URL host is validated by the caller. A custom HTTP client is used that
+// refuses to follow redirects, preventing the token from leaking to
+// unexpected hosts via redirect chains.
+func authedGetBytes(rawURL, token, accept string) ([]byte, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+
+	// Use a client that does not follow redirects so the token is never
+	// forwarded to a host we haven't validated.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// GitHub responds with 302 to a signed S3/Azure URL for asset downloads.
+	// Follow that single redirect without the token.
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect {
+		loc := resp.Header.Get("Location")
+		if loc == "" {
+			return nil, fmt.Errorf("redirect with no Location header from %s", rawURL)
+		}
+		return unauthGet(loc)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download %s returned %d", rawURL, resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// unauthGet performs an unauthenticated GET request.
+func unauthGet(rawURL string) ([]byte, error) {
+	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s returned %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("download %s returned %d", rawURL, resp.StatusCode)
 	}
-
 	return io.ReadAll(resp.Body)
 }
 
-// githubToken returns a token from GITHUB_TOKEN or GH_TOKEN if set.
-func githubToken() string {
-	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
-		return t
+// isGitHubHost returns true if the URL points to a github.com host over HTTPS.
+func isGitHubHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
 	}
-	return os.Getenv("GH_TOKEN")
+	if u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "api.github.com" || host == "github.com" || strings.HasSuffix(host, ".github.com")
 }
 
-// authedGet performs an HTTP GET, adding an Authorization header if a
-// GitHub token is available. This allows updates from private repos.
-func authedGet(url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token := githubToken(); token != "" {
-		req.Header.Set("Authorization", "token "+token)
-	}
-	return http.DefaultClient.Do(req)
+var (
+	tokenOnce  sync.Once
+	tokenCache string
+)
+
+// githubToken returns a GitHub token, checking env vars first then
+// falling back to the gh CLI's stored credentials. The result is cached.
+func githubToken() string {
+	tokenOnce.Do(func() {
+		if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+			tokenCache = t
+			return
+		}
+		if t := os.Getenv("GH_TOKEN"); t != "" {
+			tokenCache = t
+			return
+		}
+		out, err := exec.Command("gh", "auth", "token").Output()
+		if err == nil {
+			tokenCache = strings.TrimSpace(string(out))
+		}
+	})
+	return tokenCache
+}
+
+// resetTokenCache is used by tests to clear the cached token.
+func resetTokenCache() {
+	tokenOnce = sync.Once{}
+	tokenCache = ""
 }

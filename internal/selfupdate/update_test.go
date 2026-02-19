@@ -281,6 +281,29 @@ func TestAtomicReplace(t *testing.T) {
 	}
 }
 
+func TestIsGitHubHost(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"https://api.github.com/repos/foo/bar", true},
+		{"https://github.com/foo/bar/releases/download/v1/file.tar.gz", true},
+		{"https://uploads.github.com/something", true},
+		{"http://api.github.com/repos/foo/bar", false},  // no HTTPS
+		{"https://evil.com/api.github.com", false},       // wrong host
+		{"https://notgithub.com/foo", false},              // wrong host
+		{"https://api.github.com.evil.com/foo", false},    // subdomain trick
+		{"not-a-url", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			if got := isGitHubHost(tt.url); got != tt.want {
+				t.Fatalf("isGitHubHost(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 // makeTarGz creates a tar.gz archive containing a single file.
 func makeTarGz(t *testing.T, name string, content []byte) []byte {
 	t.Helper()
