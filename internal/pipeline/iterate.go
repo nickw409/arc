@@ -109,6 +109,55 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("state %q not found in workflow", phaseState.CurrentState)}
 	}
 
+	// Parallel execution: if the state has parallel config, run branches concurrently
+	if stateConfig.Parallel != nil {
+		planMD, err := os.ReadFile(filepath.Join(phaseDir, "plan.md"))
+		if err != nil {
+			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("reading plan.md: %w", err)}
+		}
+
+		verdict, err := RunParallel(ctx, logger, RunParallelOptions{
+			PhaseDir:   phaseDir,
+			StateFile:  sf,
+			PhaseState: &phaseState,
+			Config:     stateConfig.Parallel,
+			PlanMD:     string(planMD),
+		})
+		if err != nil {
+			return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("parallel execution: %w", err)}
+		}
+
+		// Use verdict for state transition
+		nextState, err := machine.NextState(phaseState.CurrentState, arc.Verdict(verdict))
+		if err != nil {
+			return &arc.IterationResult{Action: arc.ActionRetry, Err: err}
+		}
+
+		curState := phaseState.CurrentState
+		if updateErr := sf.Update(func(s *arc.PhaseState) error {
+			s.CurrentState = nextState
+			s.PhaseStatus = MapStateToStatus(nextState)
+			s.Iteration.Current++
+			s.LastVerdict = verdict
+			s.GlobalIterations++
+			s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
+				Iteration: s.Iteration.Current,
+				State:     curState,
+				Verdict:   verdict,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+			return nil
+		}); updateErr != nil {
+			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state.json: %w", updateErr)}
+		}
+
+		return &arc.IterationResult{
+			NextState: nextState,
+			Verdict:   arc.Verdict(verdict),
+			Action:    arc.ActionContinue,
+		}
+	}
+
 	// Load plan.md
 	planMD, err := os.ReadFile(filepath.Join(phaseDir, "plan.md"))
 	if err != nil {

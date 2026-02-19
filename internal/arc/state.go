@@ -31,6 +31,14 @@ type PhaseState struct {
 	GlobalIterations    int             `json:"global_iterations"`
 	LastCommit          string          `json:"last_commit,omitempty"`
 	ModelOverride       string          `json:"model_override,omitempty"`
+	SplitInto           []string        `json:"split_into,omitempty"`
+	DeferredReason      string          `json:"deferred_reason,omitempty"`
+	DeferredAt          string          `json:"deferred_at,omitempty"`
+	ParentPhase         string          `json:"parent_phase,omitempty"`
+	Notes               string          `json:"notes,omitempty"`
+	CompletedAt         string          `json:"completed_at,omitempty"`
+	BlockedReason       string          `json:"blocked_reason,omitempty"`
+	BlockedAt           string          `json:"blocked_at,omitempty"`
 }
 
 type Iteration struct {
@@ -123,6 +131,8 @@ type PlanMeta struct {
 	ReviewStatus string              `json:"review_status"`
 	ReviewedAt   string              `json:"reviewed_at,omitempty"`
 	WorkflowType string              `json:"workflow_type"`
+	SplitPhases  map[string][]string `json:"split_phases,omitempty"`
+	ArchivedAt   string              `json:"archived_at,omitempty"`
 }
 
 // NewPlanMeta creates a PlanMeta with all maps/slices initialized.
