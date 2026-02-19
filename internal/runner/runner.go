@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -75,8 +76,8 @@ func SupportedRunners() []string {
 	return []string{"go-test", "cargo-nextest", "vitest", "pytest", "cargo-test"}
 }
 
-// RunAll executes all test files for a phase and returns aggregated results.
-func RunAll(ctx context.Context, runner string, testFiles []string, timeout time.Duration, arcHome string) (*TestResult, error) {
+// RunAll executes all test files for a phase concurrently and returns aggregated results.
+func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout time.Duration, arcHome string) (*TestResult, error) {
 	agg := &TestResult{
 		FailedNames: []string{},
 	}
@@ -85,24 +86,40 @@ func RunAll(ctx context.Context, runner string, testFiles []string, timeout time
 		return agg, nil
 	}
 
+	type fileResult struct {
+		result *TestResult
+		err    error
+	}
+
+	results := make([]fileResult, len(testFiles))
+	var wg sync.WaitGroup
+
+	for i, tf := range testFiles {
+		wg.Add(1)
+		go func(idx int, testFile string) {
+			defer wg.Done()
+			r, err := Run(ctx, RunOptions{
+				Runner:   runnerName,
+				TestFile: testFile,
+				Timeout:  timeout,
+				ArcHome:  arcHome,
+			})
+			results[idx] = fileResult{result: r, err: err}
+		}(i, tf)
+	}
+
+	wg.Wait()
+
 	var rawOutputs []string
-
-	for _, tf := range testFiles {
-		r, err := Run(ctx, RunOptions{
-			Runner:   runner,
-			TestFile: tf,
-			Timeout:  timeout,
-			ArcHome:  arcHome,
-		})
-		if err != nil {
-			return agg, err
+	for _, fr := range results {
+		if fr.err != nil {
+			return agg, fr.err
 		}
-
-		agg.Total += r.Total
-		agg.Passed += r.Passed
-		agg.Failed += r.Failed
-		agg.FailedNames = append(agg.FailedNames, r.FailedNames...)
-		rawOutputs = append(rawOutputs, r.RawOutput)
+		agg.Total += fr.result.Total
+		agg.Passed += fr.result.Passed
+		agg.Failed += fr.result.Failed
+		agg.FailedNames = append(agg.FailedNames, fr.result.FailedNames...)
+		rawOutputs = append(rawOutputs, fr.result.RawOutput)
 	}
 
 	agg.RawOutput = strings.Join(rawOutputs, "\n")
