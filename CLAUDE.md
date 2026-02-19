@@ -98,6 +98,19 @@ arc manage <plan> <phase> show              # Show phase state.json
 - **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`
 - **performance** — Benchmark-driven: `baseline → analyze → optimize → benchmark → complete`
 
+## Releases
+
+Releases are built by goreleaser via `.github/workflows/release.yml` on `v*` tag push. Version is injected via `-ldflags -X github.com/nwiley/arc/internal/cli.Version=...`. The `selfupdate` package downloads releases from the GitHub API with SHA256 checksum verification.
+
+```bash
+# Tag and release
+git tag v0.X.0 && git push origin v0.X.0
+
+# Validate goreleaser config locally
+goreleaser check
+goreleaser build --snapshot --clean
+```
+
 ## Dependencies
 
 Runtime: `claude` (Claude Code CLI), `git`, `jq`, `yq` (mikefarah v4+), `python3`

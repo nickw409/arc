@@ -2,62 +2,69 @@
 
 ## Development Setup
 
-Arc is a collection of shell scripts, so there's no build step. But since arc can orchestrate changes to itself, you need to keep a stable copy separate from your development copy to avoid breaking your tooling mid-edit.
-
-### Install both copies
-
 ```bash
-# 1. Clone the repo (your development copy)
+# Clone the repo
 git clone https://github.com/nickw409/arc.git ~/projects/arc
+cd ~/projects/arc
 
-# 2. Run the installer (creates a stable copy at ~/.arc)
-~/projects/arc/install.sh
-
-# 3. Symlink the stable copy as `arc`
-ln -sf ~/.arc/bin/arc ~/.local/bin/arc
-
-# 4. Symlink the dev copy as `arc-dev`
-ln -s ~/projects/arc/bin/arc ~/.local/bin/arc-dev
+# Build and install
+go install ./cmd/arc/
 ```
 
-This gives you:
-
-| Command | Points to | Purpose |
-|---------|-----------|---------|
-| `arc` | `~/.arc/bin/arc` | Stable — safe to use in all projects |
-| `arc-dev` | `~/projects/arc/bin/arc` | Development — reflects your working tree |
-
-### Day-to-day workflow
-
-1. Make changes in `~/projects/arc`
-2. Test with `arc-dev` (e.g., `arc-dev init`, `arc-dev plan ...`)
-3. Commit and push
-4. Run `arc update` to pull changes into the stable `~/.arc` copy
-
-This way a broken edit in the dev repo never takes down `arc` in your other projects.
-
-## Running Tests
-
-Arc uses [BATS](https://github.com/bats-core/bats-core) (Bash Automated Testing System):
+### Running a dev build
 
 ```bash
-cd ~/projects/arc
-bats tests/              # run all tests
-bats tests/actions.bats  # run a specific test file
+# Build with dev version
+go build -o arc ./cmd/arc/
+./arc --version   # "arc version dev"
+
+# Or run directly
+go run ./cmd/arc/ --version
+```
+
+### Running tests
+
+```bash
+go test ./...                          # All tests
+go test ./internal/selfupdate/         # Single package
+go test ./internal/runner/ -run TestName  # Single test
+```
+
+## Releases
+
+Releases are automated via [goreleaser](https://goreleaser.com/) and GitHub Actions. To create a release:
+
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+The `.github/workflows/release.yml` workflow will:
+1. Run the full test suite
+2. Build cross-platform binaries (linux/darwin x amd64/arm64)
+3. Publish a GitHub Release with tarballs and checksums
+
+Version is injected at build time via `-ldflags -X github.com/nwiley/arc/internal/cli.Version=...`.
+
+To test the release config locally:
+
+```bash
+goreleaser check                      # Validate config
+goreleaser build --snapshot --clean   # Local test build (no publish)
 ```
 
 ## Project Structure
 
 See the [README](README.md#directory-structure) for the full directory layout. Key areas for contributors:
 
-- `bin/arc` — CLI entry point and command routing
-- `scripts/` — core execution engine (iterate, state management, orchestrator)
+- `cmd/arc/` — CLI entry point
+- `internal/cli/` — Cobra command definitions
+- `internal/orchestrator/` — Top-level orchestrator loop
+- `internal/pipeline/` — Phase iteration, escalation, hooks, constraints
+- `internal/selfupdate/` — GitHub Releases-based self-update
 - `workflows/` — YAML state machine definitions
 - `prompts/` — prompt templates by work type
 - `runners/` — test runner plugins (one per language/tool)
-- `hooks/` — Claude Code hooks for agent enforcement
-- `enforcement/` — git hooks, validation, schemas
-- `tests/` — BATS test suite
 
 ## Adding a Test Runner
 
@@ -81,12 +88,9 @@ Output must be JSON:
 
 Exit codes: 0 (all pass), 1 (failures), 2 (no tests found).
 
-After adding the runner, update `scripts/init-project.sh` to detect it and add it as a valid `runner` value in the `.arc.yaml` docs.
-
 ## Adding a Workflow
 
 Workflow definitions live in `workflows/<name>.yaml`. See `docs/WORKFLOW_SCHEMA.md` for the full spec. Each workflow needs:
 
 1. A YAML state machine in `workflows/`
 2. Prompt templates in `prompts/<name>/` (one per state)
-3. Detection logic in `scripts/init-plan.sh` if it should be auto-selectable via `--type`

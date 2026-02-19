@@ -7,14 +7,21 @@ A workflow engine for orchestrating complex, multi-phase software engineering ta
 ### Install
 
 ```bash
-# Option 1: Install from source
-./install.sh
-
-# Option 2: Symlink if developing locally
-ln -s /path/to/arc/bin/arc ~/.local/bin/arc
+# Install the latest release binary
+curl -fsSL https://raw.githubusercontent.com/nickw409/arc/main/install.sh | bash
 ```
 
-Dependencies: `jq`, `yq` (mikefarah v4+), `python3`, `claude` (Claude Code CLI), `git`
+This downloads a prebuilt binary to `~/.local/bin/arc`. No build toolchain required.
+
+To update to the latest version:
+
+```bash
+arc update
+```
+
+For private repo access, `arc update` automatically uses your `gh` CLI credentials. You can also set `GITHUB_TOKEN` or `GH_TOKEN` explicitly.
+
+Dependencies: `claude` (Claude Code CLI), `git`, `jq`, `yq` (mikefarah v4+), `python3`
 
 ### Initialize a Project
 
@@ -276,23 +283,29 @@ These live in `.plans/active/<plan>/phases/<phase>/`.
 
 ```
 arc/
-├── bin/              CLI entry point
+├── cmd/arc/          CLI entry point (main.go)
+├── internal/         All Go packages
+│   ├── cli/          Cobra command definitions
+│   ├── selfupdate/   GitHub Releases-based self-update
+│   ├── orchestrator/ Top-level orchestrator loop
+│   ├── pipeline/     Phase iteration, escalation, hooks
+│   ├── agent/        Agent spawning
+│   ├── runner/       Subprocess runner (claude CLI)
+│   ├── review/       Adversarial plan review
+│   ├── workflow/     Workflow YAML loading & validation
+│   ├── state/        Phase state (state.json) management
+│   ├── config/       .arc.yaml parsing
+│   ├── prompt/       Prompt rendering & extraction
+│   ├── plan/         Plan creation & status
+│   ├── project/      Project detection & init
+│   ├── gitops/       Git commit operations
+│   ├── monitor/      Live TUI (bubbletea)
+│   ├── resources/    Embedded templates & prompts
+│   └── arc/          Core types (verdict, result, errors, state)
 ├── workflows/        YAML workflow definitions (feature, bugfix, etc.)
 ├── prompts/          Prompt templates organized by work type
-│   ├── feature/      TDD workflow prompts
-│   ├── bugfix/       Bug fix workflow prompts
-│   ├── investigation/
-│   ├── refactor/
-│   ├── performance/
-│   ├── common/       Shared prompt snippets
-│   └── adversaries/  Plan review adversary prompts
 ├── runners/          Test runner plugins (cargo-nextest, vitest, pytest, go-test)
 ├── templates/        Plan and command templates
-├── scripts/          Execution and state management scripts
-├── hooks/            Claude Code hooks for agent enforcement
-├── enforcement/      Git hooks, validation scripts, schemas
-├── adversaries/      Adversarial committee configuration
-├── tests/            BATS test suite
 └── docs/             Detailed documentation
 ```
 
