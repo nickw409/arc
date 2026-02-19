@@ -1,0 +1,18 @@
+version: 2
+project_name: arc
+builds:
+  - main: ./cmd/arc/
+    binary: arc
+    ldflags:
+      - -s -w -X github.com/nwiley/arc/internal/cli.Version={{.Version}}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: checksums.txt
+release:
+  github:
+    owner: nickw409
+    name: arc

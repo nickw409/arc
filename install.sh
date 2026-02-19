@@ -2,60 +2,65 @@
 #
 # Arc Installer
 #
-# Installs arc to ~/.arc and adds it to PATH.
+# Downloads a prebuilt binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/your-org/arc/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/nickw409/arc/main/install.sh | bash
 #   or: ./install.sh
 #
-# To uninstall: rm -rf ~/.arc && remove PATH entry from shell config
+# To uninstall: rm ~/.local/bin/arc
 
 set -euo pipefail
 
-ARC_INSTALL_DIR="${ARC_INSTALL_DIR:-$HOME/.arc}"
-ARC_REPO="${ARC_REPO:-https://github.com/your-org/arc.git}"
+REPO="nickw409/arc"
+INSTALL_DIR="${ARC_INSTALL_DIR:-$HOME/.local/bin}"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-info()    { echo -e "${GREEN}[arc]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[arc]${NC} $*"; }
-error()   { echo -e "${RED}[arc]${NC} $*" >&2; }
+info()  { echo -e "${GREEN}[arc]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[arc]${NC} $*"; }
+error() { echo -e "${RED}[arc]${NC} $*" >&2; }
 
-# Check dependencies
-check_deps() {
-    local missing=()
+detect_platform() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
 
-    command -v jq &>/dev/null   || missing+=("jq")
-    command -v yq &>/dev/null   || missing+=("yq (mikefarah v4+)")
-    command -v python3 &>/dev/null || missing+=("python3 (3.8+)")
-    command -v claude &>/dev/null || missing+=("claude (Claude Code CLI)")
-    command -v git &>/dev/null  || missing+=("git")
+    case "$os" in
+        Linux)  os="linux" ;;
+        Darwin) os="darwin" ;;
+        *)      error "Unsupported OS: $os"; exit 1 ;;
+    esac
 
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        error "Missing required dependencies:"
-        for dep in "${missing[@]}"; do
-            echo "  - $dep"
-        done
-        echo ""
-        echo "Install them and re-run the installer."
-        exit 1
-    fi
+    case "$arch" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        arm64)   arch="arm64" ;;
+        *)       error "Unsupported architecture: $arch"; exit 1 ;;
+    esac
+
+    echo "${os} ${arch}"
 }
 
-# Detect shell config file
-detect_shell_config() {
-    if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == */zsh ]]; then
-        echo "$HOME/.zshrc"
-    elif [[ -f "$HOME/.bashrc" ]]; then
-        echo "$HOME/.bashrc"
-    elif [[ -f "$HOME/.bash_profile" ]]; then
-        echo "$HOME/.bash_profile"
+sha256_verify() {
+    local file="$1" expected="$2"
+    local actual
+    if command -v sha256sum &>/dev/null; then
+        actual="$(sha256sum "$file" | awk '{print $1}')"
+    elif command -v shasum &>/dev/null; then
+        actual="$(shasum -a 256 "$file" | awk '{print $1}')"
     else
-        echo "$HOME/.profile"
+        error "No sha256sum or shasum found"; exit 1
+    fi
+
+    if [ "$actual" != "$expected" ]; then
+        error "Checksum mismatch!"
+        error "  expected: $expected"
+        error "  actual:   $actual"
+        exit 1
     fi
 }
 
@@ -65,65 +70,60 @@ echo "  Arc Installer"
 echo "=========================================="
 echo ""
 
-# Check dependencies
-info "Checking dependencies..."
-check_deps
-info "All dependencies found."
-echo ""
+read -r os arch <<< "$(detect_platform)"
+info "Detected platform: ${os}/${arch}"
 
-# Install or update
-if [[ -d "$ARC_INSTALL_DIR" ]]; then
-    info "Existing installation found at $ARC_INSTALL_DIR"
-    info "Updating..."
-    cd "$ARC_INSTALL_DIR"
-    git pull --quiet origin main 2>/dev/null || {
-        warn "Git pull failed. This might be a local install."
-        warn "To update manually: cd $ARC_INSTALL_DIR && git pull"
-    }
-else
-    info "Installing to $ARC_INSTALL_DIR..."
+info "Fetching latest release..."
+tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*: "//;s/".*//')"
+version="${tag#v}"
+info "Latest version: ${version}"
 
-    # If running from the repo itself (not curl), copy instead of clone
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [[ -f "$SCRIPT_DIR/bin/arc" ]]; then
-        info "Installing from local source..."
-        cp -r "$SCRIPT_DIR" "$ARC_INSTALL_DIR"
-    else
-        info "Cloning from $ARC_REPO..."
-        git clone --quiet "$ARC_REPO" "$ARC_INSTALL_DIR"
-    fi
+asset_name="arc_${version}_${os}_${arch}.tar.gz"
+asset_url="https://github.com/${REPO}/releases/download/${tag}/${asset_name}"
+checksum_url="https://github.com/${REPO}/releases/download/${tag}/checksums.txt"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+info "Downloading ${asset_name}..."
+curl -fsSL -o "${tmpdir}/${asset_name}" "$asset_url"
+curl -fsSL -o "${tmpdir}/checksums.txt" "$checksum_url"
+
+info "Verifying checksum..."
+expected="$(grep "  ${asset_name}\$" "${tmpdir}/checksums.txt" | awk '{print $1}')"
+if [ -z "$expected" ]; then
+    # Also try single-space separator
+    expected="$(grep " ${asset_name}\$" "${tmpdir}/checksums.txt" | awk '{print $1}')"
 fi
-
-# Make scripts executable
-chmod +x "$ARC_INSTALL_DIR/bin/arc"
-find "$ARC_INSTALL_DIR/scripts" -name "*.sh" -exec chmod +x {} \;
-find "$ARC_INSTALL_DIR/runners" -name "*.sh" -exec chmod +x {} \;
-
-# Add to PATH if not already there
-SHELL_CONFIG=$(detect_shell_config)
-PATH_LINE='export PATH="$HOME/.arc/bin:$PATH"'
-
-if ! grep -qF '.arc/bin' "$SHELL_CONFIG" 2>/dev/null; then
-    echo "" >> "$SHELL_CONFIG"
-    echo "# Arc - AI orchestration tool" >> "$SHELL_CONFIG"
-    echo "$PATH_LINE" >> "$SHELL_CONFIG"
-    info "Added arc to PATH in $SHELL_CONFIG"
-    warn "Run 'source $SHELL_CONFIG' or open a new terminal to use arc."
-else
-    info "PATH already configured in $SHELL_CONFIG"
+if [ -z "$expected" ]; then
+    error "Checksum not found for ${asset_name}"
+    exit 1
 fi
+sha256_verify "${tmpdir}/${asset_name}" "$expected"
+info "Checksum verified."
+
+info "Extracting..."
+tar -xzf "${tmpdir}/${asset_name}" -C "${tmpdir}"
+
+mkdir -p "$INSTALL_DIR"
+mv "${tmpdir}/arc" "${INSTALL_DIR}/arc"
+chmod +x "${INSTALL_DIR}/arc"
 
 echo ""
 echo "=========================================="
-info "Arc installed successfully!"
+info "Arc ${version} installed to ${INSTALL_DIR}/arc"
 echo "=========================================="
 echo ""
+
+if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+    warn "${INSTALL_DIR} is not in your PATH."
+    warn "Add it to your shell config:"
+    warn "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+fi
+
 echo "Quick start:"
-echo "  cd your-project"
 echo "  arc init          # Set up arc in your project"
 echo "  arc plan my-feat phase1 phase2"
 echo "  arc review my-feat"
 echo "  arc run my-feat"
-echo ""
-echo "Or use /arc-plan in Claude Code for interactive planning."
 echo ""

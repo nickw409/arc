@@ -10,7 +10,7 @@ func newUpdateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Update Arc to the latest version",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return selfupdate.Update()
+			return selfupdate.Update(Version, "")
 		},
 	}
 }
