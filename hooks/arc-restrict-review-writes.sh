@@ -8,8 +8,9 @@
 # Env: REVIEW_OUTPUT_FILE=path (the specific file this agent may write)
 # Trigger: PreToolUse on Write, Edit
 
-# Skip if not a review agent
-[[ "$REVIEW_AGENT" != "1" ]] && exit 0
+# Skip if arc is not active or not a review agent
+[[ -z "${ARC_HOME:-}" ]] && exit 0
+[[ "${REVIEW_AGENT:-}" != "1" ]] && exit 0
 
 # Parse the file path from tool input
 FILE_PATH=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('file_path',''))" 2>/dev/null)

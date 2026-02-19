@@ -1,0 +1,6 @@
+name: empty
+version: 1
+description: Empty states list
+entry_state: start
+terminal_states: [done]
+states: []

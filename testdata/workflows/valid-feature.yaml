@@ -1,0 +1,44 @@
+name: feature
+version: 5
+description: Standard feature development workflow
+entry_state: qa
+terminal_states: [complete, blocked]
+intervention_triggers:
+  - condition: "stuck_iterations >= 5"
+    message: "Phase appears stuck"
+states:
+  - name: qa
+    description: Write tests
+    prompt: feature/qa.md
+    next: qa_review
+
+  - name: qa_review
+    description: Review tests
+    prompt: feature/qa_review.md
+    verdicts: [approved, gaps_found]
+    next:
+      approved: impl
+      gaps_found: qa
+
+  - name: impl
+    description: Implement
+    prompt: feature/impl.md
+    next: impl_review
+    escalation:
+      - at_iteration: 5
+        action: switch_model
+        params: {model: opus}
+
+  - name: impl_review
+    description: Review implementation
+    prompt: feature/impl_review.md
+    verdicts: [approved, concerns]
+    next:
+      approved: complete
+      concerns: impl
+
+  - name: complete
+    description: Done
+
+  - name: blocked
+    description: Blocked

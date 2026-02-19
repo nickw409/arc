@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# Commit-msg hook: Verify conventional commit format
+#
+# Valid formats:
+#   test: add distribution fitting tests
+#   feat: implement KS test
+#   fix: correct sample size calculation
+#   chore: resolve dispute, update coordination
+#   ci: automated state updates
+#   (no prefix): manual human commits
+#
+# Install: arc init (installs hooks automatically)
+
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+
+# Strip co-authored-by lines
+grep -v '^Co-authored-by:' "$COMMIT_MSG_FILE" > "$COMMIT_MSG_FILE.tmp" || true
+mv "$COMMIT_MSG_FILE.tmp" "$COMMIT_MSG_FILE"
+
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_error() { echo -e "${RED}[BLOCKED]${NC} $1" >&2; }
+
+# Extract commit type from message
+COMMIT_TYPE=$(echo "$COMMIT_MSG" | grep -oE '^(test|feat|fix|chore|ci|docs|refactor|perf|style):' | tr -d ':' || echo "none")
+
+# Get expected type from environment or branch
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+EXPECTED_TYPE="${COMMIT_TYPE_OVERRIDE:-}"
+
+if [[ -z "$EXPECTED_TYPE" ]]; then
+    case "$BRANCH" in
+        phase-*-qa|*/phase-*-qa) EXPECTED_TYPE="test" ;;
+        phase-*|*/phase-*) EXPECTED_TYPE="feat|fix" ;;
+        develop) EXPECTED_TYPE="chore|ci" ;;
+        main) EXPECTED_TYPE="none" ;;
+        *) EXPECTED_TYPE="" ;;
+    esac
+fi
+
+# Verify type matches expected for branch (unless no prefix = human override)
+if [[ -n "$EXPECTED_TYPE" && "$COMMIT_TYPE" != "none" ]]; then
+    if [[ ! "$EXPECTED_TYPE" =~ "$COMMIT_TYPE" && "$EXPECTED_TYPE" != "none" ]]; then
+        # Allow any valid conventional commit - just warn
+        echo "Note: Expected '$EXPECTED_TYPE' for branch $BRANCH, got '$COMMIT_TYPE'"
+    fi
+fi
+
+# Validate commit message has actual content
+if [[ "$COMMIT_TYPE" != "none" ]]; then
+    MSG_CONTENT=$(echo "$COMMIT_MSG" | sed 's/^[a-z]*://' | xargs)
+else
+    MSG_CONTENT=$(echo "$COMMIT_MSG" | xargs)
+fi
+
+if [[ -z "$MSG_CONTENT" ]]; then
+    log_error "Commit message must have content"
+    exit 1
+fi
+
+exit 0

@@ -1,0 +1,246 @@
+package workflow
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/nwiley/arc/internal/arc"
+	"gopkg.in/yaml.v3"
+)
+
+func testdataPath(name string) string {
+	// Walk up from internal/workflow to project root, then into testdata/workflows
+	return filepath.Join("..", "..", "testdata", "workflows", name)
+}
+
+func TestLoadLinearWorkflow(t *testing.T) {
+	w, err := Load(testdataPath("valid-feature.yaml"))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// qa is a linear state: next: qa_review (string)
+	var qa *arc.StateConfig
+	for i := range w.States {
+		if w.States[i].Name == "qa" {
+			qa = &w.States[i]
+			break
+		}
+	}
+	if qa == nil {
+		t.Fatal("state 'qa' not found")
+	}
+
+	want := map[arc.Verdict]string{"": "qa_review"}
+	if len(qa.Transition.Branches) != len(want) {
+		t.Fatalf("Branches len = %d, want %d", len(qa.Transition.Branches), len(want))
+	}
+	for k, v := range want {
+		if qa.Transition.Branches[k] != v {
+			t.Fatalf("Branches[%q] = %q, want %q", k, qa.Transition.Branches[k], v)
+		}
+	}
+}
+
+func TestLoadBranchingWorkflow(t *testing.T) {
+	w, err := Load(testdataPath("valid-feature.yaml"))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	var qaReview *arc.StateConfig
+	for i := range w.States {
+		if w.States[i].Name == "qa_review" {
+			qaReview = &w.States[i]
+			break
+		}
+	}
+	if qaReview == nil {
+		t.Fatal("state 'qa_review' not found")
+	}
+
+	want := map[arc.Verdict]string{
+		arc.VerdictApproved:  "impl",
+		arc.VerdictGapsFound: "qa",
+	}
+	if len(qaReview.Transition.Branches) != len(want) {
+		t.Fatalf("Branches len = %d, want %d", len(qaReview.Transition.Branches), len(want))
+	}
+	for k, v := range want {
+		if qaReview.Transition.Branches[k] != v {
+			t.Fatalf("Branches[%q] = %q, want %q", k, qaReview.Transition.Branches[k], v)
+		}
+	}
+}
+
+func TestLoadWorkflowStatesCount(t *testing.T) {
+	w, err := Load(testdataPath("valid-feature.yaml"))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(w.States) != 6 {
+		t.Fatalf("len(States) = %d, want 6", len(w.States))
+	}
+}
+
+func TestLoadLinearOnlyWorkflow(t *testing.T) {
+	w, err := Load(testdataPath("valid-linear-only.yaml"))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// All non-terminal states should have linear transitions
+	for _, s := range w.States {
+		if s.Name == "done" {
+			continue // terminal
+		}
+		if len(s.Verdicts) != 0 {
+			t.Fatalf("state %q has verdicts %v, want none", s.Name, s.Verdicts)
+		}
+		if s.Transition.Branches == nil {
+			t.Fatalf("state %q has nil branches, want linear transition", s.Name)
+		}
+		if _, ok := s.Transition.Branches[""]; !ok {
+			t.Fatalf("state %q missing linear branch key \"\"", s.Name)
+		}
+	}
+}
+
+func TestTransitionUnmarshalString(t *testing.T) {
+	node := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: "impl",
+		Tag:   "!!str",
+	}
+
+	var tr arc.Transition
+	if err := tr.UnmarshalYAML(node); err != nil {
+		t.Fatalf("UnmarshalYAML error: %v", err)
+	}
+
+	want := map[arc.Verdict]string{"": "impl"}
+	if len(tr.Branches) != len(want) {
+		t.Fatalf("Branches len = %d, want %d", len(tr.Branches), len(want))
+	}
+	for k, v := range want {
+		if tr.Branches[k] != v {
+			t.Fatalf("Branches[%q] = %q, want %q", k, tr.Branches[k], v)
+		}
+	}
+}
+
+func TestTransitionUnmarshalMap(t *testing.T) {
+	// Create a mapping node: {approved: impl, gaps_found: qa}
+	node := &yaml.Node{
+		Kind: yaml.MappingNode,
+		Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: "approved", Tag: "!!str"},
+			{Kind: yaml.ScalarNode, Value: "impl", Tag: "!!str"},
+			{Kind: yaml.ScalarNode, Value: "gaps_found", Tag: "!!str"},
+			{Kind: yaml.ScalarNode, Value: "qa", Tag: "!!str"},
+		},
+	}
+
+	var tr arc.Transition
+	if err := tr.UnmarshalYAML(node); err != nil {
+		t.Fatalf("UnmarshalYAML error: %v", err)
+	}
+
+	want := map[arc.Verdict]string{
+		arc.VerdictApproved:  "impl",
+		arc.VerdictGapsFound: "qa",
+	}
+	if len(tr.Branches) != len(want) {
+		t.Fatalf("Branches len = %d, want %d", len(tr.Branches), len(want))
+	}
+	for k, v := range want {
+		if tr.Branches[k] != v {
+			t.Fatalf("Branches[%q] = %q, want %q", k, tr.Branches[k], v)
+		}
+	}
+}
+
+func TestTransitionUnmarshalInvalidSequence(t *testing.T) {
+	node := &yaml.Node{
+		Kind: yaml.SequenceNode,
+		Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: "a", Tag: "!!str"},
+			{Kind: yaml.ScalarNode, Value: "b", Tag: "!!str"},
+		},
+	}
+
+	var tr arc.Transition
+	err := tr.UnmarshalYAML(node)
+	if err == nil {
+		t.Fatal("expected error for sequence node, got nil")
+	}
+	if want := "must be a string or verdict map"; !containsString(err.Error(), want) {
+		t.Fatalf("error = %q, want containing %q", err.Error(), want)
+	}
+}
+
+func TestTransitionUnmarshalNull(t *testing.T) {
+	node := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: "",
+		Tag:   "!!null",
+	}
+
+	var tr arc.Transition
+	err := tr.UnmarshalYAML(node)
+	// Should not panic. Either returns nil branches or error.
+	if err != nil {
+		// Acceptable: error is fine
+		return
+	}
+	// Acceptable: nil branches for null
+	if tr.Branches != nil {
+		// If branches were set, they should be empty or nil
+		return
+	}
+}
+
+func TestLoadBytesValid(t *testing.T) {
+	data, err := os.ReadFile(testdataPath("valid-feature.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	w, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes failed: %v", err)
+	}
+	if len(w.States) != 6 {
+		t.Fatalf("len(States) = %d, want 6", len(w.States))
+	}
+}
+
+func TestLoadBytesEmpty(t *testing.T) {
+	_, err := LoadBytes([]byte{})
+	if err == nil {
+		t.Fatal("expected error for empty input, got nil")
+	}
+}
+
+func TestLoadBytesMalformedYAML(t *testing.T) {
+	_, err := LoadBytes([]byte("{invalid: yaml: [broken"))
+	if err == nil {
+		t.Fatal("expected error for malformed YAML, got nil")
+	}
+}
+
+// containsString is a simple helper for checking substrings in error messages.
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

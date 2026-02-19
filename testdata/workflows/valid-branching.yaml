@@ -1,0 +1,21 @@
+name: branching
+version: 2
+description: Workflow with verdict branching
+entry_state: review
+terminal_states: [done]
+states:
+  - name: review
+    description: Review code
+    prompt: review.md
+    verdicts: [approved, concerns]
+    next:
+      approved: done
+      concerns: fix
+
+  - name: fix
+    description: Fix issues
+    prompt: fix.md
+    next: review
+
+  - name: done
+    description: Complete

@@ -27,6 +27,12 @@ done
 
 # Extract package path from test file
 PKG_DIR=$(dirname "$TEST_FILE")
+
+# Make relative to current directory if absolute
+if [[ "$PKG_DIR" == /* ]]; then
+    PKG_DIR=$(realpath --relative-to="$(pwd)" "$PKG_DIR" 2>/dev/null || echo "$PKG_DIR")
+fi
+
 PKG_PATH="./$PKG_DIR"
 
 # Build command
@@ -37,17 +43,18 @@ CMD="go test $PKG_PATH -v -count=1"
 OUTPUT=$(timeout --foreground -k 10 "$TIMEOUT" bash -c "$CMD" 2>&1) || true
 
 # Parse go test output
-PASSED=0
-FAILED=0
-
-# Count "--- PASS:" and "--- FAIL:" lines
-PASSED=$(echo "$OUTPUT" | grep -c '--- PASS:' || echo "0")
-FAILED=$(echo "$OUTPUT" | grep -c '--- FAIL:' || echo "0")
+PASSED=$(echo "$OUTPUT" | grep -c -e '--- PASS:' || true)
+FAILED=$(echo "$OUTPUT" | grep -c -e '--- FAIL:' || true)
 TOTAL=$((PASSED + FAILED))
 
-# Extract failed test names
-FAILED_NAMES=$(echo "$OUTPUT" | grep -oP '(?<=--- FAIL: )\S+' || true)
-FAILED_NAMES_JSON=$(echo "$FAILED_NAMES" | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || echo '[]')
+# Extract failed test names as JSON array
+FAILED_NAMES_JSON="[]"
+if [[ $FAILED -gt 0 ]]; then
+    FAILED_NAMES=$(echo "$OUTPUT" | grep -oP '(?<=--- FAIL: )\S+' || true)
+    if [[ -n "$FAILED_NAMES" ]]; then
+        FAILED_NAMES_JSON=$(echo "$FAILED_NAMES" | jq -R . | jq -s .)
+    fi
+fi
 
 jq -n \
     --argjson total "$TOTAL" \

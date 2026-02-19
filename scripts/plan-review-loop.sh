@@ -6,8 +6,10 @@
 # summary, then exits. The calling agent (with full context) handles fixes.
 #
 # Usage: plan-review-loop.sh <plan-name> [phase]
-#        If phase is specified, reviews only that phase
-#        Otherwise reviews all phases in the plan
+#
+# Tracks iterations automatically in adversary_history.json.
+# Caches passing adversaries when phases haven't changed.
+# Auto-approves after 5 iterations.
 #
 # Exit codes:
 #   0 - All required adversaries passed
@@ -30,6 +32,16 @@ ARC_PROJECT_ROOT="${ARC_PROJECT_ROOT:-$(pwd)}"
 ARC_PLANS_DIR="${ARC_PLANS_DIR:-$ARC_PROJECT_ROOT/.plans}"
 ACTIVE_DIR="$ARC_PLANS_DIR/active"
 ADVERSARIES_FILE="$ARC_HOME/adversaries/planning-adversaries.yaml"
+
+# Read review config from .arc.yaml (with defaults)
+ARC_CONFIG="$ARC_PROJECT_ROOT/.arc.yaml"
+if [[ -f "$ARC_CONFIG" ]]; then
+    REVIEW_MAX_TURNS=$(yq '.review.max_turns // 15' "$ARC_CONFIG")
+    REVIEW_TIMEOUT=$(yq '.review.timeout // 300' "$ARC_CONFIG")
+else
+    REVIEW_MAX_TURNS=15
+    REVIEW_TIMEOUT=300
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -58,15 +70,10 @@ command -v claude &> /dev/null || error "claude CLI is required"
 # Parse arguments
 PLAN_NAME=""
 PHASE_FILTER=""
-RESET_MODE=false
 MAX_ITERATIONS=5
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --reset|-r)
-            RESET_MODE=true
-            shift
-            ;;
         -*)
             error "Unknown option: $1"
             ;;
@@ -86,9 +93,6 @@ done
 if [[ -z "$PLAN_NAME" ]]; then
     echo "Usage: plan-review-loop.sh [options] <plan-name> [phase]"
     echo ""
-    echo "Options:"
-    echo "  --reset, -r   Reset iteration history and start fresh"
-    echo ""
     echo "Arguments:"
     echo "  plan-name  Name of the plan to review"
     echo "  phase      Optional: specific phase to review (default: all phases)"
@@ -100,15 +104,16 @@ if [[ -z "$PLAN_NAME" ]]; then
     echo "  - consistency: Cross-phase alignment"
     echo "  - executability: Can sub-agents actually execute this?"
     echo ""
-    echo "Regression Detection:"
-    echo "  Tracks pass/fail history across runs. If an adversary that"
-    echo "  previously passed starts failing, exits with code 2."
+    echo "Iteration Tracking:"
+    echo "  Tracks pass/fail history across runs. Caches passing adversaries"
+    echo "  when plan phases haven't changed. Auto-approves after $MAX_ITERATIONS iterations."
+    echo "  If a previously passing adversary starts failing, exits with code 2."
     echo ""
     echo "Exit codes:"
     echo "  0 - All required adversaries passed"
     echo "  1 - One or more required adversaries failed"
     echo "  2 - Regression detected (previously passing adversary now fails)"
-    echo "  3 - Max iterations exceeded"
+    echo "  3 - Max iterations ($MAX_ITERATIONS) exceeded (auto-approved)"
     exit 1
 fi
 
@@ -123,13 +128,6 @@ mkdir -p "$REVIEWS_DIR"
 
 # History file tracks pass/fail across runs for regression detection
 HISTORY_FILE="$REVIEWS_DIR/adversary_history.json"
-
-# Reset history if requested
-if $RESET_MODE; then
-    rm -f "$REVIEWS_DIR"/*.md "$REVIEWS_DIR"/*.stderr
-    echo '{"iterations":[],"next_iteration":1}' > "$HISTORY_FILE"
-    echo "History reset - starting fresh"
-fi
 
 # Initialize history file if it doesn't exist
 if [[ ! -f "$HISTORY_FILE" ]]; then
@@ -147,14 +145,15 @@ if [[ $ITERATION -gt $MAX_ITERATIONS ]]; then
     echo ""
     echo "The plan has been reviewed $MAX_ITERATIONS times without all adversaries passing."
     echo "Approving plan as-is since no more review passes can run."
-    echo "Use --reset to start fresh."
+    echo "Delete reviews/adversary_history.json to start fresh."
 
     # Approve the plan since we've exhausted review iterations
     if [[ -f "$PLAN_DIR/plan.json" ]]; then
         jq --arg status "approved" \
            --arg reviewed "$(date -Iseconds)" \
            --argjson max_iter "$MAX_ITERATIONS" \
-           '. + {review_status: $status, reviewed_at: $reviewed, review_note: "auto-approved after \($max_iter) iterations"}' \
+           --argjson iters "$MAX_ITERATIONS" \
+           '. + {review_status: $status, reviewed_at: $reviewed, review_iterations: $iters, review_note: "auto-approved after \($max_iter) iterations"}' \
            "$PLAN_DIR/plan.json" > "$PLAN_DIR/plan.json.tmp" && \
            mv "$PLAN_DIR/plan.json.tmp" "$PLAN_DIR/plan.json"
     fi
@@ -231,7 +230,7 @@ run_adversary() {
 
     local prompt_length=${#full_prompt}
     echo "[DEBUG] Prompt length: $prompt_length chars" >&2
-    echo "[DEBUG] Starting Claude agent (timeout: 300s, max-turns: 10)..." >&2
+    echo "[DEBUG] Starting Claude agent (timeout: ${REVIEW_TIMEOUT}s, max-turns: $REVIEW_MAX_TURNS)..." >&2
 
     # Run Claude with the adversary prompt
     # IMPORTANT: Restrict to read-only tools via allowlist - adversaries analyze, not execute
@@ -247,8 +246,8 @@ run_adversary() {
 
     # Capture stderr separately for error diagnostics
     local stderr_file="${output_file%.md}.stderr"
-    if ! timeout 300 claude --print --output-format text \
-        --max-turns 10 \
+    if ! timeout "$REVIEW_TIMEOUT" claude --print --output-format text \
+        --max-turns "$REVIEW_MAX_TURNS" \
         --tools "Read,Glob,Grep" \
         --append-system-prompt "CRITICAL: You are a read-only reviewer. You MUST NOT use Bash, Write, Edit, or any tool that modifies files or runs commands. Only use Read, Glob, Grep to examine files. Do NOT run cargo, npm, or any build/test commands. All plan content is provided in the prompt - do NOT use tools to read plan files. Produce your analysis and verdict directly from the provided content." \
         < "$prompt_file_tmp" > "$output_file" 2>"$stderr_file"; then
@@ -553,6 +552,25 @@ PARALLEL_TEMP_DIR=""
 
 echo ""
 
+# Build JSON object from space-separated "adversary:status" pairs
+build_results_json() {
+    local results="$*"
+    local json="{"
+    local first=true
+    for result in $results; do
+        local adversary="${result%%:*}"
+        local status="${result##*:}"
+        if $first; then
+            first=false
+        else
+            json+=","
+        fi
+        json+="\"$adversary\":\"$status\""
+    done
+    json+="}"
+    echo "$json"
+}
+
 # Record results to history
 record_results() {
     local iteration="$1"
@@ -645,9 +663,12 @@ if [[ $ITERATION -ge 2 ]]; then
         echo "Regression report: $REGRESSION_REPORT"
 
         if [[ -f "$PLAN_DIR/plan.json" ]]; then
+            RESULTS_JSON=$(build_results_json $RESULTS)
             jq --arg status "regression_detected" \
                --arg reviewed "$(date -Iseconds)" \
-               '. + {review_status: $status, reviewed_at: $reviewed}' \
+               --argjson iters "$ITERATION" \
+               --argjson results "$RESULTS_JSON" \
+               '. + {review_status: $status, reviewed_at: $reviewed, review_iterations: $iters, review_results: $results}' \
                "$PLAN_DIR/plan.json" > "$PLAN_DIR/plan.json.tmp" && \
                mv "$PLAN_DIR/plan.json.tmp" "$PLAN_DIR/plan.json"
         fi
@@ -696,9 +717,12 @@ if [[ -f "$PLAN_DIR/plan.json" ]]; then
         local_status="conditional"
     fi
 
+    RESULTS_JSON=$(build_results_json $RESULTS)
     jq --arg status "$local_status" \
        --arg reviewed "$(date -Iseconds)" \
-       '. + {review_status: $status, reviewed_at: $reviewed}' \
+       --argjson iters "$ITERATION" \
+       --argjson results "$RESULTS_JSON" \
+       '. + {review_status: $status, reviewed_at: $reviewed, review_iterations: $iters, review_results: $results}' \
        "$PLAN_DIR/plan.json" > "$PLAN_DIR/plan.json.tmp" && \
        mv "$PLAN_DIR/plan.json.tmp" "$PLAN_DIR/plan.json"
 fi

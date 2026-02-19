@@ -1,0 +1,13 @@
+name: bad-next
+version: 1
+description: References nonexistent state
+entry_state: start
+terminal_states: [done]
+states:
+  - name: start
+    description: Start
+    prompt: start.md
+    next: nonexistent
+
+  - name: done
+    description: Done

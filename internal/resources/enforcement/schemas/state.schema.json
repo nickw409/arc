@@ -1,0 +1,169 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "state.schema.json",
+  "title": "Arc Phase State",
+  "description": "State file for an Arc phase iteration",
+  "type": "object",
+  "required": ["phase", "phase_status", "iteration", "chunks", "blocked", "last_updated", "checksum"],
+  "additionalProperties": false,
+  "properties": {
+    "phase": {
+      "type": "string",
+      "pattern": "^[0-9]{2}-[a-z-]+$",
+      "description": "Phase identifier (e.g., '01-two-phase-mc')"
+    },
+    "phase_status": {
+      "type": "string",
+      "enum": ["init", "planning", "implementing", "blocked", "disputed", "complete", "failed", "integration_failed", "merge_conflict", "timeout", "reverted"],
+      "description": "Current phase status"
+    },
+    "iteration": {
+      "type": "object",
+      "required": ["current", "max"],
+      "properties": {
+        "current": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "chunks": {
+      "type": "object",
+      "required": ["total", "completed", "current", "remaining"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "commit"],
+            "properties": {
+              "id": { "type": "integer" },
+              "commit": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" }
+            }
+          }
+        },
+        "current": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["id", "name", "status"],
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "status": {
+                  "type": "string",
+                  "enum": ["not_started", "in_progress", "tests_failing", "tests_passing", "committed"]
+                }
+              }
+            }
+          ]
+        },
+        "remaining": {
+          "type": "array",
+          "items": { "type": "integer" }
+        }
+      }
+    },
+    "blocked": {
+      "type": "object",
+      "required": ["is_blocked", "reason"],
+      "properties": {
+        "is_blocked": { "type": "boolean" },
+        "reason": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "blocked_at": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] }
+      }
+    },
+    "dispute": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["id", "test_file", "test_name", "plan_reference", "test_expects", "correct_value", "reason", "proposed_fix", "filed_at"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^dispute-[0-9]+$" },
+            "test_file": { "type": "string" },
+            "test_name": { "type": "string" },
+            "plan_reference": { "type": "string" },
+            "test_expects": { "type": "string" },
+            "correct_value": { "type": "string" },
+            "reason": { "type": "string", "minLength": 20 },
+            "proposed_fix": { "type": "string" },
+            "filed_at": { "type": "string", "format": "date-time" },
+            "attempt_number": { "type": "integer", "minimum": 1, "maximum": 3 },
+            "resolution": {
+              "oneOf": [
+                { "type": "null" },
+                { "type": "string", "enum": ["approved", "rejected", "escalated"] }
+              ]
+            },
+            "resolution_reason": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+            "resolved_at": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] },
+            "resolved_by": { "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["orchestrator", "human"] }] }
+          }
+        }
+      ]
+    },
+    "test_results": {
+      "type": "object",
+      "properties": {
+        "last_run": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "exit_code": { "type": "integer" }
+      }
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_updated_by": {
+      "type": "string",
+      "enum": ["qa", "phase-lead", "orchestrator", "system", "human"]
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA256 of all fields except checksum, for integrity verification"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "phase_status": { "const": "disputed" } }
+      },
+      "then": {
+        "properties": {
+          "dispute": { "not": { "type": "null" } },
+          "blocked": {
+            "properties": { "is_blocked": { "const": true } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "phase_status": { "const": "complete" } }
+      },
+      "then": {
+        "properties": {
+          "chunks": {
+            "properties": {
+              "remaining": { "maxItems": 0 },
+              "current": { "type": "null" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
