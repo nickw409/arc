@@ -205,11 +205,18 @@ func TestStateToTemplateMapNilPanics(t *testing.T) {
 func TestRenderFromResources(t *testing.T) {
 	// Test the file-based Render path using an embedded prompt.
 	result, err := Render("feature/qa.md", TemplateContext{
-		Phase:     "test-phase",
-		Plan:      "test-plan",
-		Iteration: 1,
-		PlanMD:    "# Test Plan",
-		State:     map[string]string{"iteration": "1"},
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -245,5 +252,88 @@ func TestRenderStringNilMapsWithMapReference(t *testing.T) {
 	_, err := RenderString("value={{index .State \"key\"}}", TemplateContext{State: nil, Params: nil})
 	if err == nil {
 		t.Fatal("expected error when accessing key on nil map with missingkey=error")
+	}
+}
+
+func TestRenderNewContextFields(t *testing.T) {
+	tmpl := "plan={{.PlanFile}} dir={{.PhaseDir}} state={{.StateFile}} scripts={{.ScriptsDir}} mode={{.Mode}} disputes={{.DisputeCount}} list={{.DisputeList}}"
+	ctx := TemplateContext{
+		PlanFile:     "/plans/p/plan.md",
+		PhaseDir:     "/plans/p/phases/qa",
+		StateFile:    "/plans/p/phases/qa/state.json",
+		ScriptsDir:   "/home/.arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 2,
+		DisputeList:  "- **test1**: reason1\n- **test2**: reason2",
+	}
+	result, err := RenderString(tmpl, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "plan=/plans/p/plan.md dir=/plans/p/phases/qa state=/plans/p/phases/qa/state.json scripts=/home/.arc/scripts mode=implement disputes=2 list=- **test1**: reason1\n- **test2**: reason2"
+	if result != want {
+		t.Fatalf("got %q, want %q", result, want)
+	}
+}
+
+func TestRenderHandlebarsNewFields(t *testing.T) {
+	tmpl := "plan={{plan_file}} dir={{phase_dir}} state={{state_file}} scripts={{scripts_dir}} mode={{mode}} disputes={{dispute_count}}"
+	ctx := TemplateContext{
+		PlanFile:     "/plans/p/plan.md",
+		PhaseDir:     "/plans/p/phases/qa",
+		StateFile:    "/plans/p/phases/qa/state.json",
+		ScriptsDir:   "/home/.arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 3,
+	}
+	result, err := RenderString(tmpl, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "plan=/plans/p/plan.md dir=/plans/p/phases/qa state=/plans/p/phases/qa/state.json scripts=/home/.arc/scripts mode=implement disputes=3"
+	if result != want {
+		t.Fatalf("got %q, want %q", result, want)
+	}
+}
+
+func TestFormatDisputeList(t *testing.T) {
+	tests := []struct {
+		name     string
+		disputes []arc.Dispute
+		want     string
+	}{
+		{
+			name:     "empty",
+			disputes: nil,
+			want:     "(none)",
+		},
+		{
+			name:     "empty slice",
+			disputes: []arc.Dispute{},
+			want:     "(none)",
+		},
+		{
+			name: "single dispute",
+			disputes: []arc.Dispute{
+				{TestName: "TestFoo", Reason: "wrong assertion"},
+			},
+			want: "- **TestFoo**: wrong assertion",
+		},
+		{
+			name: "multiple disputes",
+			disputes: []arc.Dispute{
+				{TestName: "TestFoo", Reason: "wrong assertion"},
+				{TestName: "TestBar", Reason: "missing edge case"},
+			},
+			want: "- **TestFoo**: wrong assertion\n- **TestBar**: missing edge case",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatDisputeList(tt.disputes)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

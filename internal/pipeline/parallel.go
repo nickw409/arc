@@ -21,6 +21,9 @@ type RunParallelOptions struct {
 	PhaseState *arc.PhaseState
 	Config     *arc.ParallelConfig
 	PlanMD     string
+	ArcHome    string
+	PlansDir   string
+	PlanName   string
 }
 
 // RunParallel spawns agents for each branch in parallel, collects results,
@@ -66,12 +69,19 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 			}
 
 			tmplCtx := prompt.TemplateContext{
-				Phase:     opts.PhaseState.Phase,
-				Plan:      opts.PhaseState.Plan,
-				Iteration: opts.PhaseState.Iteration.Current,
-				PlanMD:    opts.PlanMD,
-				State:     prompt.StateToTemplateMap(opts.PhaseState),
-				Params:    map[string]string{},
+				Phase:        opts.PhaseState.Phase,
+				Plan:         opts.PhaseState.Plan,
+				Iteration:    opts.PhaseState.Iteration.Current,
+				PlanMD:       opts.PlanMD,
+				State:        prompt.StateToTemplateMap(opts.PhaseState),
+				Params:       map[string]string{},
+				PlanFile:     filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
+				PhaseDir:     opts.PhaseDir,
+				StateFile:    filepath.Join(opts.PhaseDir, "state.json"),
+				ScriptsDir:   filepath.Join(opts.ArcHome, "scripts"),
+				Mode:         "",
+				DisputeCount: len(opts.PhaseState.Disputes),
+				DisputeList:  prompt.FormatDisputeList(opts.PhaseState.Disputes),
 			}
 
 			rendered, err := prompt.RenderString(b.Prompt, tmplCtx)

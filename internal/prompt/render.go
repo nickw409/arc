@@ -15,12 +15,19 @@ import (
 
 // TemplateContext contains all variables available during prompt rendering.
 type TemplateContext struct {
-	Phase     string
-	Plan      string
-	Iteration int
-	PlanMD    string
-	State     map[string]string
-	Params    map[string]string
+	Phase        string
+	Plan         string
+	Iteration    int
+	PlanMD       string
+	State        map[string]string
+	Params       map[string]string
+	PlanFile     string
+	PhaseDir     string
+	StateFile    string
+	ScriptsDir   string
+	Mode         string
+	DisputeCount int
+	DisputeList  string
 }
 
 // Render loads a prompt template from embedded resources and renders it.
@@ -188,19 +195,33 @@ func hasKey(item interface{}, key string) bool {
 func contextToMap(ctx TemplateContext) map[string]interface{} {
 	return map[string]interface{}{
 		// Capitalized keys for Go template direct references
-		"Phase":     ctx.Phase,
-		"Plan":      ctx.Plan,
-		"Iteration": ctx.Iteration,
-		"PlanMD":    ctx.PlanMD,
-		"State":     ctx.State,
-		"Params":    ctx.Params,
+		"Phase":        ctx.Phase,
+		"Plan":         ctx.Plan,
+		"Iteration":    ctx.Iteration,
+		"PlanMD":       ctx.PlanMD,
+		"State":        ctx.State,
+		"Params":       ctx.Params,
+		"PlanFile":     ctx.PlanFile,
+		"PhaseDir":     ctx.PhaseDir,
+		"StateFile":    ctx.StateFile,
+		"ScriptsDir":   ctx.ScriptsDir,
+		"Mode":         ctx.Mode,
+		"DisputeCount": ctx.DisputeCount,
+		"DisputeList":  ctx.DisputeList,
 		// Lowercase keys for Handlebars-style references
-		"phase":     ctx.Phase,
-		"plan":      ctx.Plan,
-		"iteration": ctx.Iteration,
-		"plan_md":   ctx.PlanMD,
-		"state":     ctx.State,
-		"params":    ctx.Params,
+		"phase":         ctx.Phase,
+		"plan":          ctx.Plan,
+		"iteration":     ctx.Iteration,
+		"plan_md":       ctx.PlanMD,
+		"state":         ctx.State,
+		"params":        ctx.Params,
+		"plan_file":     ctx.PlanFile,
+		"phase_dir":     ctx.PhaseDir,
+		"state_file":    ctx.StateFile,
+		"scripts_dir":   ctx.ScriptsDir,
+		"mode":          ctx.Mode,
+		"dispute_count": ctx.DisputeCount,
+		"dispute_list":  ctx.DisputeList,
 	}
 }
 
@@ -241,6 +262,18 @@ func ValidateTemplate(tmplStr string) error {
 	data := contextToMap(ctx)
 	var buf bytes.Buffer
 	return t.Execute(&buf, data)
+}
+
+// FormatDisputeList formats a slice of Disputes into a markdown list for templates.
+func FormatDisputeList(disputes []arc.Dispute) string {
+	if len(disputes) == 0 {
+		return "(none)"
+	}
+	var b strings.Builder
+	for _, d := range disputes {
+		fmt.Fprintf(&b, "- **%s**: %s\n", d.TestName, d.Reason)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // StateToTemplateMap converts a PhaseState into a flat map[string]string.

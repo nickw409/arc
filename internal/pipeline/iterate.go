@@ -122,6 +122,9 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 			PhaseState: &phaseState,
 			Config:     stateConfig.Parallel,
 			PlanMD:     string(planMD),
+			ArcHome:    opts.ArcHome,
+			PlansDir:   opts.PlansDir,
+			PlanName:   opts.PlanName,
 		})
 		if err != nil {
 			return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("parallel execution: %w", err)}
@@ -172,12 +175,19 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 
 	tmplCtx := prompt.TemplateContext{
-		Phase:     phaseState.Phase,
-		Plan:      phaseState.Plan,
-		Iteration: phaseState.Iteration.Current,
-		PlanMD:    string(planMD),
-		State:     prompt.StateToTemplateMap(&phaseState),
-		Params:    map[string]string{},
+		Phase:        phaseState.Phase,
+		Plan:         phaseState.Plan,
+		Iteration:    phaseState.Iteration.Current,
+		PlanMD:       string(planMD),
+		State:        prompt.StateToTemplateMap(&phaseState),
+		Params:       map[string]string{},
+		PlanFile:     filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
+		PhaseDir:     phaseDir,
+		StateFile:    filepath.Join(phaseDir, "state.json"),
+		ScriptsDir:   filepath.Join(opts.ArcHome, "scripts"),
+		Mode:         opts.Mode,
+		DisputeCount: len(phaseState.Disputes),
+		DisputeList:  prompt.FormatDisputeList(phaseState.Disputes),
 	}
 
 	rendered, err := prompt.RenderString(string(promptBytes), tmplCtx)
