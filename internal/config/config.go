@@ -18,12 +18,18 @@ var (
 
 // Config represents the project-level .arc.yaml configuration.
 type Config struct {
-	Language       string    `yaml:"language"`
-	Runner         string    `yaml:"runner"`
-	DefaultPackage string    `yaml:"default_package"`
-	BuildCommand   string    `yaml:"build_command"`
-	TestCommand    string    `yaml:"test_command"`
-	Git            GitConfig `yaml:"git"`
+	Language       string         `yaml:"language"`
+	Runner         string         `yaml:"runner"`
+	DefaultPackage string         `yaml:"default_package"`
+	BuildCommand   string         `yaml:"build_command"`
+	TestCommand    string         `yaml:"test_command"`
+	Git            GitConfig    `yaml:"git"`
+	Audit          AuditConfig  `yaml:"audit"`
+}
+
+// AuditConfig holds settings for the validate (audit) command.
+type AuditConfig struct {
+	Prompt string `yaml:"prompt"`
 }
 
 // GitConfig holds git-related settings.
@@ -47,6 +53,15 @@ func Load(projectRoot string) (*Config, error) {
 		cfg.Git.CommitStyle = "conventional"
 	}
 	return &cfg, nil
+}
+
+// Save writes the config back to .arc.yaml in the given project root.
+func Save(projectRoot string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(filepath.Join(projectRoot, ".arc.yaml"), data, 0644)
 }
 
 // Validate checks that language is in SupportedLanguages and runner is in SupportedRunners.

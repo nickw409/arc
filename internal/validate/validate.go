@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -53,12 +55,13 @@ func (r *Report) HasCritical() bool {
 
 // Options configures a validate run.
 type Options struct {
-	Paths    []string
-	Language string
-	Timeout  time.Duration
-	MaxTurns int
-	Model    string
-	Logger   *slog.Logger
+	Paths      []string
+	Language   string
+	PromptPath string // custom prompt file path; if empty, uses embedded default
+	Timeout    time.Duration
+	MaxTurns   int
+	Model      string
+	Logger     *slog.Logger
 }
 
 // Run executes a test quality audit by spawning an AI agent.
@@ -67,9 +70,9 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		return nil, ctx.Err()
 	}
 
-	promptBytes, err := resources.PromptBytes("validate/audit.md")
+	promptBytes, err := loadPrompt(opts.PromptPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading audit prompt: %w", err)
+		return nil, err
 	}
 
 	prompt := renderPrompt(string(promptBytes), opts)
@@ -287,12 +290,40 @@ func parseSummaryCount(output, label string) int {
 	return 0
 }
 
-// TryLoadLanguage attempts to read the language from .arc.yaml.
-// Returns the language string or empty string on any failure.
-func TryLoadLanguage(projectRoot string) string {
+// ProjectConfig holds validate-relevant settings loaded from .arc.yaml.
+type ProjectConfig struct {
+	Language   string
+	PromptPath string
+}
+
+// TryLoadConfig attempts to read validate-relevant settings from .arc.yaml.
+// Returns zero-value fields on any failure.
+func TryLoadConfig(projectRoot string) ProjectConfig {
 	cfg, err := config.Load(projectRoot)
 	if err != nil {
-		return ""
+		return ProjectConfig{}
 	}
-	return cfg.Language
+	promptPath := cfg.Audit.Prompt
+	if promptPath != "" && !filepath.IsAbs(promptPath) {
+		promptPath = filepath.Join(projectRoot, promptPath)
+	}
+	return ProjectConfig{
+		Language:   cfg.Language,
+		PromptPath: promptPath,
+	}
+}
+
+func loadPrompt(customPath string) ([]byte, error) {
+	if customPath != "" {
+		data, err := os.ReadFile(customPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading custom prompt %q: %w", customPath, err)
+		}
+		return data, nil
+	}
+	data, err := resources.PromptBytes("validate/audit.md")
+	if err != nil {
+		return nil, fmt.Errorf("loading embedded audit prompt: %w", err)
+	}
+	return data, nil
 }

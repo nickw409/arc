@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -33,19 +34,20 @@ func newValidateCmd() *cobra.Command {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			language := validate.TryLoadLanguage(cwd)
+			projCfg := validate.TryLoadConfig(cwd)
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
 
 			report, err := validate.Run(context.Background(), validate.Options{
-				Paths:    paths,
-				Language: language,
-				Timeout:  time.Duration(timeout) * time.Second,
-				MaxTurns: maxTurns,
-				Model:    model,
-				Logger:   logger,
+				Paths:      paths,
+				Language:   projCfg.Language,
+				PromptPath: projCfg.PromptPath,
+				Timeout:    time.Duration(timeout) * time.Second,
+				MaxTurns:   maxTurns,
+				Model:      model,
+				Logger:     logger,
 			})
 			if err != nil {
 				return err
@@ -64,7 +66,76 @@ func newValidateCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxTurns, "max-turns", 30, "max agent conversation turns")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 
+	cmd.AddCommand(
+		newValidateSetPromptCmd(),
+		newValidateClearPromptCmd(),
+	)
+
 	return cmd
+}
+
+func newValidateSetPromptCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-prompt <path>",
+		Short: "Set a custom audit prompt file",
+		Long:  "Persists a custom prompt path in .arc.yaml. The file is read on each validate run.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			promptPath := args[0]
+
+			if _, err := os.Stat(promptPath); err != nil {
+				return fmt.Errorf("prompt file not found: %w", err)
+			}
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+
+			cfg, err := config.Load(cwd)
+			if err != nil {
+				return fmt.Errorf("loading .arc.yaml: %w", err)
+			}
+
+			cfg.Audit.Prompt = promptPath
+
+			if err := config.Save(cwd, cfg); err != nil {
+				return fmt.Errorf("saving .arc.yaml: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Validate prompt set to: %s\n", promptPath)
+			return nil
+		},
+	}
+}
+
+func newValidateClearPromptCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear-prompt",
+		Short: "Revert to the built-in audit prompt",
+		Long:  "Removes the custom prompt path from .arc.yaml, reverting to the embedded default.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+
+			cfg, err := config.Load(cwd)
+			if err != nil {
+				return fmt.Errorf("loading .arc.yaml: %w", err)
+			}
+
+			cfg.Audit.Prompt = ""
+
+			if err := config.Save(cwd, cfg); err != nil {
+				return fmt.Errorf("saving .arc.yaml: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "Validate prompt reset to built-in default")
+			return nil
+		},
+	}
 }
 
 func printReport(cmd *cobra.Command, report *validate.Report) {

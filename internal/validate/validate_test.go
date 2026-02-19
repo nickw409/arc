@@ -221,23 +221,90 @@ func TestParseFindingLine(t *testing.T) {
 	}
 }
 
-func TestTryLoadLanguageNoConfig(t *testing.T) {
+func TestTryLoadConfigNoConfig(t *testing.T) {
 	dir := t.TempDir()
-	lang := TryLoadLanguage(dir)
-	if lang != "" {
-		t.Fatalf("TryLoadLanguage(empty dir) = %q, want %q", lang, "")
+	pc := TryLoadConfig(dir)
+	if pc.Language != "" {
+		t.Fatalf("Language = %q, want %q", pc.Language, "")
+	}
+	if pc.PromptPath != "" {
+		t.Fatalf("PromptPath = %q, want %q", pc.PromptPath, "")
 	}
 }
 
-func TestTryLoadLanguageWithConfig(t *testing.T) {
+func TestTryLoadConfigLanguageOnly(t *testing.T) {
 	dir := t.TempDir()
 	cfg := []byte("language: go\nrunner: go-test\n")
 	if err := os.WriteFile(filepath.Join(dir, ".arc.yaml"), cfg, 0644); err != nil {
 		t.Fatal(err)
 	}
-	lang := TryLoadLanguage(dir)
-	if lang != "go" {
-		t.Fatalf("TryLoadLanguage() = %q, want %q", lang, "go")
+	pc := TryLoadConfig(dir)
+	if pc.Language != "go" {
+		t.Fatalf("Language = %q, want %q", pc.Language, "go")
+	}
+	if pc.PromptPath != "" {
+		t.Fatalf("PromptPath = %q, want %q", pc.PromptPath, "")
+	}
+}
+
+func TestTryLoadConfigWithPrompt(t *testing.T) {
+	dir := t.TempDir()
+	cfg := []byte("language: go\nrunner: go-test\naudit:\n  prompt: my-audit.md\n")
+	if err := os.WriteFile(filepath.Join(dir, ".arc.yaml"), cfg, 0644); err != nil {
+		t.Fatal(err)
+	}
+	pc := TryLoadConfig(dir)
+	if pc.Language != "go" {
+		t.Fatalf("Language = %q, want %q", pc.Language, "go")
+	}
+	want := filepath.Join(dir, "my-audit.md")
+	if pc.PromptPath != want {
+		t.Fatalf("PromptPath = %q, want %q", pc.PromptPath, want)
+	}
+}
+
+func TestTryLoadConfigAbsolutePromptPath(t *testing.T) {
+	dir := t.TempDir()
+	cfg := []byte("language: go\nrunner: go-test\naudit:\n  prompt: /tmp/custom-audit.md\n")
+	if err := os.WriteFile(filepath.Join(dir, ".arc.yaml"), cfg, 0644); err != nil {
+		t.Fatal(err)
+	}
+	pc := TryLoadConfig(dir)
+	if pc.PromptPath != "/tmp/custom-audit.md" {
+		t.Fatalf("PromptPath = %q, want %q", pc.PromptPath, "/tmp/custom-audit.md")
+	}
+}
+
+func TestLoadPromptCustomFile(t *testing.T) {
+	dir := t.TempDir()
+	content := "custom prompt content"
+	path := filepath.Join(dir, "audit.md")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := loadPrompt(path)
+	if err != nil {
+		t.Fatalf("loadPrompt() error: %v", err)
+	}
+	if string(data) != content {
+		t.Fatalf("loadPrompt() = %q, want %q", string(data), content)
+	}
+}
+
+func TestLoadPromptCustomFileMissing(t *testing.T) {
+	_, err := loadPrompt("/nonexistent/audit.md")
+	if err == nil {
+		t.Fatal("expected error for missing custom prompt, got nil")
+	}
+}
+
+func TestLoadPromptDefault(t *testing.T) {
+	data, err := loadPrompt("")
+	if err != nil {
+		t.Fatalf("loadPrompt() error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("loadPrompt() returned empty bytes for default prompt")
 	}
 }
 
