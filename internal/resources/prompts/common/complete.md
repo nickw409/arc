@@ -1,6 +1,6 @@
 # Phase Complete
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 
 This phase has been marked as complete. All tests are passing and the implementation has been reviewed.

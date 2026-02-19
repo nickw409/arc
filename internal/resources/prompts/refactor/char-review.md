@@ -1,6 +1,6 @@
 # Characterization Test Review
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Characterization: {{phase_dir}}/characterization.md

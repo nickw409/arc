@@ -1,6 +1,6 @@
 # Performance Verification
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Baseline: {{phase_dir}}/baseline.md
@@ -19,7 +19,7 @@ Verify that the optimizations:
 2. **Compare to baseline** - was goal achieved?
 3. **Run full test suite** - no behavioral regressions:
    ```bash
-   {{scripts_dir}}/run-phase-tests.sh {{plan_name}} {{phase}}
+   {{scripts_dir}}/run-phase-tests.sh {{plan}} {{phase}}
    ```
 4. **Check for side effects** - memory usage, startup time, etc.
 

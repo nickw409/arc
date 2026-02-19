@@ -1,6 +1,6 @@
 # Bug Fix Implementation
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Investigation: {{phase_dir}}/investigation.md
@@ -16,7 +16,7 @@ Implement the fix for the bug identified in the investigation.
 3. **Implement the minimal fix** that makes tests pass
 4. **Run tests** to verify the fix:
    ```bash
-   {{scripts_dir}}/run-phase-tests.sh {{plan_name}} {{phase}}
+   {{scripts_dir}}/run-phase-tests.sh {{plan}} {{phase}}
    ```
 5. **Document your changes** in `{{phase_dir}}/fix_reasoning.md`
 

@@ -1,6 +1,6 @@
 # Bug Fix Review
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Investigation: {{phase_dir}}/investigation.md
 Fix reasoning: {{phase_dir}}/fix_reasoning.md

@@ -1,6 +1,6 @@
 # Research Phase
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 

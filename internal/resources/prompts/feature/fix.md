@@ -1,6 +1,6 @@
 # Test Fix Agent
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 State: {{state_file}}
 Plan doc: {{plan_file}}
@@ -17,7 +17,7 @@ The orchestrator has approved {{dispute_count}} dispute(s) to modify QA tests.
 3. The fixes must align with the plan - you're correcting tests, not weakening them
 4. When ALL tests are fixed, clear the disputes:
    ```bash
-   {{scripts_dir}}/update-state.sh {{plan_name}} {{phase}} clear-dispute
+   {{scripts_dir}}/update-state.sh {{plan}} {{phase}} clear-dispute
    ```
 5. Exit
 

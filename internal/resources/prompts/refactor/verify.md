@@ -1,6 +1,6 @@
 # Refactoring Verification
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Refactoring log: {{phase_dir}}/refactor_log.md
@@ -16,7 +16,7 @@ Verify that the refactoring:
 
 1. **Run ALL characterization tests** - they must all pass:
    ```bash
-   {{scripts_dir}}/run-phase-tests.sh {{plan_name}} {{phase}}
+   {{scripts_dir}}/run-phase-tests.sh {{plan}} {{phase}}
    ```
 2. **Run full test suite** - no regressions
 3. **Review changes** against plan goals

@@ -1,6 +1,6 @@
 # Findings Review
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Findings: {{phase_dir}}/findings.md

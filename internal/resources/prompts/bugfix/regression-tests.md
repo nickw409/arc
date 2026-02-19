@@ -1,6 +1,6 @@
 # Regression Test Writer
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Investigation: {{phase_dir}}/investigation.md
@@ -33,7 +33,7 @@ Place test files according to your project's test conventions.
 
 After creating test files:
 ```bash
-arc update-state.sh {{plan_name}} {{phase}} add-test-file "<path_to_test>"
+arc update-state.sh {{plan}} {{phase}} add-test-file "<path_to_test>"
 ```
 
 ## Example

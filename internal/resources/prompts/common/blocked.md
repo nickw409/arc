@@ -1,6 +1,6 @@
 # Phase Blocked
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 
 This phase is blocked and requires human intervention.
@@ -12,9 +12,9 @@ This phase is blocked and requires human intervention.
 - Unresolvable dispute
 
 ## Required Actions
-1. Review the phase state: `arc get-state.sh {{plan_name}} {{phase}}`
+1. Review the phase state: `arc get-state.sh {{plan}} {{phase}}`
 2. Check impl_reasoning.md for what was attempted
 3. Manually investigate and fix the issue
-4. Reset the phase: `arc update-state.sh {{plan_name}} {{phase}} reset-blocked`
+4. Reset the phase: `arc update-state.sh {{plan}} {{phase}} reset-blocked`
 
 When done, exit.

@@ -1,6 +1,6 @@
 # Draft Findings
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Research notes: {{phase_dir}}/research_notes.md

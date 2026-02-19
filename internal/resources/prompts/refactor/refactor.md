@@ -1,6 +1,6 @@
 # Refactoring Implementation
 
-Plan: {{plan_name}}
+Plan: {{plan}}
 Phase: {{phase}}
 Plan doc: {{plan_file}}
 Characterization: {{phase_dir}}/characterization.md
@@ -14,12 +14,12 @@ Perform the structural refactoring described in the plan while keeping all chara
 1. **Read the plan** for specific refactoring instructions
 2. **Run characterization tests** to establish baseline:
    ```bash
-   {{scripts_dir}}/run-phase-tests.sh {{plan_name}} {{phase}}
+   {{scripts_dir}}/run-phase-tests.sh {{plan}} {{phase}}
    ```
 3. **Make structural changes** in small increments
 4. **Run tests after each change** to catch regressions:
    ```bash
-   {{scripts_dir}}/run-phase-tests.sh {{plan_name}} {{phase}}
+   {{scripts_dir}}/run-phase-tests.sh {{plan}} {{phase}}
    ```
 5. **Document changes** in `{{phase_dir}}/refactor_log.md`
 
