@@ -12,5 +12,8 @@ __pycache__/
 *.tmp
 *.tmp.*
 
+# Build artifacts
+/arc
+
 # Arc orchestration plans
 .plans/
