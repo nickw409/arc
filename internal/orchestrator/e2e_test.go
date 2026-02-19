@@ -41,19 +41,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// writeScriptFile writes a scripted response for the mock agent at the given call index.
-func writeScriptFile(t *testing.T, scriptDir string, callIndex int, content string) {
-	t.Helper()
-	path := filepath.Join(scriptDir, "call_"+itoa(callIndex)+".txt")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func itoa(n int) string {
-	return string(rune('0'+n/10)) + string(rune('0'+n%10))
-}
-
 // setupE2E creates a plan directory with phases and returns (plansDir, scriptDir, cleanup).
 func setupE2E(t *testing.T, planName string, phases []string, workflowType string) (string, string) {
 	t.Helper()
@@ -115,24 +102,6 @@ func readState(t *testing.T, plansDir, planName, phaseName string) *arc.PhaseSta
 
 func e2eLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
-
-// Format helpers for itoa — use stdlib instead
-func init() {
-	// Override the hacky itoa above with stdlib
-}
-
-// Override itoa with proper version
-func formatInt(n int) string {
-	s := ""
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	return s
 }
 
 // TestE2EHappyPath exercises the full happy path:
