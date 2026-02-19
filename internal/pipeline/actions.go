@@ -85,13 +85,15 @@ func commitAction(ctx context.Context, params map[string]string, actx ActionCont
 		args = append(args, "-S")
 	}
 
-	cmd := exec.CommandContext(ctx, "git", append([]string{"add", "-A"}, []string{}...)...)
-	if err := cmd.Run(); err != nil {
+	addCmd := exec.CommandContext(ctx, "git", "add", "-A")
+	addCmd.Dir = actx.PhaseDir
+	if err := addCmd.Run(); err != nil {
 		return fmt.Errorf("git add failed: %w", err)
 	}
 
-	cmd = exec.CommandContext(ctx, "git", args...)
-	if err := cmd.Run(); err != nil {
+	commitCmd := exec.CommandContext(ctx, "git", args...)
+	commitCmd.Dir = actx.PhaseDir
+	if err := commitCmd.Run(); err != nil {
 		return fmt.Errorf("git commit failed: %w", err)
 	}
 

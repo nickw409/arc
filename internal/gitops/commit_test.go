@@ -72,15 +72,9 @@ func initGitRepo(t *testing.T) string {
 func TestCommitNoChanges(t *testing.T) {
 	dir := initGitRepo(t)
 
-	// Change to the git repo dir for commit operations
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(origDir)
-
 	hash, err := Commit(CommitOptions{
 		Message: "test commit",
+		Dir:     dir,
 		Config:  &config.Config{Git: config.GitConfig{CommitStyle: "conventional"}},
 	})
 	if err != nil {
@@ -99,14 +93,9 @@ func TestCommitWithChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(origDir)
-
 	hash, err := Commit(CommitOptions{
 		Message: "test commit",
+		Dir:     dir,
 		Config:  &config.Config{Git: config.GitConfig{CommitStyle: "conventional"}},
 	})
 	if err != nil {
@@ -138,15 +127,10 @@ func TestCommitWithSigning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(origDir)
-
 	// With signing enabled; may fail if no GPG key, but tests the code path
 	_, err := Commit(CommitOptions{
 		Message: "test",
+		Dir:     dir,
 		Config:  &config.Config{Git: config.GitConfig{Sign: true}},
 	})
 	// We don't fail the test on error here because GPG signing may not be configured
