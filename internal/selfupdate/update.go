@@ -31,6 +31,25 @@ func Update() error {
 		return fmt.Errorf("git pull failed: %w", err)
 	}
 
+	// Rebuild in-place so the binary stays resolvable to the repo
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding executable: %w", err)
+	}
+	exePath, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		return fmt.Errorf("resolving executable path: %w", err)
+	}
+
+	fmt.Println("Building arc...")
+	buildCmd := exec.Command("go", "build", "-o", exePath, "./cmd/arc/")
+	buildCmd.Dir = installDir
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("go build failed: %w", err)
+	}
+
 	fmt.Println("Arc updated successfully.")
 	return nil
 }
