@@ -12,6 +12,10 @@ import (
 	"github.com/nwiley/arc/internal/arc"
 )
 
+// judgeCommandName is the binary name used for judge/stuck-instruction agent spawning.
+// Tests override this to point to a mock binary.
+var judgeCommandName = "claude"
+
 // DisputeResolution is the AI's judgment on a test dispute.
 type DisputeResolution struct {
 	Approve bool
@@ -59,10 +63,10 @@ REJECT_DISPUTE: <reason> — if the test is correct and the implementation shoul
 	)
 
 	result, err := agent.Spawn(ctx, agent.SpawnOptions{
-		Prompt:      prompt,
-		CommandName: "claude",
-		MaxTurns:    1,
-		Timeout:     60 * time.Second,
+		Prompt:       prompt,
+		CommandName:  judgeCommandName,
+		MaxTurns:     1,
+		Timeout:      60 * time.Second,
 		AllowedTools: []string{},
 	})
 	if err != nil {
@@ -115,7 +119,7 @@ What specific, actionable instruction should be given to the implementation agen
 
 	result, err := agent.Spawn(ctx, agent.SpawnOptions{
 		Prompt:       prompt,
-		CommandName:  "claude",
+		CommandName:  judgeCommandName,
 		MaxTurns:     1,
 		Timeout:      60 * time.Second,
 		AllowedTools: []string{},

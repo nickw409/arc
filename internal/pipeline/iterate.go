@@ -21,6 +21,11 @@ import (
 // Tests override this to point to a mock binary.
 var agentCommandName = "claude"
 
+// SetAgentCommandNameForTest overrides the agent binary name for testing.
+func SetAgentCommandNameForTest(name string) {
+	agentCommandName = name
+}
+
 // IterateOptions configures a single iteration.
 type IterateOptions struct {
 	PlanName     string

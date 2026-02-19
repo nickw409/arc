@@ -6,12 +6,16 @@
 //   - MOCK_STDERR: string to print to stderr (default: empty)
 //   - MOCK_ECHO_STDIN: if "1", reads stdin and echoes it to stdout (overrides MOCK_OUTPUT)
 //   - MOCK_ECHO_ARGS: if "1", prints os.Args[1:] joined by newlines to stdout (overrides MOCK_OUTPUT)
+//   - MOCK_SCRIPT_DIR: directory containing call_0.txt, call_1.txt, etc. for sequential scripted
+//     responses. A shared .call_count file tracks which response to serve next. Falls through to
+//     MOCK_OUTPUT if the script file doesn't exist.
 package main
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -36,10 +40,40 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Print(string(data))
+	} else if scriptDir := os.Getenv("MOCK_SCRIPT_DIR"); scriptDir != "" {
+		printScriptedResponse(scriptDir)
 	} else if output := os.Getenv("MOCK_OUTPUT"); output != "" {
 		fmt.Print(output)
 	}
 
 	exitCode, _ := strconv.Atoi(os.Getenv("MOCK_EXIT_CODE"))
 	os.Exit(exitCode)
+}
+
+func printScriptedResponse(scriptDir string) {
+	counterPath := filepath.Join(scriptDir, ".call_count")
+
+	// Read current counter (default 0)
+	count := 0
+	if data, err := os.ReadFile(counterPath); err == nil {
+		count, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+
+	// Increment and write back
+	if err := os.WriteFile(counterPath, []byte(strconv.Itoa(count+1)), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing call count: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Read scripted response file
+	scriptFile := filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", count))
+	data, err := os.ReadFile(scriptFile)
+	if err != nil {
+		// Fall through to MOCK_OUTPUT
+		if output := os.Getenv("MOCK_OUTPUT"); output != "" {
+			fmt.Print(output)
+		}
+		return
+	}
+	fmt.Print(string(data))
 }
