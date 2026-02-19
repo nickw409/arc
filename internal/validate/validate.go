@@ -60,16 +60,55 @@ type Options struct {
 	PromptPath string // custom prompt file path; if empty, uses embedded default
 	Timeout    time.Duration
 	MaxTurns   int
+	Workers    int
 	Model      string
 	Logger     *slog.Logger
 }
 
-// Run executes a test quality audit by spawning an AI agent.
+// Run executes a test quality audit. If a custom prompt is set, uses the legacy
+// single-agent tool-based path. Otherwise, uses the pre-aggregated parallel path.
 func Run(ctx context.Context, opts Options) (*Report, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
+	if opts.PromptPath != "" {
+		return runLegacy(ctx, opts)
+	}
+	return runParallel(ctx, opts)
+}
+
+// runParallel scans files, groups by package, and fans out parallel agents.
+func runParallel(ctx context.Context, opts Options) (*Report, error) {
+	opts.Logger.Info("starting parallel test quality audit", "paths", opts.Paths, "language", opts.Language)
+
+	batches, err := Scan(ScanOptions{
+		Paths:    opts.Paths,
+		Language: opts.Language,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scanning files: %w", err)
+	}
+
+	if len(batches) == 0 {
+		opts.Logger.Info("no files found to audit")
+		return &Report{Verdict: "pass"}, nil
+	}
+
+	opts.Logger.Info("scan complete", "batches", len(batches))
+
+	return RunParallel(ctx, ParallelOptions{
+		Batches:  batches,
+		Language: opts.Language,
+		Workers:  opts.Workers,
+		Timeout:  opts.Timeout,
+		Model:    opts.Model,
+		Logger:   opts.Logger,
+	})
+}
+
+// runLegacy is the original single-agent tool-based audit path, used when a custom prompt is set.
+func runLegacy(ctx context.Context, opts Options) (*Report, error) {
 	promptBytes, err := loadPrompt(opts.PromptPath)
 	if err != nil {
 		return nil, err
@@ -87,7 +126,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		maxTurns = 30
 	}
 
-	opts.Logger.Info("starting test quality audit", "paths", opts.Paths, "language", opts.Language)
+	opts.Logger.Info("starting test quality audit (legacy)", "paths", opts.Paths, "language", opts.Language)
 
 	result, err := agent.Spawn(ctx, agent.SpawnOptions{
 		Prompt:       prompt,

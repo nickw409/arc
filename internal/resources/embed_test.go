@@ -118,6 +118,16 @@ func TestEmbeddedValidatePromptAccessible(t *testing.T) {
 	}
 }
 
+func TestEmbeddedBatchAuditPromptAccessible(t *testing.T) {
+	data, err := PromptBytes("validate/batch-audit.md")
+	if err != nil {
+		t.Fatalf("PromptBytes(validate/batch-audit.md) error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("PromptBytes(validate/batch-audit.md) returned empty byte slice")
+	}
+}
+
 func TestEmbeddedWorkflowContent(t *testing.T) {
 	// Verify embedded workflows have expected content markers
 	types := []string{"feature", "bugfix", "investigation", "refactor", "performance"}

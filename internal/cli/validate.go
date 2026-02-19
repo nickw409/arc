@@ -16,6 +16,7 @@ func newValidateCmd() *cobra.Command {
 	var (
 		timeout  int
 		maxTurns int
+		workers  int
 		model    string
 	)
 
@@ -46,6 +47,7 @@ func newValidateCmd() *cobra.Command {
 				PromptPath: projCfg.PromptPath,
 				Timeout:    time.Duration(timeout) * time.Second,
 				MaxTurns:   maxTurns,
+				Workers:    workers,
 				Model:      model,
 				Logger:     logger,
 			})
@@ -64,6 +66,7 @@ func newValidateCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&timeout, "timeout", 600, "agent timeout in seconds")
 	cmd.Flags().IntVar(&maxTurns, "max-turns", 30, "max agent conversation turns")
+	cmd.Flags().IntVar(&workers, "workers", 4, "max parallel audit agents")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 
 	cmd.AddCommand(
