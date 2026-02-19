@@ -128,6 +128,23 @@ func TestEmbeddedBatchAuditPromptAccessible(t *testing.T) {
 	}
 }
 
+func TestEmbeddedGuideAccessible(t *testing.T) {
+	data, err := GuideBytes("guide.md")
+	if err != nil {
+		t.Fatalf("GuideBytes(guide.md) error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("GuideBytes(guide.md) returned empty byte slice")
+	}
+}
+
+func TestEmbeddedGuideNotFound(t *testing.T) {
+	_, err := GuideBytes("nonexistent.md")
+	if err == nil {
+		t.Fatal("expected error for nonexistent guide, got nil")
+	}
+}
+
 func TestEmbeddedWorkflowContent(t *testing.T) {
 	// Verify embedded workflows have expected content markers
 	types := []string{"feature", "bugfix", "investigation", "refactor", "performance"}

@@ -21,6 +21,7 @@ func NewRootCmd() *cobra.Command {
 		newMonitorCmd(),
 		newUpdateCmd(),
 		newValidateCmd(),
+		newGuideCmd(),
 	)
 	return cmd
 }

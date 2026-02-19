@@ -2,7 +2,6 @@ package resources
 
 import (
 	"embed"
-	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,9 @@ var templatesFS embed.FS
 
 //go:embed enforcement/hooks/*
 var enforcementFS embed.FS
+
+//go:embed guides/*.md
+var guidesFS embed.FS
 
 // WorkflowBytes returns the raw YAML for a workflow type (e.g., "feature").
 func WorkflowBytes(workflowType string) ([]byte, error) {
@@ -55,5 +57,7 @@ func ListWorkflows() []string {
 	return names
 }
 
-// Ensure fmt is used (for future error wrapping).
-var _ = fmt.Errorf
+// GuideBytes returns the raw markdown for a guide file (e.g., "guide.md").
+func GuideBytes(name string) ([]byte, error) {
+	return guidesFS.ReadFile(filepath.Join("guides", name))
+}
