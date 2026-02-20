@@ -2,8 +2,11 @@ package review
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"sync"
 )
 
 // ReviewOptions configures the adversarial review loop.
@@ -40,26 +43,55 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
 	adversaries := DefaultAdversaries()
 
+	// Read plan.md content for the phase
+	planMDPath := filepath.Join(planDir, "phases", opts.Phase, "plan.md")
+	planMDBytes, err := os.ReadFile(planMDPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading plan.md for phase %s: %w", opts.Phase, err)
+	}
+	planMD := string(planMDBytes)
+
 	result := &ReviewResult{
 		Verdicts: make(map[string]AdversaryResult),
 	}
 
-	for _, adv := range adversaries {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	var wg sync.WaitGroup
+	resultsCh := make(chan AdversaryResult, len(adversaries))
 
-		advResult, err := RunAdversary(ctx, adv, planDir, opts.Phase)
-		if err != nil {
-			result.Verdicts[adv.Name] = AdversaryResult{
-				Name:     adv.Name,
-				Status:   "error",
-				Output:   err.Error(),
-				Required: adv.Required,
+	for _, adv := range adversaries {
+		wg.Add(1)
+		go func(a Adversary) {
+			defer wg.Done()
+
+			if ctx.Err() != nil {
+				resultsCh <- AdversaryResult{
+					Name:     a.Name,
+					Status:   "error",
+					Output:   ctx.Err().Error(),
+					Required: a.Required,
+				}
+				return
 			}
-			continue
-		}
-		result.Verdicts[adv.Name] = *advResult
+
+			advResult, err := RunAdversary(ctx, a, planDir, opts.Phase, planMD)
+			if err != nil {
+				resultsCh <- AdversaryResult{
+					Name:     a.Name,
+					Status:   "error",
+					Output:   err.Error(),
+					Required: a.Required,
+				}
+				return
+			}
+			resultsCh <- *advResult
+		}(adv)
+	}
+
+	wg.Wait()
+	close(resultsCh)
+
+	for r := range resultsCh {
+		result.Verdicts[r.Name] = r
 	}
 
 	// Determine overall status

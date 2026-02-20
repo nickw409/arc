@@ -9,24 +9,39 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/nwiley/arc/internal/agent"
+	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/resources"
 )
+
+// agentCommandName is the binary name used for agent spawning.
+// Tests override this to point to a mock binary.
+var agentCommandName = "claude"
+
+// SetAgentCommandNameForTest overrides the agent binary name for testing.
+func SetAgentCommandNameForTest(name string) {
+	agentCommandName = name
+}
 
 // Adversary defines a single adversarial reviewer.
 type Adversary struct {
 	Name        string
 	PromptPath  string
 	PassVerdict string
+	FailVerdict string
 	Required    bool
 }
 
 // DefaultAdversaries returns the 5 standard adversarial reviewers.
 func DefaultAdversaries() []Adversary {
 	return []Adversary{
-		{Name: "coverage", PromptPath: "adversaries/coverage.md", PassVerdict: "coverage_sufficient", Required: true},
-		{Name: "ambiguity", PromptPath: "adversaries/ambiguity.md", PassVerdict: "unambiguous", Required: true},
-		{Name: "scope", PromptPath: "adversaries/scope.md", PassVerdict: "scope_appropriate", Required: false},
-		{Name: "consistency", PromptPath: "adversaries/consistency.md", PassVerdict: "consistent", Required: true},
-		{Name: "executability", PromptPath: "adversaries/executability.md", PassVerdict: "executable", Required: true},
+		{Name: "coverage", PromptPath: "adversaries/coverage.md", PassVerdict: "coverage_sufficient", FailVerdict: "coverage_gaps", Required: true},
+		{Name: "ambiguity", PromptPath: "adversaries/ambiguity.md", PassVerdict: "unambiguous", FailVerdict: "ambiguous", Required: true},
+		{Name: "scope", PromptPath: "adversaries/scope.md", PassVerdict: "scope_appropriate", FailVerdict: "scope_too_large", Required: false},
+		{Name: "consistency", PromptPath: "adversaries/consistency.md", PassVerdict: "consistent", FailVerdict: "inconsistent", Required: true},
+		{Name: "executability", PromptPath: "adversaries/executability.md", PassVerdict: "executable", FailVerdict: "blocked", Required: true},
 	}
 }
 
@@ -39,7 +54,7 @@ type historyEntry struct {
 }
 
 // RunAdversary spawns a single adversary agent and extracts its verdict.
-func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string) (*AdversaryResult, error) {
+func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string) (*AdversaryResult, error) {
 	// Compute hash of plan.md
 	planMDPath := filepath.Join(planDir, "phases", phaseName, "plan.md")
 	hash, err := computePlanHash(planMDPath)
@@ -81,13 +96,54 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 		}, nil
 	}
 
-	// For now, without a real agent, return a placeholder result.
-	// In a full implementation, this would spawn an agent and extract the verdict.
+	// Load adversary prompt template
+	promptBytes, err := resources.PromptBytes(adv.PromptPath)
+	if err != nil {
+		return &AdversaryResult{
+			Name:     adv.Name,
+			Status:   "error",
+			Verdict:  "",
+			Required: adv.Required,
+			Output:   fmt.Sprintf("failed to load prompt %s: %v", adv.PromptPath, err),
+		}, nil
+	}
+
+	// Append plan content as context
+	fullPrompt := string(promptBytes) + "\n\n## Plan Under Review\n\n" + planMD
+
+	// Spawn agent
+	spawnResult, err := agent.Spawn(ctx, agent.SpawnOptions{
+		Prompt:       fullPrompt,
+		AllowedTools: []string{"Read", "Bash"},
+		CommandName:  agentCommandName,
+	})
+	if err != nil {
+		return &AdversaryResult{
+			Name:     adv.Name,
+			Status:   "error",
+			Verdict:  "",
+			Required: adv.Required,
+			Output:   fmt.Sprintf("agent spawn failed: %v", err),
+		}, nil
+	}
+
+	// Extract verdict from agent output
+	validVerdicts := []arc.Verdict{arc.Verdict(adv.PassVerdict), arc.Verdict(adv.FailVerdict)}
+	verdict, extractErr := prompt.ExtractVerdict(spawnResult.Output, validVerdicts)
+
+	var status string
+	if extractErr == nil && arc.Verdict(adv.PassVerdict) == verdict {
+		status = "passed"
+	} else {
+		status = "failed"
+	}
+
 	result := &AdversaryResult{
 		Name:     adv.Name,
-		Status:   "passed",
-		Verdict:  adv.PassVerdict,
+		Status:   status,
+		Verdict:  string(verdict),
 		Required: adv.Required,
+		Output:   spawnResult.Output,
 	}
 
 	// Update history

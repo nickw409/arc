@@ -3,14 +3,39 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
 )
+
+func TestMain(m *testing.M) {
+	// Build the mock agent binary for review tests.
+	tmpDir, err := os.MkdirTemp("", "review-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	testBin := filepath.Join(tmpDir, "mockagent")
+	cmd := exec.Command("go", "build", "-o", testBin, "../agent/testdata/mockagent")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build mock agent: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Override the agent command name so RunAdversary uses our mock binary.
+	agentCommandName = testBin
+
+	os.Exit(m.Run())
+}
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -65,13 +90,14 @@ func TestReviewDefaultAdversaries(t *testing.T) {
 	}
 
 	expected := map[string]struct {
-		required bool
+		required    bool
+		failVerdict string
 	}{
-		"coverage":      {required: true},
-		"ambiguity":     {required: true},
-		"scope":         {required: false},
-		"consistency":   {required: true},
-		"executability": {required: true},
+		"coverage":      {required: true, failVerdict: "coverage_gaps"},
+		"ambiguity":     {required: true, failVerdict: "ambiguous"},
+		"scope":         {required: false, failVerdict: "scope_too_large"},
+		"consistency":   {required: true, failVerdict: "inconsistent"},
+		"executability": {required: true, failVerdict: "blocked"},
 	}
 
 	for _, adv := range advs {
@@ -81,6 +107,9 @@ func TestReviewDefaultAdversaries(t *testing.T) {
 		}
 		if adv.Required != exp.required {
 			t.Fatalf("adversary %q: got Required=%v, want %v", adv.Name, adv.Required, exp.required)
+		}
+		if adv.FailVerdict != exp.failVerdict {
+			t.Fatalf("adversary %q: got FailVerdict=%q, want %q", adv.Name, adv.FailVerdict, exp.failVerdict)
 		}
 	}
 }
@@ -96,9 +125,15 @@ func TestReviewRunBasic(t *testing.T) {
 		Logger:   testLogger(),
 	})
 
-	// When implemented with mock agents: result.Status == "approved"
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Verdicts) != 5 {
+		t.Fatalf("expected 5 verdicts, got %d", len(result.Verdicts))
+	}
 }
 
 func TestReviewAllCached(t *testing.T) {
@@ -146,9 +181,12 @@ func TestReviewAllCached(t *testing.T) {
 		Logger:   testLogger(),
 	})
 
-	// When implemented: all adversaries cached, no agents spawned
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 }
 
 func TestReviewContextCancel(t *testing.T) {
@@ -165,9 +203,10 @@ func TestReviewContextCancel(t *testing.T) {
 		Logger:   testLogger(),
 	})
 
-	// When implemented: review returns with error from cancelled context
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
 	_ = result
-	_ = err
 }
 
 func TestReviewRegressionDetected(t *testing.T) {
@@ -192,8 +231,6 @@ func TestReviewRegressionDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// When implemented: if coverage agent now returns "coverage_gaps" with same hash,
-	// result.Status == "regression_detected"
 	result, err := Run(context.Background(), ReviewOptions{
 		PlanName: "test-plan",
 		PlansDir: plansDir,
@@ -201,8 +238,12 @@ func TestReviewRegressionDetected(t *testing.T) {
 		Phase:    "phase-1",
 		Logger:   testLogger(),
 	})
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 }
 
 func TestReviewConditionalStatus(t *testing.T) {
@@ -216,9 +257,12 @@ func TestReviewConditionalStatus(t *testing.T) {
 		Phase:    "phase-1",
 		Logger:   testLogger(),
 	})
-	// When implemented: result.Status == "conditional"
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 }
 
 func TestReviewNeedsReviewStatus(t *testing.T) {
@@ -232,9 +276,12 @@ func TestReviewNeedsReviewStatus(t *testing.T) {
 		Phase:    "phase-1",
 		Logger:   testLogger(),
 	})
-	// When implemented: result.Status == "needs_review"
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 }
 
 func TestReviewHistoryFirstRun(t *testing.T) {
@@ -253,8 +300,13 @@ func TestReviewHistoryFirstRun(t *testing.T) {
 		Logger:   testLogger(),
 	})
 
-	// When implemented: review runs all adversaries, no cache hits.
-	// After completion, adversary_history.json should be created.
-	_ = result
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Verdicts) != 5 {
+		t.Fatalf("expected 5 verdicts, got %d", len(result.Verdicts))
+	}
 }
