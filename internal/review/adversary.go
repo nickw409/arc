@@ -54,7 +54,7 @@ type historyEntry struct {
 }
 
 // RunAdversary spawns a single adversary agent and extracts its verdict.
-func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string) (*AdversaryResult, error) {
+func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string) (*AdversaryResult, error) {
 	// Compute hash of plan.md
 	planMDPath := filepath.Join(planDir, "phases", phaseName, "plan.md")
 	hash, err := computePlanHash(planMDPath)
@@ -70,16 +70,17 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 
 	// Check cache
 	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
-	history := loadHistory(histPath)
+	history := LoadHistory(histPath)
 
 	if phaseHistory, ok := history[phaseName]; ok {
 		if entry, ok := phaseHistory[adv.Name]; ok {
-			if entry.Hash == hash && entry.Status == "passed" {
+			if entry.Hash == hash {
 				return &AdversaryResult{
-					Name:     adv.Name,
-					Status:   "cached",
-					Verdict:  entry.Verdict,
-					Required: adv.Required,
+					Name:         adv.Name,
+					Status:       "cached",
+					CachedStatus: entry.Status,
+					Verdict:      entry.Verdict,
+					Required:     adv.Required,
 				}, nil
 			}
 		}
@@ -111,11 +112,13 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 	// Append plan content as context
 	fullPrompt := string(promptBytes) + "\n\n## Plan Under Review\n\n" + planMD
 
-	// Spawn agent
+	// Spawn agent with 60s timeout (review agents are read-only analysis)
 	spawnResult, err := agent.Spawn(ctx, agent.SpawnOptions{
 		Prompt:       fullPrompt,
-		AllowedTools: []string{"Read", "Bash"},
+		AllowedTools: []string{"Read"},
 		CommandName:  agentCommandName,
+		Timeout:      60 * time.Second,
+		Model:        model,
 	})
 	if err != nil {
 		return &AdversaryResult{
@@ -138,27 +141,13 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 		status = "failed"
 	}
 
-	result := &AdversaryResult{
+	return &AdversaryResult{
 		Name:     adv.Name,
 		Status:   status,
 		Verdict:  string(verdict),
 		Required: adv.Required,
 		Output:   spawnResult.Output,
-	}
-
-	// Update history
-	if history[phaseName] == nil {
-		history[phaseName] = make(map[string]historyEntry)
-	}
-	history[phaseName][adv.Name] = historyEntry{
-		Hash:      hash,
-		Verdict:   result.Verdict,
-		Status:    result.Status,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	saveHistory(histPath, history)
-
-	return result, nil
+	}, nil
 }
 
 func computePlanHash(path string) (string, error) {
@@ -170,7 +159,8 @@ func computePlanHash(path string) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
-func loadHistory(path string) map[string]map[string]historyEntry {
+// LoadHistory reads the adversary history file.
+func LoadHistory(path string) map[string]map[string]historyEntry {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return make(map[string]map[string]historyEntry)
@@ -182,7 +172,8 @@ func loadHistory(path string) map[string]map[string]historyEntry {
 	return history
 }
 
-func saveHistory(path string, history map[string]map[string]historyEntry) {
+// SaveHistory writes the adversary history file.
+func SaveHistory(path string, history map[string]map[string]historyEntry) {
 	data, _ := json.MarshalIndent(history, "", "  ")
 	os.WriteFile(path, data, 0644)
 }

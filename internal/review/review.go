@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // ReviewOptions configures the adversarial review loop.
@@ -15,6 +16,7 @@ type ReviewOptions struct {
 	PlansDir string
 	ArcHome  string
 	Phase    string
+	Model    string
 	Logger   *slog.Logger
 }
 
@@ -27,11 +29,12 @@ type ReviewResult struct {
 
 // AdversaryResult holds the outcome of a single adversary agent.
 type AdversaryResult struct {
-	Name     string
-	Verdict  string
-	Status   string
-	Output   string
-	Required bool
+	Name         string
+	Verdict      string
+	Status       string
+	CachedStatus string // original status before caching (only set when Status=="cached")
+	Output       string
+	Required     bool
 }
 
 // Run executes the adversarial review loop.
@@ -73,7 +76,7 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 				return
 			}
 
-			advResult, err := RunAdversary(ctx, a, planDir, opts.Phase, planMD)
+			advResult, err := RunAdversary(ctx, a, planDir, opts.Phase, planMD, opts.Model)
 			if err != nil {
 				resultsCh <- AdversaryResult{
 					Name:     a.Name,
@@ -94,6 +97,26 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		result.Verdicts[r.Name] = r
 	}
 
+	// Save history after all goroutines complete (no concurrent writes)
+	hash, _ := computePlanHash(planMDPath)
+	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+	history := LoadHistory(histPath)
+	if history[opts.Phase] == nil {
+		history[opts.Phase] = make(map[string]historyEntry)
+	}
+	for _, v := range result.Verdicts {
+		if v.Status == "cached" || v.Status == "error" {
+			continue
+		}
+		history[opts.Phase][v.Name] = historyEntry{
+			Hash:      hash,
+			Verdict:   v.Verdict,
+			Status:    v.Status,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+	SaveHistory(histPath, history)
+
 	// Determine overall status
 	result.Status = determineReviewStatus(result.Verdicts)
 
@@ -106,7 +129,8 @@ func determineReviewStatus(verdicts map[string]AdversaryResult) string {
 	requiredFailed := false
 
 	for _, v := range verdicts {
-		if v.Status != "passed" && v.Status != "cached" {
+		isPassing := v.Status == "passed" || (v.Status == "cached" && v.CachedStatus == "passed")
+		if !isPassing {
 			allPassed = false
 			if v.Required {
 				requiredFailed = true
