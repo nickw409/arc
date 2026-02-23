@@ -792,14 +792,15 @@ func TestE2ENonZeroExitRetries(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-exit", []string{"core"}, "feature")
 	t.Setenv("MOCK_EXIT_CODE", "1")
 
-	// Call 0: qa — will exit with code 1 → retry
-	writeScript(t, scriptDir, 0, "fail")
+	// Write script files for multiple calls so the mock always has
+	// output. On slow CI runners the mock process can be killed before
+	// writing .call_count when using a tight timeout, so give plenty of
+	// room for at least 2 spawns to complete.
+	for i := 0; i < 10; i++ {
+		writeScript(t, scriptDir, i, "fail")
+	}
 
-	// After call 0, clear exit code so subsequent calls succeed.
-	// We can't change env mid-run, so instead we use a timeout and
-	// verify retries happened. Use a generous timeout to avoid flaking
-	// under load when process spawning is slow.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	err := RunPhase(ctx, RunPhaseOptions{
