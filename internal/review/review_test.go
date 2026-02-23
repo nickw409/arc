@@ -284,6 +284,135 @@ func TestReviewNeedsReviewStatus(t *testing.T) {
 	}
 }
 
+func TestReviewOutputFilesWritten(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	_, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that output files were created for each adversary
+	adversaries := DefaultAdversaries()
+	for _, adv := range adversaries {
+		outPath := filepath.Join(planDir, "reviews", "phase-1_"+adv.Name+".md")
+		if _, err := os.Stat(outPath); os.IsNotExist(err) {
+			t.Errorf("expected output file %s to exist", outPath)
+		}
+	}
+}
+
+func TestReviewCachedResultsSkipOutputFiles(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Run once to get output files and history
+	_, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+
+	// Write a sentinel value into an output file
+	sentinel := "SENTINEL_CONTENT"
+	sentinelPath := filepath.Join(planDir, "reviews", "phase-1_coverage.md")
+	if err := os.WriteFile(sentinelPath, []byte(sentinel), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run again — results should be cached, so sentinel should be preserved
+	_, err = Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+
+	data, err := os.ReadFile(sentinelPath)
+	if err != nil {
+		t.Fatalf("failed to read sentinel file: %v", err)
+	}
+	if string(data) != sentinel {
+		t.Fatalf("expected sentinel content %q, got %q", sentinel, string(data))
+	}
+}
+
+func TestCleanupOutputFiles(t *testing.T) {
+	planDir := t.TempDir()
+	reviewsDir := filepath.Join(planDir, "reviews")
+	if err := os.MkdirAll(reviewsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create output files for two phases
+	adversaries := DefaultAdversaries()
+	for _, adv := range adversaries {
+		for _, phase := range []string{"phase-1", "phase-2"} {
+			path := filepath.Join(reviewsDir, phase+"_"+adv.Name+".md")
+			if err := os.WriteFile(path, []byte("output"), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// Create adversary_history.json
+	histPath := filepath.Join(reviewsDir, "adversary_history.json")
+	if err := os.WriteFile(histPath, []byte(`{"phase-1":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cleanup only phase-1
+	if err := CleanupOutputFiles(planDir, []string{"phase-1"}); err != nil {
+		t.Fatalf("cleanup error: %v", err)
+	}
+
+	// phase-1 output files should be gone
+	for _, adv := range adversaries {
+		path := filepath.Join(reviewsDir, "phase-1_"+adv.Name+".md")
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be removed", path)
+		}
+	}
+
+	// phase-2 output files should still exist
+	for _, adv := range adversaries {
+		path := filepath.Join(reviewsDir, "phase-2_"+adv.Name+".md")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected %s to still exist", path)
+		}
+	}
+
+	// adversary_history.json should still exist
+	if _, err := os.Stat(histPath); os.IsNotExist(err) {
+		t.Error("expected adversary_history.json to be preserved")
+	}
+}
+
+func TestCleanupOutputFilesNoDir(t *testing.T) {
+	planDir := t.TempDir()
+
+	// Cleanup on non-existent reviews dir should not error
+	if err := CleanupOutputFiles(planDir, []string{"phase-1"}); err != nil {
+		t.Fatalf("expected no error for missing reviews dir, got: %v", err)
+	}
+}
+
 func TestReviewHistoryFirstRun(t *testing.T) {
 	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
 	planDir := filepath.Join(plansDir, "test-plan")

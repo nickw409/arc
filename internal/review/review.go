@@ -97,6 +97,17 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		result.Verdicts[r.Name] = r
 	}
 
+	// Write adversary output files for non-cached, non-error results
+	reviewsDir := filepath.Join(planDir, "reviews")
+	os.MkdirAll(reviewsDir, 0755)
+	for _, v := range result.Verdicts {
+		if v.Status == "cached" || v.Status == "error" {
+			continue
+		}
+		outPath := filepath.Join(reviewsDir, opts.Phase+"_"+v.Name+".md")
+		os.WriteFile(outPath, []byte(v.Output), 0644)
+	}
+
 	// Save history after all goroutines complete (no concurrent writes)
 	hash, _ := computePlanHash(planMDPath)
 	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
@@ -122,6 +133,22 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 
 	opts.Logger.Info("review complete", "status", result.Status, "phase", opts.Phase)
 	return result, nil
+}
+
+// CleanupOutputFiles removes adversary output files for the given phases.
+// It preserves adversary_history.json and any other non-output files.
+func CleanupOutputFiles(planDir string, phases []string) error {
+	reviewsDir := filepath.Join(planDir, "reviews")
+	adversaries := DefaultAdversaries()
+	for _, phase := range phases {
+		for _, adv := range adversaries {
+			path := filepath.Join(reviewsDir, phase+"_"+adv.Name+".md")
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s: %w", path, err)
+			}
+		}
+	}
+	return nil
 }
 
 func determineReviewStatus(verdicts map[string]AdversaryResult) string {

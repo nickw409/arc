@@ -14,6 +14,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
+	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
 )
 
@@ -48,6 +49,11 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
 		return fmt.Errorf("reading plan.json: %w", err)
+	}
+
+	// Clean up review output files from previous adversarial reviews
+	if err := review.CleanupOutputFiles(planDir, meta.Phases); err != nil {
+		opts.Logger.Warn("failed to clean review output files", "error", err)
 	}
 
 	// Print header
