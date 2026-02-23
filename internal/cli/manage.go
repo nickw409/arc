@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/review"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +42,7 @@ Actions:
 		newManageIterationCmd(),
 		newManageCopyFromCmd(),
 		newManageShowCmd(),
+		newManageResetReviewCmd(),
 	)
 
 	return cmd
@@ -240,6 +242,32 @@ func newManageShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := baseManageOpts(args)
 			return plan.ManageShow(os.Stdout, opts)
+		},
+	}
+}
+
+func newManageResetReviewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset-review <plan> <phase>",
+		Short: "Clear review cache and iteration counter for a phase",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			planName := args[0]
+			phase := args[1]
+			planDir := filepath.Join(".plans", "active", planName)
+
+			histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+			history := review.LoadHistory(histPath)
+			delete(history.Phases, phase)
+			delete(history.Iterations, phase)
+			review.SaveHistory(histPath, history)
+
+			if err := review.CleanupOutputFiles(planDir, []string{phase}); err != nil {
+				return fmt.Errorf("cleaning up output files: %w", err)
+			}
+
+			fmt.Printf("Reset review for %s/%s\n", planName, phase)
+			return nil
 		},
 	}
 }

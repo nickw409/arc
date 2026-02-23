@@ -128,8 +128,10 @@ type PlanMeta struct {
 	Phases       []string            `json:"phases"`
 	PhaseOrder   map[string]int      `json:"phase_order"`
 	Dependencies map[string][]string `json:"dependencies"`
-	ReviewStatus string              `json:"review_status"`
-	ReviewedAt   string              `json:"reviewed_at,omitempty"`
+	ReviewStatus     string              `json:"review_status"`
+	ReviewedAt       string              `json:"reviewed_at,omitempty"`
+	ReviewIterations int                 `json:"review_iterations,omitempty"`
+	ReviewResults    map[string]string   `json:"review_results,omitempty"`
 	WorkflowType string              `json:"workflow_type"`
 	SplitPhases  map[string][]string `json:"split_phases,omitempty"`
 	ArchivedAt   string              `json:"archived_at,omitempty"`

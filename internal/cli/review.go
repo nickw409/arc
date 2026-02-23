@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/review"
@@ -70,23 +71,6 @@ func newReviewCmd() *cobra.Command {
 				phases = []string{phaseFilter}
 			}
 
-			// Clear history if --reset flag is set
-			reset, _ := cmd.Flags().GetBool("reset")
-			if reset {
-				histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
-				if phaseFilter != "" {
-					// Clear only the target phase from history
-					history := review.LoadHistory(histPath)
-					delete(history, phaseFilter)
-					review.SaveHistory(histPath, history)
-					logger.Info("reset review history", "phase", phaseFilter)
-				} else {
-					// Clear entire history file
-					os.Remove(histPath)
-					logger.Info("reset review history", "plan", planName)
-				}
-			}
-
 			// Run phases in batches to avoid overwhelming the system
 			const maxConcurrentPhases = 3
 
@@ -130,14 +114,21 @@ func newReviewCmd() *cobra.Command {
 
 			// Print in phase order
 			overallStatus := "approved"
+			maxIteration := 0
+			reviewResults := make(map[string]string)
 			for _, phase := range phases {
 				pr := phaseResults[phase]
-				fmt.Printf("Phase: %s\n", phase)
 
 				if pr.Err != nil {
+					fmt.Printf("Phase: %s\n", phase)
 					fmt.Printf("  ERROR: %v\n\n", pr.Err)
 					overallStatus = "needs_review"
 					continue
+				}
+
+				fmt.Printf("Phase: %s (iteration %d/%d)\n", phase, pr.Result.Iteration, review.MaxReviewIterations)
+				if pr.Result.Iteration > maxIteration {
+					maxIteration = pr.Result.Iteration
 				}
 
 				for _, v := range pr.Result.Verdicts {
@@ -153,6 +144,14 @@ func newReviewCmd() *cobra.Command {
 				}
 				fmt.Printf("  Phase result: %s\n\n", pr.Result.Status)
 
+				for _, v := range pr.Result.Verdicts {
+					effectiveStatus := v.Status
+					if v.Status == "cached" {
+						effectiveStatus = v.CachedStatus
+					}
+					reviewResults[v.Name] = effectiveStatus
+				}
+
 				if pr.Result.Status == "needs_review" {
 					overallStatus = "needs_review"
 				} else if pr.Result.Status == "conditional" && overallStatus == "approved" {
@@ -161,13 +160,28 @@ func newReviewCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Review complete: status=%s\n", overallStatus)
+
+			// Update plan.json with review results
+			metaBytes, err = os.ReadFile(filepath.Join(planDir, "plan.json"))
+			if err == nil {
+				var updatedMeta arc.PlanMeta
+				if err := json.Unmarshal(metaBytes, &updatedMeta); err == nil {
+					updatedMeta.ReviewStatus = overallStatus
+					updatedMeta.ReviewedAt = time.Now().UTC().Format(time.RFC3339)
+					updatedMeta.ReviewIterations = maxIteration
+					updatedMeta.ReviewResults = reviewResults
+					if data, err := json.MarshalIndent(updatedMeta, "", "  "); err == nil {
+						os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644)
+					}
+				}
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().String("model", "", "Model to use for review agents (default: claude-sonnet-4-5-20250929)")
 	cmd.Flags().String("phase", "", "Review a single phase instead of all phases")
-	cmd.Flags().Bool("reset", false, "Clear cached review history before running")
 
 	return cmd
 }

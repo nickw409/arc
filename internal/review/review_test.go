@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -410,6 +411,150 @@ func TestCleanupOutputFilesNoDir(t *testing.T) {
 	// Cleanup on non-existent reviews dir should not error
 	if err := CleanupOutputFiles(planDir, []string{"phase-1"}); err != nil {
 		t.Fatalf("expected no error for missing reviews dir, got: %v", err)
+	}
+}
+
+func TestReviewIterationIncrements(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// First run: iteration should be 1
+	result1, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+	if result1.Iteration != 1 {
+		t.Fatalf("expected iteration 1, got %d", result1.Iteration)
+	}
+
+	// Modify plan.md so cache is invalidated
+	if err := os.WriteFile(filepath.Join(planDir, "phases", "phase-1", "plan.md"), []byte("# phase-1\nUpdated plan."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run: iteration should be 2
+	result2, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+	if result2.Iteration != 2 {
+		t.Fatalf("expected iteration 2, got %d", result2.Iteration)
+	}
+}
+
+func TestReviewMaxIterationEnforcement(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Seed history at max iterations
+	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+	hf := &historyFile{
+		Phases:     make(map[string]map[string]historyEntry),
+		Iterations: map[string]int{"phase-1": MaxReviewIterations},
+	}
+	data, _ := json.MarshalIndent(hf, "", "  ")
+	if err := os.WriteFile(histPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err == nil {
+		t.Fatal("expected error for max iterations exceeded")
+	}
+	if !strings.Contains(err.Error(), "maximum of 5 review iterations") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestReviewBackwardCompatHistory(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Write old flat-format history
+	oldHistory := map[string]map[string]historyEntry{
+		"phase-1": {
+			"coverage": {Hash: "oldhash", Verdict: "coverage_sufficient", Status: "passed", Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	data, _ := json.MarshalIndent(oldHistory, "", "  ")
+	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+	if err := os.WriteFile(histPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load should succeed and convert to new format
+	history := LoadHistory(histPath)
+	if history.Phases == nil {
+		t.Fatal("expected Phases to be non-nil")
+	}
+	if _, ok := history.Phases["phase-1"]["coverage"]; !ok {
+		t.Fatal("expected coverage entry in phase-1")
+	}
+	if history.Iterations == nil {
+		t.Fatal("expected Iterations to be non-nil")
+	}
+	if history.Iterations["phase-1"] != 0 {
+		t.Fatalf("expected iteration 0 for old format, got %d", history.Iterations["phase-1"])
+	}
+}
+
+func TestReviewCachedRunNoIterationIncrement(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Run once to populate cache
+	result1, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+	if result1.Iteration != 1 {
+		t.Fatalf("expected iteration 1 after first run, got %d", result1.Iteration)
+	}
+
+	// Run again without modifying plan.md — all results should be cached
+	result2, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+	if result2.Iteration != 1 {
+		t.Fatalf("expected iteration to stay at 1 for cached run, got %d", result2.Iteration)
+	}
+
+	// Verify history file still shows iteration 1
+	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+	history := LoadHistory(histPath)
+	if history.Iterations["phase-1"] != 1 {
+		t.Fatalf("expected iteration count 1 in history, got %d", history.Iterations["phase-1"])
 	}
 }
 

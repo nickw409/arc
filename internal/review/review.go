@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// MaxReviewIterations is the maximum number of review iterations per phase.
+const MaxReviewIterations = 5
+
 // ReviewOptions configures the adversarial review loop.
 type ReviewOptions struct {
 	PlanName string
@@ -53,6 +56,14 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		return nil, fmt.Errorf("reading plan.md for phase %s: %w", opts.Phase, err)
 	}
 	planMD := string(planMDBytes)
+
+	// Load history and check iteration limit
+	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+	history := LoadHistory(histPath)
+
+	if history.Iterations[opts.Phase] >= MaxReviewIterations {
+		return nil, fmt.Errorf("phase %q has reached the maximum of %d review iterations; use 'arc manage reset-review' to reset", opts.Phase, MaxReviewIterations)
+	}
 
 	result := &ReviewResult{
 		Verdicts: make(map[string]AdversaryResult),
@@ -110,22 +121,26 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 
 	// Save history after all goroutines complete (no concurrent writes)
 	hash, _ := computePlanHash(planMDPath)
-	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
-	history := LoadHistory(histPath)
-	if history[opts.Phase] == nil {
-		history[opts.Phase] = make(map[string]historyEntry)
+	if history.Phases[opts.Phase] == nil {
+		history.Phases[opts.Phase] = make(map[string]historyEntry)
 	}
+	hasNonCached := false
 	for _, v := range result.Verdicts {
 		if v.Status == "cached" || v.Status == "error" {
 			continue
 		}
-		history[opts.Phase][v.Name] = historyEntry{
+		hasNonCached = true
+		history.Phases[opts.Phase][v.Name] = historyEntry{
 			Hash:      hash,
 			Verdict:   v.Verdict,
 			Status:    v.Status,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 	}
+	if hasNonCached {
+		history.Iterations[opts.Phase]++
+	}
+	result.Iteration = history.Iterations[opts.Phase]
 	SaveHistory(histPath, history)
 
 	// Determine overall status

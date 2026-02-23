@@ -53,6 +53,12 @@ type historyEntry struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// historyFile is the on-disk format for adversary_history.json.
+type historyFile struct {
+	Phases     map[string]map[string]historyEntry `json:"phases"`
+	Iterations map[string]int                     `json:"iterations"`
+}
+
 // RunAdversary spawns a single adversary agent and extracts its verdict.
 func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string) (*AdversaryResult, error) {
 	// Compute hash of plan.md
@@ -72,7 +78,7 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
 	history := LoadHistory(histPath)
 
-	if phaseHistory, ok := history[phaseName]; ok {
+	if phaseHistory, ok := history.Phases[phaseName]; ok {
 		if entry, ok := phaseHistory[adv.Name]; ok {
 			if entry.Hash == hash {
 				return &AdversaryResult{
@@ -160,20 +166,42 @@ func computePlanHash(path string) (string, error) {
 }
 
 // LoadHistory reads the adversary history file.
-func LoadHistory(path string) map[string]map[string]historyEntry {
+// It supports both the new wrapped format and the old flat map format for backward compat.
+func LoadHistory(path string) *historyFile {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return make(map[string]map[string]historyEntry)
+		return newHistoryFile()
 	}
-	var history map[string]map[string]historyEntry
-	if err := json.Unmarshal(data, &history); err != nil {
-		return make(map[string]map[string]historyEntry)
+
+	// Try new format first
+	var hf historyFile
+	if err := json.Unmarshal(data, &hf); err == nil && hf.Phases != nil {
+		if hf.Iterations == nil {
+			hf.Iterations = make(map[string]int)
+		}
+		return &hf
 	}
-	return history
+
+	// Fall back to old flat format: map[phase]map[adv]entry
+	var flat map[string]map[string]historyEntry
+	if err := json.Unmarshal(data, &flat); err != nil {
+		return newHistoryFile()
+	}
+	return &historyFile{
+		Phases:     flat,
+		Iterations: make(map[string]int),
+	}
 }
 
 // SaveHistory writes the adversary history file.
-func SaveHistory(path string, history map[string]map[string]historyEntry) {
+func SaveHistory(path string, history *historyFile) {
 	data, _ := json.MarshalIndent(history, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func newHistoryFile() *historyFile {
+	return &historyFile{
+		Phases:     make(map[string]map[string]historyEntry),
+		Iterations: make(map[string]int),
+	}
 }
