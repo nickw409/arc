@@ -43,6 +43,8 @@ This detects your language and test runner, then creates:
 arc plan my-feature phase1 phase2 integration   # Create a plan with phases
 vim .plans/active/my-feature/phases/phase1/plan.md  # Write phase plans
 arc review my-feature                            # Adversarial review
+arc review my-feature --phase phase1             # Review a single phase
+arc review my-feature --reset                    # Clear cached results and re-review
 arc run my-feature                               # Execute through orchestrator
 ```
 
@@ -51,11 +53,19 @@ arc run my-feature                               # Execute through orchestrator
 For step-by-step control instead of full automation:
 
 ```bash
-arc iterate my-feature phase1 qa          # Run one QA iteration
-arc iterate my-feature phase1 qa-review   # Review QA output
-arc iterate my-feature phase1 impl        # Run one impl iteration
-arc iterate my-feature phase1 impl-review # Review impl output
-arc status my-feature phase1              # Check state
+arc iterate my-feature phase1             # Run one iteration (advances current state)
+arc status my-feature                     # Check plan/phase status
+arc manage my-feature phase1 show         # Inspect phase state.json
+```
+
+### Validate Tests
+
+```bash
+arc validate                    # Audit test quality in current directory
+arc validate ./pkg/auth ./pkg/db  # Audit specific paths
+arc validate --workers 8        # Run with more parallel agents
+arc validate set-prompt my.md   # Use a custom audit prompt
+arc validate clear-prompt       # Revert to built-in prompt
 ```
 
 ### Monitor
@@ -135,7 +145,7 @@ Five workflow types, each with its own state machine and prompt set:
 | **bugfix** | `investigate` | Reproduce the bug, write regression tests, fix |
 | **investigation** | `research` | Research only, no code changes, outputs documentation |
 | **refactor** | `characterize` | Characterization tests must pass before and after changes |
-| **performance** | `benchmark` | Benchmarks drive optimization, not unit tests |
+| **performance** | `baseline` | Benchmarks drive optimization, not unit tests |
 
 Workflows are defined as YAML state machines in `workflows/`.
 
@@ -203,9 +213,7 @@ Arc uses a plugin system for test runners. Each runner lives in `runners/` and p
 | Runner | Language | Command |
 |--------|----------|---------|
 | `cargo-nextest` | Rust | `cargo nextest run` |
-| `cargo-test` | Rust | `cargo test` |
 | `vitest` | TypeScript | `npx vitest run` |
-| `jest` | TypeScript | `npx jest` |
 | `pytest` | Python | `pytest` |
 | `go-test` | Go | `go test ./...` |
 
@@ -275,7 +283,7 @@ Each phase produces reasoning and review documents:
 | `qa_review.md` | QA reviewer | Verifies coverage, finds gaps |
 | `impl_reasoning.md` | Impl agent | Hypothesis, evidence, alternatives |
 | `impl_review.md` | Impl reviewer | Challenges weak reasoning |
-| `last_test_output.txt` | iterate.sh | Full test output for impl-review |
+| `last_test_output.txt` | Pipeline | Full test output for impl-review |
 
 These live in `.plans/active/<plan>/phases/<phase>/`.
 
@@ -301,11 +309,16 @@ arc/
 │   ├── gitops/       Git commit operations
 │   ├── monitor/      Live TUI (bubbletea)
 │   ├── resources/    Embedded templates & prompts
+│   ├── logging/      Structured logger
+│   ├── migrate/      State migration
+│   ├── guide/        Agent-facing reference guide
+│   ├── validate/     AI-powered test quality audit
 │   └── arc/          Core types (verdict, result, errors, state)
 ├── workflows/        YAML workflow definitions (feature, bugfix, etc.)
 ├── prompts/          Prompt templates organized by work type
 ├── runners/          Test runner plugins (cargo-nextest, vitest, pytest, go-test)
 ├── templates/        Plan and command templates
+├── testdata/         Test fixtures
 └── docs/             Detailed documentation
 ```
 
@@ -340,4 +353,5 @@ your-project/
 | `docs/PLANNING_PROCESS.md` | How to write phase plans |
 | `docs/INTERVENTION_SYSTEM.md` | Escape hatches and overrides |
 | `docs/V4_FEATURES.md` | Hooks, constraints, and escalation details |
+| `docs/PROMPT_TEMPLATES.md` | Template variable system |
 | `docs/IMPLEMENTATION_ROADMAP.md` | Version-by-version build history (V1 through V5) |

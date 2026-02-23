@@ -44,6 +44,8 @@ internal/         All Go packages:
   logging/        Structured logger
   selfupdate/     Self-update mechanism
   migrate/        State migration
+  guide/          Agent-facing reference guide
+  validate/       AI-powered test quality audit
   arc/            Core types (verdict, result, errors, state)
 templates/        Workflow YAML templates
 prompts/          Prompt templates (embedded at build)
@@ -71,11 +73,14 @@ arc init --force                            # Re-initialize existing project
 arc plan <name> <phase1> [phase2] ...       # Create plan scaffolding
 arc plan --type bugfix <name> <phases...>   # Create with specific workflow type
 arc review <plan-name>                      # Run adversarial review (5 adversaries)
+arc review <plan-name> --phase <phase>      # Review a single phase
+arc review <plan-name> --reset              # Clear cached results and re-review
 arc run <plan-name>                         # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>        # Run single iteration for a phase
 arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
+arc validate [paths...]                     # Audit test quality using AI agent
 
 # Phase management
 arc manage <plan> <phase> complete          # Mark phase complete
