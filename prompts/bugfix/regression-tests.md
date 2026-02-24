@@ -68,4 +68,4 @@ fn test_division_by_zero_returns_error() {
 - Keep tests focused on the bug
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of the tests you wrote and exit.

@@ -17,4 +17,4 @@ This phase is blocked and requires human intervention.
 3. Manually investigate and fix the issue
 4. Reset the phase: `arc update-state.sh {{plan}} {{phase}} reset-blocked`
 
-When done, exit.
+When done, output a summary and exit.

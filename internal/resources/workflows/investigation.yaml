@@ -14,7 +14,12 @@ states:
   - name: review
     description: Review findings for completeness
     prompt: prompts/investigation/review.md
-    next: complete
+    verdicts:
+      - approved
+      - gaps_found
+    next:
+      approved: complete
+      gaps_found: draft
   - name: complete
     description: Investigation completed
     prompt: prompts/common/complete.md

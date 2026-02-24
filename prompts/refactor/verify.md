@@ -57,4 +57,4 @@ CONCERNS - Address before proceeding: <list>
 - No behavior changes allowed
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of the verification results and exit.

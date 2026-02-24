@@ -64,4 +64,4 @@ CONCERNS - <what's wrong>
 - Document any trade-offs made
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of the benchmark results and exit.

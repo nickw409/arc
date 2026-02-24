@@ -51,4 +51,4 @@ Create `{{phase_dir}}/fix_reasoning.md`:
 - Do NOT modify the regression tests
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of your changes and exit.

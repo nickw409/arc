@@ -41,9 +41,21 @@ func Render(promptPath string, ctx TemplateContext) (string, error) {
 
 // preprocessHandlebars converts Handlebars-style syntax to Go template syntax.
 func preprocessHandlebars(s string) string {
-	// Remove partial includes {{> ...}}
-	partialRe := regexp.MustCompile(`(?m)^\s*\{\{>\s+[^}]+\}\}\s*$\n?`)
-	s = partialRe.ReplaceAllString(s, "")
+	// Inline partial includes {{> path/to/file.md}} by loading from embedded resources.
+	partialRe := regexp.MustCompile(`(?m)^\s*\{\{>\s+([^}]+?)\s*\}\}\s*$\n?`)
+	s = partialRe.ReplaceAllStringFunc(s, func(match string) string {
+		parts := partialRe.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return ""
+		}
+		partialPath := parts[1]
+		content, err := resources.PromptBytes(partialPath)
+		if err != nil {
+			// If partial not found, remove the line silently (backwards compat)
+			return ""
+		}
+		return string(content)
+	})
 
 	// Handle {{X.Y | default: "Z"}} pipe syntax with default values.
 	// Convert to: {{index .X "Y"}}  (drop the default, index will handle missing keys)

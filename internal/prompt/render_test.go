@@ -226,6 +226,70 @@ func TestRenderFromResources(t *testing.T) {
 	}
 }
 
+func TestRenderPartialIncludesInlined(t *testing.T) {
+	// Verify that {{> common/test-commands.md}} is actually inlined, not stripped.
+	result, err := Render("feature/qa.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// test-commands.md content should be present
+	if !strings.Contains(result, "Do NOT run test commands directly") {
+		t.Fatal("expected rendered output to contain inlined test-commands.md content")
+	}
+	// reasoning-format.md content should be present
+	if !strings.Contains(result, "Analysis") {
+		t.Fatal("expected rendered output to contain inlined reasoning-format.md content")
+	}
+}
+
+func TestRenderImplPartialIncludesInlined(t *testing.T) {
+	// Verify feature/impl.md inlines all three partials.
+	result, err := Render("feature/impl.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"tests_passing": "0", "tests_total": "5"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// test-commands.md
+	if !strings.Contains(result, "Do NOT run test commands directly") {
+		t.Fatal("expected inlined test-commands.md content")
+	}
+	// do-not-rules.md
+	if !strings.Contains(result, "Do NOT modify test files") {
+		t.Fatal("expected inlined do-not-rules.md content")
+	}
+	// reasoning-format.md
+	if !strings.Contains(result, "Analysis") {
+		t.Fatal("expected inlined reasoning-format.md content")
+	}
+}
+
 func TestRenderWithParams(t *testing.T) {
 	result, err := RenderString("Action: {{index .Params \"key\"}}", TemplateContext{
 		Params: map[string]string{"key": "value"},

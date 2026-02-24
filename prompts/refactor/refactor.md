@@ -60,4 +60,4 @@ Create `{{phase_dir}}/refactor_log.md`:
 - Do NOT fix bugs (unless plan explicitly includes them)
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of the refactoring changes and exit.

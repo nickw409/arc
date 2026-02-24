@@ -10,4 +10,4 @@ This phase has been marked as complete. All tests are passing and the implementa
 - Move to the next phase in the plan
 - Run status.sh to see overall plan progress
 
-When done, exit.
+When done, output a summary and exit.
