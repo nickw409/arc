@@ -265,25 +265,34 @@ All workflows share two terminal states:
 
 ```bash
 arc plan <name> <phase1> [phase2] ...   # Create plan scaffolding
-arc review <plan-name>                   # Run adversarial review (5 adversaries)
+arc review <plan-name>                   # Adversarial review with auto-remediation
+arc review <plan-name> --phase <phase>   # Review a single phase
 arc run <plan-name>                      # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase
 arc status <plan-name>                   # Show plan/phase status
+arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter
 ```
 
 ### Adversarial Review
 
-`arc review` validates each phase plan using 5 parallel adversaries:
+`arc review` validates each phase plan using 5 parallel adversaries with auto-remediation:
 
-| Adversary | Focus | Blocking |
-|-----------|-------|----------|
-| **coverage** | Every function and error variant has tests | Yes |
-| **ambiguity** | Nothing an agent could misinterpret | Yes |
-| **scope** | Phase isn't too large to execute reliably | No (warning) |
-| **consistency** | Types, names, and contracts match across phases | Yes |
-| **executability** | No blockers that prevent agent execution | Yes |
+| Adversary | Focus | Priority | Blocking |
+|-----------|-------|----------|----------|
+| **executability** | No blockers that prevent agent execution | 1 (highest) | Yes |
+| **consistency** | Types, names, and contracts match across phases | 2 | Yes |
+| **coverage** | Every function and error variant has tests | 3 | Yes |
+| **ambiguity** | Nothing an agent could misinterpret | 4 | Yes |
+| **scope** | Phase isn't too large to execute reliably | 5 (lowest) | No (warning) |
 
-All blocking adversaries must approve before a plan can run. Fix issues and re-run `arc review` until all pass.
+When adversaries find issues, they emit structured suggestions (find-and-replace blocks). The review loop automatically:
+
+1. Parses suggestions from failed adversaries
+2. Merges by priority (higher-priority adversary wins conflicts)
+3. Applies fixes to `plan.md`
+4. Re-reviews until all pass or iteration limit (5) is hit
+
+All blocking adversaries must approve before a plan can run.
 
 ### The Iteration Pipeline
 

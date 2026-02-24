@@ -42,9 +42,8 @@ This detects your language and test runner, then creates:
 ```bash
 arc plan my-feature phase1 phase2 integration   # Create a plan with phases
 vim .plans/active/my-feature/phases/phase1/plan.md  # Write phase plans
-arc review my-feature                            # Adversarial review
+arc review my-feature                            # Adversarial review (auto-remediates)
 arc review my-feature --phase phase1             # Review a single phase
-arc review my-feature --reset                    # Clear cached results and re-review
 arc run my-feature                               # Execute through orchestrator
 ```
 
@@ -253,17 +252,25 @@ If max iterations are exceeded, the system requests human intervention.
 
 ## Plan Review
 
-Before running a plan, each phase goes through adversarial review. The review system runs 5 specialized adversary agents in parallel:
+Before running a plan, each phase goes through adversarial review with auto-remediation. The review system runs 5 specialized adversary agents in parallel:
 
-| Adversary | Focus | Required |
-|-----------|-------|----------|
-| **coverage** | Every function and error variant has tests | Yes |
-| **ambiguity** | Nothing a sub-agent could misinterpret | Yes |
-| **scope** | Phase isn't too large to execute reliably | No (warning only) |
-| **consistency** | Types, names, and contracts match across phases | Yes |
-| **executability** | No blockers that prevent sub-agent execution | Yes |
+| Adversary | Focus | Priority | Required |
+|-----------|-------|----------|----------|
+| **executability** | No blockers that prevent sub-agent execution | 1 (highest) | Yes |
+| **consistency** | Types, names, and contracts match across phases | 2 | Yes |
+| **coverage** | Every function and error variant has tests | 3 | Yes |
+| **ambiguity** | Nothing a sub-agent could misinterpret | 4 | Yes |
+| **scope** | Phase isn't too large to execute reliably | 5 (lowest) | No (warning only) |
 
-The review loop iterates up to 5 times. Smart caching skips re-reviewing unchanged phases on subsequent iterations.
+When adversaries find issues, they emit structured suggestions (find-and-replace blocks targeting `plan.md`). The review loop:
+
+1. Runs all 5 adversaries in parallel
+2. Parses suggestions from any that failed
+3. Merges suggestions by priority (higher-priority adversary wins conflicts)
+4. Applies fixes to `plan.md` mechanically
+5. Re-reviews until all pass or iteration limit (5) is hit
+
+Smart caching skips re-reviewing when `plan.md` hasn't changed (SHA256 hash match). Use `arc manage reset-review <plan> <phase>` to clear the cache and iteration counter.
 
 ## Sub-Agent Enforcement
 

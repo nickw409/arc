@@ -20,7 +20,7 @@ const defaultReviewModel = "claude-sonnet-4-5-20250929"
 func newReviewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review <plan-name>",
-		Short: "Review a plan before execution",
+		Short: "Run adversarial review with auto-remediation",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planName := args[0]

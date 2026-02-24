@@ -43,16 +43,18 @@ Human Request
      |
      v
 +---------------------------------------------------------+
-|  4. ADVERSARIAL REVIEW                                  |
+|  4. ADVERSARIAL REVIEW + AUTO-REMEDIATION               |
 |                                                         |
 |  Adversary Committee attacks plans:                     |
+|  - Executability: Can this actually be done?            |
+|  - Consistency: Does this contradict itself?            |
 |  - Coverage: Are all cases handled?                     |
 |  - Ambiguity: Could this be misinterpreted?             |
 |  - Scope: Is this too big?                              |
-|  - Consistency: Does this contradict itself?            |
-|  - Executability: Can this actually be done?            |
 |                                                         |
-|  Loop until all adversaries satisfied or max iterations |
+|  Failed adversaries emit suggestions (find-and-replace) |
+|  Suggestions merged by priority, applied to plan.md     |
+|  Loop until all pass or max iterations (5)              |
 +---------------------------------------------------------+
      |
      v
