@@ -270,7 +270,7 @@ arc review <plan-name> --phase <phase>   # Review a single phase
 arc run <plan-name>                      # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase
 arc status <plan-name>                   # Show plan/phase status
-arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter
+arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter (run from project root)
 ```
 
 ### Adversarial Review

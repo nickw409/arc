@@ -42,9 +42,9 @@ If scope is too large, identify split points:
 
 ## Output Format
 
-Your response MUST contain these sections in order:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-### 1. Scope Analysis
+### Section 1: Scope Analysis
 
 Provide metrics and findings:
 
@@ -52,9 +52,23 @@ Provide metrics and findings:
 - **Concerns** — specific items that push scope beyond comfortable limits
 - **Suggested Split** — if scope is too large, how to break it into smaller phases
 
-### 2. Suggestions (REQUIRED when verdict is scope_too_large)
+### Section 2: Verdict
 
-If scope is too large, you MUST output a `## Suggestions` section containing find-and-replace blocks. Each block MUST be written exactly like this, with the markers on their own lines, NOT inside code fences:
+End your analysis with a verdict line:
+
+## Verdict
+scope_appropriate
+
+OR
+
+## Verdict
+scope_too_large
+
+### Section 3: Suggestions (MANDATORY when verdict is scope_too_large)
+
+If your verdict is scope_too_large, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is scope_too_large, your response is INCOMPLETE and INVALID.
+
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
 ## Suggestions
 
@@ -65,24 +79,13 @@ exact text copied from plan.md
 replacement text with scope reduced
 >>>
 
-CRITICAL RULES for suggestions:
-- Write <<<ORIGINAL and <<<SUGGESTED and >>> as raw text, NOT inside code blocks
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
+
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
 - The ORIGINAL text must be an exact character-for-character substring of the plan
 - Keep changes minimal — only reduce scope
 - Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items
 - Do NOT remove critical functionality — reduce scope by deferring, not deleting
-- You may include multiple suggestion blocks
-
-### 3. Verdict
-
-Your response MUST end with a verdict section:
-
-## Verdict
-scope_appropriate
-
-OR
-
-## Verdict
-scope_too_large
 
 When in doubt, smaller is better.

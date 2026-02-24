@@ -36,15 +36,29 @@ For EVERY Result-returning function:
 
 ## Output Format
 
-Your response MUST contain these sections in order:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-### 1. Coverage Analysis
+### Section 1: Coverage Analysis
 
 List all findings organized by category (functions without tests, missing edge cases, untested error variants).
 
-### 2. Suggestions (REQUIRED when verdict is coverage_gaps)
+### Section 2: Verdict
 
-If you find coverage gaps, you MUST output a `## Suggestions` section containing find-and-replace blocks. Each block MUST be written exactly like this, with the markers on their own lines, NOT inside code fences:
+End your analysis with a verdict line:
+
+## Verdict
+coverage_sufficient
+
+OR
+
+## Verdict
+coverage_gaps
+
+### Section 3: Suggestions (MANDATORY when verdict is coverage_gaps)
+
+If your verdict is coverage_gaps, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is coverage_gaps, your response is INCOMPLETE and INVALID.
+
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
 ## Suggestions
 
@@ -55,24 +69,13 @@ exact text copied from plan.md
 replacement text with the coverage gap fixed
 >>>
 
-CRITICAL RULES for suggestions:
-- Write <<<ORIGINAL and <<< SUGGESTED and >>> as raw text, NOT inside code blocks
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
+
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
 - The ORIGINAL text must be an exact character-for-character substring of the plan
 - Keep changes minimal — only fix the coverage gap
 - Add missing test cases, edge case specifications, or error handling requirements
 - Do NOT remove existing content unless replacing it with something better
-- You may include multiple suggestion blocks
-
-### 3. Verdict
-
-Your response MUST end with a verdict section:
-
-## Verdict
-coverage_sufficient
-
-OR
-
-## Verdict
-coverage_gaps
 
 Be thorough. Missing coverage now means bugs later.
