@@ -479,6 +479,168 @@ ambiguous`
 	}
 }
 
+// --- Confidence tests ---
+
+func TestParseSuggestions_WithConfidence(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: 85)\nold text\n<<<SUGGESTED\nnew text\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 85 {
+		t.Errorf("Confidence = %d, want 85", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_WithoutConfidence(t *testing.T) {
+	output := "<<<ORIGINAL\nold text\n<<<SUGGESTED\nnew text\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 100 {
+		t.Errorf("Confidence = %d, want 100 (default)", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_MixedConfidence(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: 60)\ntext one\n<<<SUGGESTED\nfix one\n>>>\n<<<ORIGINAL\ntext two\n<<<SUGGESTED\nfix two\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 2 {
+		t.Fatalf("expected 2 suggestions, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 60 {
+		t.Errorf("first Confidence = %d, want 60", suggestions[0].Confidence)
+	}
+	if suggestions[1].Confidence != 100 {
+		t.Errorf("second Confidence = %d, want 100", suggestions[1].Confidence)
+	}
+}
+
+func TestParseSuggestions_ConfidenceOutOfRange(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: 150)\nold\n<<<SUGGESTED\nnew\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 100 {
+		t.Errorf("Confidence = %d, want 100 (clamped)", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_ConfidenceZero(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: 0)\nold\n<<<SUGGESTED\nnew\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 0 {
+		t.Errorf("Confidence = %d, want 0", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_ConfidenceNonNumeric(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: high)\nold\n<<<SUGGESTED\nnew\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 100 {
+		t.Errorf("Confidence = %d, want 100 (default for non-numeric)", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_NegativeConfidence(t *testing.T) {
+	output := "<<<ORIGINAL (confidence: -50)\nold\n<<<SUGGESTED\nnew\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 0 {
+		t.Errorf("Confidence = %d, want 0 (clamped)", suggestions[0].Confidence)
+	}
+}
+
+func TestParseSuggestions_ConfidenceWithWhitespace(t *testing.T) {
+	output := "<<<ORIGINAL  (confidence:  85  )\nold\n<<<SUGGESTED\nnew\n>>>"
+	suggestions := ParseSuggestions("coverage", output)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+	if suggestions[0].Confidence != 85 {
+		t.Errorf("Confidence = %d, want 85", suggestions[0].Confidence)
+	}
+}
+
+func TestFilterByConfidence_AboveThreshold(t *testing.T) {
+	suggestions := []Suggestion{
+		{Confidence: 85, Original: "a", Suggested: "b"},
+		{Confidence: 90, Original: "c", Suggested: "d"},
+	}
+	result := FilterByConfidence(suggestions, 80)
+	if len(result) != 2 {
+		t.Errorf("got %d, want 2", len(result))
+	}
+}
+
+func TestFilterByConfidence_BelowThreshold(t *testing.T) {
+	suggestions := []Suggestion{
+		{Confidence: 50, Original: "a", Suggested: "b"},
+		{Confidence: 90, Original: "c", Suggested: "d"},
+	}
+	result := FilterByConfidence(suggestions, 80)
+	if len(result) != 1 {
+		t.Errorf("got %d, want 1", len(result))
+	}
+	if result[0].Confidence != 90 {
+		t.Errorf("kept wrong suggestion")
+	}
+}
+
+func TestFilterByConfidence_ExactThreshold(t *testing.T) {
+	suggestions := []Suggestion{
+		{Confidence: 80, Original: "a", Suggested: "b"},
+	}
+	result := FilterByConfidence(suggestions, 80)
+	if len(result) != 1 {
+		t.Errorf("got %d, want 1 (exact threshold included)", len(result))
+	}
+}
+
+func TestFilterByConfidence_AllBelow(t *testing.T) {
+	suggestions := []Suggestion{
+		{Confidence: 10, Original: "a", Suggested: "b"},
+		{Confidence: 20, Original: "c", Suggested: "d"},
+	}
+	result := FilterByConfidence(suggestions, 80)
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("got %d, want 0", len(result))
+	}
+}
+
+func TestFilterByConfidence_EmptyInput(t *testing.T) {
+	result := FilterByConfidence([]Suggestion{}, 80)
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("got %d, want 0", len(result))
+	}
+}
+
+func TestFilterByConfidence_NilInput(t *testing.T) {
+	result := FilterByConfidence(nil, 80)
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("got %d, want 0", len(result))
+	}
+}
+
 func TestOverlaps(t *testing.T) {
 	tests := []struct {
 		a, b string
