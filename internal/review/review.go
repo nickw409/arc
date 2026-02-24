@@ -6,8 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/nwiley/arc/internal/arc"
 )
 
 // MaxReviewIterations is the maximum number of review iterations per phase.
@@ -30,6 +34,7 @@ type ReviewResult struct {
 	Iteration          int
 	SuggestionsApplied int
 	IterationDetails   []IterationDetail
+	Usage              arc.Usage
 }
 
 // IterationDetail records what happened in a single iteration of the review loop.
@@ -49,6 +54,7 @@ type AdversaryResult struct {
 	CachedStatus string // original status before caching (only set when Status=="cached")
 	Output       string
 	Required     bool
+	Usage        arc.Usage
 }
 
 // Run executes the adversarial review loop with auto-remediation.
@@ -70,6 +76,10 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		Verdicts: make(map[string]AdversaryResult),
 	}
 
+	// Track failure signatures for convergence detection.
+	// If the same set of failing adversaries appears twice, we're oscillating.
+	var failureSignatures []string
+
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -85,16 +95,25 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		// Check iteration limit
 		history := LoadHistory(histPath)
 		if history.Iterations[opts.Phase] >= MaxReviewIterations {
-			if len(result.IterationDetails) == 0 {
-				// Hit limit before any iteration in this run
-				return nil, fmt.Errorf("phase %q has reached the maximum of %d review iterations; use 'arc manage reset-review' to reset", opts.Phase, MaxReviewIterations)
+			opts.Logger.Info("max review iterations reached, proceeding as conditional",
+				"phase", opts.Phase,
+				"iterations", history.Iterations[opts.Phase],
+			)
+			if result.Status == "" || result.Status == "needs_review" {
+				result.Status = "conditional"
 			}
-			// Hit limit during this run — return what we have
+			result.Iteration = history.Iterations[opts.Phase]
 			break
 		}
 
 		// Run all adversaries in parallel
-		verdicts := runAdversaries(ctx, adversaries, planDir, opts.Phase, planMD, opts.Model)
+		iteration := history.Iterations[opts.Phase] + 1
+		verdicts := runAdversaries(ctx, adversaries, planDir, opts.Phase, planMD, opts.Model, iteration)
+
+		// Aggregate usage from this iteration's adversaries
+		for _, v := range verdicts {
+			result.Usage = result.Usage.Add(v.Usage)
+		}
 
 		// Write output files and update history
 		hash, _ := computePlanHash(planMDPath)
@@ -122,12 +141,31 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		SaveHistory(histPath, history)
 
 		status := determineReviewStatus(verdicts)
-		iteration := history.Iterations[opts.Phase]
+		currentIteration := history.Iterations[opts.Phase]
 
 		// Update result with latest verdicts
 		result.Verdicts = verdicts
-		result.Iteration = iteration
+		result.Iteration = currentIteration
 		result.Status = status
+
+		// Convergence detection: if we've seen this failure pattern before, stop
+		converged := false
+		if status != "approved" && status != "conditional" {
+			sig := failureSignature(verdicts)
+			if sig != "" {
+				for _, prev := range failureSignatures {
+					if sig == prev {
+						opts.Logger.Info("convergence detected — same failure pattern repeating, stopping review",
+							"phase", opts.Phase,
+							"failing", sig,
+						)
+						converged = true
+						break
+					}
+				}
+				failureSignatures = append(failureSignatures, sig)
+			}
+		}
 
 		// Collect suggestions from failed adversaries
 		var allSuggestions []Suggestion
@@ -160,7 +198,7 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 			verdictSummary[name] = effectiveStatus
 		}
 		result.IterationDetails = append(result.IterationDetails, IterationDetail{
-			Iteration:          iteration,
+			Iteration:          currentIteration,
 			Status:             status,
 			SuggestionsFound:   len(allSuggestions),
 			SuggestionsApplied: applied,
@@ -169,7 +207,7 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 
 		opts.Logger.Info("review iteration complete",
 			"phase", opts.Phase,
-			"iteration", iteration,
+			"iteration", currentIteration,
 			"status", status,
 			"suggestions_found", len(allSuggestions),
 			"suggestions_applied", applied,
@@ -179,19 +217,42 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		if status == "approved" || status == "conditional" {
 			break
 		}
-		if applied == 0 {
-			// No suggestions were applied — can't make progress, stop
+		if converged || applied == 0 {
 			break
 		}
 		// Suggestions were applied, plan.md changed — loop for re-review
+	}
+
+	// When the review loop exits without full approval, allow the plan to
+	// proceed as conditional rather than blocking. The auto-remediation has
+	// done its best — remaining issues are logged but non-blocking.
+	if result.Status == "needs_review" {
+		result.Status = "conditional"
 	}
 
 	opts.Logger.Info("review complete", "status", result.Status, "phase", opts.Phase)
 	return result, nil
 }
 
+// failureSignature returns a deterministic string identifying which adversaries
+// are currently failing, used for convergence/oscillation detection.
+func failureSignature(verdicts map[string]AdversaryResult) string {
+	var names []string
+	for _, v := range verdicts {
+		effectiveStatus := v.Status
+		if v.Status == "cached" {
+			effectiveStatus = v.CachedStatus
+		}
+		if effectiveStatus == "failed" {
+			names = append(names, v.Name)
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
+
 // runAdversaries spawns all adversaries concurrently and returns their results.
-func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string) map[string]AdversaryResult {
+func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, iteration int) map[string]AdversaryResult {
 	var wg sync.WaitGroup
 	resultsCh := make(chan AdversaryResult, len(adversaries))
 
@@ -210,7 +271,7 @@ func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string
 				return
 			}
 
-			advResult, err := RunAdversary(ctx, a, planDir, phase, planMD, model)
+			advResult, err := RunAdversary(ctx, a, planDir, phase, planMD, model, iteration)
 			if err != nil {
 				resultsCh <- AdversaryResult{
 					Name:     a.Name,

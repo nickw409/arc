@@ -39,40 +39,52 @@ For EVERY integration point:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-```
+### Section 1: Consistency Analysis
+
+List all findings organized by category:
+
+- **Type Mismatches** — field types, generic bounds, Option/Result wrapping differences
+- **Integration Misalignments** — output/input type mismatches, incompatible function signatures
+- **Naming Inconsistencies** — snake_case vs camelCase, module name mismatches
+- **Contradictory Requirements** — conflicting behavioral specs across phases
+
+### Section 2: Verdict
+
+End your analysis with a verdict line:
+
 ## Verdict
 consistent
-```
+
 OR
-```
+
 ## Verdict
 inconsistent
-```
 
-Before the verdict, provide your analysis:
+### Section 3: Suggestions (MANDATORY when verdict is inconsistent)
 
-```markdown
-## Consistency Analysis
+If your verdict is inconsistent, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is inconsistent, your response is INCOMPLETE and INVALID.
 
-### Type Mismatches
-- [ ] `TypeA` in Phase 1 has field `foo: String`, Phase 2 expects `foo: &str`
-- [ ] `ErrorType` in Phase 1 missing variant used in Phase 2
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
-### Integration Misalignments
-- [ ] Phase 1 outputs `Vec<Item>`, Phase 2 expects `&[Item]`
-- [ ] Phase 1 returns `Result<T, E1>`, Phase 2 expects `Result<T, E2>`
+## Suggestions
 
-### Naming Inconsistencies
-- [ ] Phase 1 uses `user_id`, Phase 2 uses `userId`
-- [ ] Phase 1 module `data`, Phase 2 references `types`
+<<<ORIGINAL
+exact text copied from plan.md
+>>>
+<<<SUGGESTED
+replacement text with the inconsistency fixed
+>>>
 
-### Contradictory Requirements
-- [ ] Phase 1 says "must panic on error", Phase 2 says "return Err"
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
 
-## Verdict
-[verdict here - lowercase, one of: consistent, inconsistent]
-```
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Issue 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
+- Keep changes minimal — only fix the inconsistency
+- Align types, names, error handling, and integration points to be consistent
+- When two things conflict, prefer the more specific or more correct version
 
 Assume nothing aligns. Verify everything explicitly.

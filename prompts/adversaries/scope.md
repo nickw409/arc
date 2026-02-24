@@ -84,6 +84,7 @@ You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
 RULES for suggestions:
 - The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
 - The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Issue 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
 - Keep changes minimal — only reduce scope
 - Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items
 - Do NOT remove critical functionality — reduce scope by deferring, not deleting

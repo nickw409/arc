@@ -135,7 +135,7 @@ func TestSpawnNonzeroExit(t *testing.T) {
 }
 
 func TestSpawnDefaults(t *testing.T) {
-	// Verify defaults: MaxTurns=15, Timeout=600s, AllowedTools=["View","Edit","Write","Bash"], OutputFormat="text"
+	// Verify defaults: MaxTurns=15, Timeout=600s, AllowedTools=["View","Edit","Write","Bash"], OutputFormat="json"
 	t.Setenv("MOCK_ECHO_ARGS", "1")
 
 	result, err := Spawn(context.Background(), SpawnOptions{
@@ -152,8 +152,8 @@ func TestSpawnDefaults(t *testing.T) {
 		t.Fatalf("expected default --max-turns 15 in args, got: %s", args)
 	}
 	// Check default output format
-	if !strings.Contains(args, "--output-format") || !strings.Contains(args, "text") {
-		t.Fatalf("expected default --output-format text in args, got: %s", args)
+	if !strings.Contains(args, "--output-format") || !strings.Contains(args, "json") {
+		t.Fatalf("expected default --output-format json in args, got: %s", args)
 	}
 	// Check default allowed tools
 	if !strings.Contains(args, "--allowedTools") || !strings.Contains(args, "View,Edit,Write,Bash") {
@@ -307,5 +307,61 @@ func TestSpawnStderrDiscarded(t *testing.T) {
 	}
 	if strings.Contains(result.Output, "stderr") {
 		t.Fatal("stderr content should not appear in Output")
+	}
+}
+
+func TestSpawnJSONParsing(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", "hello from agent")
+	t.Setenv("MOCK_JSON_WRAP", "1")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("got exit code %d, want 0", result.ExitCode)
+	}
+	// Output should be the unwrapped result text, not the JSON envelope
+	if result.Output != "hello from agent" {
+		t.Fatalf("got output %q, want %q", result.Output, "hello from agent")
+	}
+	// Usage should be populated from the JSON envelope
+	if result.Usage.InputTokens != 10 {
+		t.Fatalf("got InputTokens=%d, want 10", result.Usage.InputTokens)
+	}
+	if result.Usage.OutputTokens != 5 {
+		t.Fatalf("got OutputTokens=%d, want 5", result.Usage.OutputTokens)
+	}
+	if result.Usage.CacheCreationInputTokens != 2 {
+		t.Fatalf("got CacheCreationInputTokens=%d, want 2", result.Usage.CacheCreationInputTokens)
+	}
+	if result.Usage.CacheReadInputTokens != 3 {
+		t.Fatalf("got CacheReadInputTokens=%d, want 3", result.Usage.CacheReadInputTokens)
+	}
+	if result.Usage.CostUSD != 0.001 {
+		t.Fatalf("got CostUSD=%f, want 0.001", result.Usage.CostUSD)
+	}
+}
+
+func TestSpawnPlainTextFallback(t *testing.T) {
+	// When output is plain text (not JSON), it should pass through unmodified
+	// with zero usage.
+	t.Setenv("MOCK_OUTPUT", "plain text output\n")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "plain text output\n" {
+		t.Fatalf("got output %q, want %q", result.Output, "plain text output\n")
+	}
+	if !result.Usage.IsZero() {
+		t.Fatalf("expected zero usage for plain text, got %+v", result.Usage)
 	}
 }

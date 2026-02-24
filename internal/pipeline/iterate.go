@@ -116,7 +116,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("reading plan.md: %w", err)}
 		}
 
-		verdict, err := RunParallel(ctx, logger, RunParallelOptions{
+		verdict, parallelUsage, err := RunParallel(ctx, logger, RunParallelOptions{
 			PhaseDir:   phaseDir,
 			StateFile:  sf,
 			PhaseState: &phaseState,
@@ -158,6 +158,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 			NextState: nextState,
 			Verdict:   arc.Verdict(verdict),
 			Action:    arc.ActionContinue,
+			Usage:     parallelUsage,
 		}
 	}
 
@@ -223,18 +224,18 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 
 	// Handle timeout
 	if spawnResult.TimedOut {
-		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent timed out")}
+		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent timed out")}
 	}
 
 	// Handle empty output
 	output := strings.TrimSpace(spawnResult.Output)
 	if output == "" {
-		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent produced no output (empty)")}
+		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent produced no output (empty)")}
 	}
 
 	// Handle non-zero exit
 	if spawnResult.ExitCode != 0 {
-		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent exited with code %d", spawnResult.ExitCode)}
+		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent exited with code %d", spawnResult.ExitCode)}
 	}
 
 	// Determine next state
@@ -303,6 +304,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		NextState: nextState,
 		Verdict:   verdict,
 		Action:    arc.ActionContinue,
+		Usage:     spawnResult.Usage,
 	}
 }
 

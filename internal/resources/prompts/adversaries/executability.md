@@ -48,42 +48,52 @@ For EVERY file referenced:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-```
+### Section 1: Executability Analysis
+
+List all findings organized by category:
+
+- **Blocking Issues** — missing servers, nonexistent files, hardware requirements
+- **Missing Dependencies** — unlisted libraries, nonexistent modules
+- **Implicit Assumptions** — references to undefined patterns, unnamed handlers
+- **Environment Requirements** — required env vars, system prerequisites
+
+### Section 2: Verdict
+
+End your analysis with a verdict line:
+
 ## Verdict
 executable
-```
+
 OR
-```
+
 ## Verdict
 blocked
-```
 
-Before the verdict, provide your analysis:
+### Section 3: Suggestions (MANDATORY when verdict is blocked)
 
-```markdown
-## Executability Analysis
+If your verdict is blocked, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is blocked, your response is INCOMPLETE and INVALID.
 
-### Blocking Issues
-- [ ] Requires a server running on port 50051 - no setup step defined
-- [ ] References `config.toml` that doesn't exist in repo
-- [ ] Test requires specific hardware but no availability check
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
-### Missing Dependencies
-- [ ] Uses a library not listed in project dependencies
-- [ ] References a module that doesn't exist
+## Suggestions
 
-### Implicit Assumptions
-- [ ] "Follow the existing pattern" - which pattern?
-- [ ] "Similar to the other handlers" - which handlers?
+<<<ORIGINAL
+exact text copied from plan.md
+>>>
+<<<SUGGESTED
+replacement text with the blocker resolved
+>>>
 
-### Environment Requirements
-- [ ] Requires `DATABASE_URL` environment variable
-- [ ] Requires `CUDA_HOME` to be set
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
 
-## Verdict
-[verdict here - lowercase, one of: executable, blocked]
-```
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Issue 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
+- Keep changes minimal — only fix the executability blocker
+- Add missing file paths, explicit dependency declarations, environment setup steps, or remove impossible requirements
+- Do NOT remove functional requirements — fix the executability issue while preserving intent
 
 If you can imagine a way it could fail, it will fail.

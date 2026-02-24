@@ -36,36 +36,47 @@ For EVERY Result-returning function:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-```
+### Section 1: Coverage Analysis
+
+List all findings organized by category (functions without tests, missing edge cases, untested error variants).
+
+### Section 2: Verdict
+
+End your analysis with a verdict line:
+
 ## Verdict
 coverage_sufficient
-```
+
 OR
-```
+
 ## Verdict
 coverage_gaps
-```
 
-Before the verdict, provide your analysis:
+### Section 3: Suggestions (MANDATORY when verdict is coverage_gaps)
 
-```markdown
-## Coverage Analysis
+If your verdict is coverage_gaps, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is coverage_gaps, your response is INCOMPLETE and INVALID.
 
-### Functions Without Tests
-- [ ] `function_name` - no test found
-- [ ] `another_function` - only happy path tested
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
-### Missing Edge Case Coverage
-- [ ] `function_name` - no test for empty input
-- [ ] `function_name` - no test for negative values
+## Suggestions
 
-### Untested Error Variants
-- [ ] `ErrorType::Variant` - never triggered in tests
+<<<ORIGINAL
+exact text copied from plan.md
+>>>
+<<<SUGGESTED
+replacement text with the coverage gap fixed
+>>>
 
-## Verdict
-[verdict here - lowercase, one of: coverage_sufficient, coverage_gaps]
-```
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
+
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Gap 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
+- Keep changes minimal — only fix the coverage gap
+- Add missing test cases, edge case specifications, or error handling requirements
+- Do NOT remove existing content unless replacing it with something better
 
 Be thorough. Missing coverage now means bugs later.

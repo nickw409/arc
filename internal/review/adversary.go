@@ -60,7 +60,7 @@ type historyFile struct {
 }
 
 // RunAdversary spawns a single adversary agent and extracts its verdict.
-func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string) (*AdversaryResult, error) {
+func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string, iteration int) (*AdversaryResult, error) {
 	// Compute hash of plan.md
 	planMDPath := filepath.Join(planDir, "phases", phaseName, "plan.md")
 	hash, err := computePlanHash(planMDPath)
@@ -115,15 +115,42 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 		}, nil
 	}
 
-	// Append plan content as context
-	fullPrompt := string(promptBytes) + "\n\n## Plan Under Review\n\n" + planMD
+	// Append plan content as context, with a post-plan reminder to emit suggestions.
+	// The reminder must come AFTER the plan so the LLM sees it last, reinforcing
+	// the requirement to produce <<<ORIGINAL/<<<SUGGESTED blocks on failure.
+	postPlanReminder := "\n\n---\n\n" +
+		"IMPORTANT: You have now read the plan. Produce your analysis and verdict. " +
+		"If your verdict indicates failure, you MUST then include a ## Suggestions section " +
+		"containing <<<ORIGINAL and <<<SUGGESTED fix blocks as described in your instructions above. " +
+		"Omitting suggestions on a failing verdict makes your response invalid.\n"
 
-	// Spawn agent with 60s timeout (review agents are read-only analysis)
+	// Progressive leniency: on later iterations the plan has already been
+	// improved, so adversaries should focus only on genuine blocking issues.
+	// Thresholds are deliberately high so early iterations work at full rigor.
+	if iteration >= 3 {
+		postPlanReminder += fmt.Sprintf("\n"+
+			"NOTE: This is review iteration %d. "+
+			"The plan has already been improved based on previous review feedback. "+
+			"Raise your bar for failure — only flag issues that would genuinely block implementation. "+
+			"Minor stylistic concerns, theoretical edge cases, and nice-to-haves should PASS. "+
+			"You MUST still use the exact verdict format and suggestion blocks described above.\n", iteration)
+	}
+	if iteration >= 5 {
+		postPlanReminder += "\n" +
+			"FINAL REVIEW: Only flag issues that will definitely cause incorrect behavior. " +
+			"If the plan is good enough to implement successfully, approve it. " +
+			"You MUST still output a valid verdict line.\n"
+	}
+
+	fullPrompt := string(promptBytes) + "\n\n## Plan Under Review\n\n" + planMD + postPlanReminder
+
+	// Spawn agent with 120s timeout (review agents are read-only analysis,
+	// but need enough time to produce analysis + verdict + suggestion blocks)
 	spawnResult, err := agent.Spawn(ctx, agent.SpawnOptions{
 		Prompt:       fullPrompt,
 		AllowedTools: []string{"Read"},
 		CommandName:  agentCommandName,
-		Timeout:      60 * time.Second,
+		Timeout:      120 * time.Second,
 		Model:        model,
 	})
 	if err != nil {
@@ -153,6 +180,7 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 		Verdict:  string(verdict),
 		Required: adv.Required,
 		Output:   spawnResult.Output,
+		Usage:    spawnResult.Usage,
 	}, nil
 }
 

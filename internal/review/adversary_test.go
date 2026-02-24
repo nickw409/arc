@@ -47,7 +47,7 @@ func TestRunAdversaryBasic(t *testing.T) {
 		Required:    true,
 	}
 
-	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRunAdversaryTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	result, err := RunAdversary(ctx, adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(ctx, adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRunAdversaryCached(t *testing.T) {
 		Required:    true,
 	}
 
-	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestRunAdversaryCachedFailure(t *testing.T) {
 		Required:    true,
 	}
 
-	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestRunAdversaryInvalidVerdict(t *testing.T) {
 	}
 
 	// Without a real agent binary, the spawn will fail resulting in error status
-	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestRunAdversaryHashFailure(t *testing.T) {
 		Required:    true,
 	}
 
-	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "")
+	result, err := RunAdversary(context.Background(), adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

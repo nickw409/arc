@@ -155,6 +155,71 @@ func TestGenerateCompletionReportNilPhaseState(t *testing.T) {
 	}
 }
 
+func TestGenerateCompletionReportWithUsage(t *testing.T) {
+	planDir := t.TempDir()
+
+	meta := &arc.PlanMeta{
+		Name:   "test-plan",
+		Phases: []string{"phase-a", "phase-b"},
+	}
+
+	phaseStates := map[string]*arc.PhaseState{
+		"phase-a": {
+			PhaseStatus:  "complete",
+			Iteration:    arc.Iteration{Current: 3},
+			TestsPassing: 5,
+			TestsTotal:   5,
+			Usage: arc.Usage{
+				InputTokens:  1000,
+				OutputTokens: 500,
+				CostUSD:      0.05,
+			},
+		},
+		"phase-b": {
+			PhaseStatus:  "complete",
+			Iteration:    arc.Iteration{Current: 2},
+			TestsPassing: 3,
+			TestsTotal:   3,
+			Usage: arc.Usage{
+				InputTokens:  2000,
+				OutputTokens: 800,
+				CostUSD:      0.10,
+			},
+		},
+	}
+
+	err := generateCompletionReport(planDir, "test-plan", meta, phaseStates)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(planDir, "COMPLETION_REPORT.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := string(data)
+
+	// Check per-phase cost
+	if !strings.Contains(report, "$0.05") {
+		t.Error("expected report to contain per-phase cost $0.05")
+	}
+	if !strings.Contains(report, "$0.10") {
+		t.Error("expected report to contain per-phase cost $0.10")
+	}
+
+	// Check cost summary section
+	if !strings.Contains(report, "## Cost Summary") {
+		t.Error("expected report to contain cost summary section")
+	}
+	if !strings.Contains(report, "$0.15") {
+		t.Error("expected report to contain total cost $0.15")
+	}
+	if !strings.Contains(report, "3000") {
+		t.Error("expected report to contain total input tokens 3000")
+	}
+}
+
 func TestGenerateCompletionReportSplitAndDeferred(t *testing.T) {
 	planDir := t.TempDir()
 

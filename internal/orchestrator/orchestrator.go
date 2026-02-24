@@ -95,7 +95,13 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 
 		if allDone {
 			fmt.Println("\nAll phases complete.")
-			return generateCompletionReport(planDir, opts.PlanName, meta, phaseStates)
+			if err := generateCompletionReport(planDir, opts.PlanName, meta, phaseStates); err != nil {
+				return err
+			}
+			if meta.WorkflowType == "performance" {
+				printUsageSummary(meta, phaseStates)
+			}
+			return nil
 		}
 
 		// Find next ready phase
@@ -211,5 +217,29 @@ func releaseLock(planDir string) {
 	os.Remove(lockPath)
 }
 
-// ensure imports used
-var _ = json.Unmarshal
+// printUsageSummary outputs a JSON usage summary to stdout.
+func printUsageSummary(meta *arc.PlanMeta, phaseStates map[string]*arc.PhaseState) {
+	phases := make(map[string]*arc.Usage, len(meta.Phases))
+	var total arc.Usage
+	for _, phase := range meta.Phases {
+		ps := phaseStates[phase]
+		if ps == nil || ps.Usage.IsZero() {
+			continue
+		}
+		u := ps.Usage
+		phases[phase] = &u
+		total = total.Add(u)
+	}
+	if total.IsZero() {
+		return
+	}
+	summary := struct {
+		Phases map[string]*arc.Usage `json:"phases"`
+		Total  arc.Usage             `json:"total"`
+	}{
+		Phases: phases,
+		Total:  total,
+	}
+	data, _ := json.MarshalIndent(summary, "", "  ")
+	fmt.Printf("\n%s\n", data)
+}

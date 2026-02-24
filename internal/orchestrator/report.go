@@ -71,6 +71,33 @@ func generateCompletionReport(planDir, planName string, meta *arc.PlanMeta, phas
 		if ps.RollbackCount > 0 {
 			b.WriteString(fmt.Sprintf("- **Rollbacks**: %d\n", ps.RollbackCount))
 		}
+		if ps.Usage.CostUSD > 0 {
+			b.WriteString(fmt.Sprintf("- **Cost**: $%.4f\n", ps.Usage.CostUSD))
+			b.WriteString(fmt.Sprintf("- **Tokens**: %d in / %d out\n", ps.Usage.InputTokens, ps.Usage.OutputTokens))
+		}
+		b.WriteString("\n")
+	}
+
+	// Cost summary (aggregate all phases)
+	var totalUsage arc.Usage
+	for _, phase := range meta.Phases {
+		ps := phaseStates[phase]
+		if ps == nil {
+			continue
+		}
+		totalUsage = totalUsage.Add(ps.Usage)
+	}
+	if totalUsage.CostUSD > 0 {
+		b.WriteString("## Cost Summary\n\n")
+		b.WriteString(fmt.Sprintf("- **Total cost**: $%.4f\n", totalUsage.CostUSD))
+		b.WriteString(fmt.Sprintf("- **Input tokens**: %d\n", totalUsage.InputTokens))
+		b.WriteString(fmt.Sprintf("- **Output tokens**: %d\n", totalUsage.OutputTokens))
+		if totalUsage.CacheReadInputTokens > 0 {
+			b.WriteString(fmt.Sprintf("- **Cache read tokens**: %d\n", totalUsage.CacheReadInputTokens))
+		}
+		if totalUsage.CacheCreationInputTokens > 0 {
+			b.WriteString(fmt.Sprintf("- **Cache creation tokens**: %d\n", totalUsage.CacheCreationInputTokens))
+		}
 		b.WriteString("\n")
 	}
 

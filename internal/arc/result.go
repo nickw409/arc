@@ -33,4 +33,5 @@ type IterationResult struct {
 	Verdict   Verdict      // the parsed verdict, if any
 	Action    ResultAction // what the orchestrator should do
 	Err       error        // underlying error, if any
+	Usage     Usage        // token/cost usage from the agent
 }

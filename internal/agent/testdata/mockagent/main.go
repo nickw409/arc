@@ -6,12 +6,14 @@
 //   - MOCK_STDERR: string to print to stderr (default: empty)
 //   - MOCK_ECHO_STDIN: if "1", reads stdin and echoes it to stdout (overrides MOCK_OUTPUT)
 //   - MOCK_ECHO_ARGS: if "1", prints os.Args[1:] joined by newlines to stdout (overrides MOCK_OUTPUT)
+//   - MOCK_JSON_WRAP: if "1", wraps MOCK_OUTPUT in a Claude CLI JSON envelope with hardcoded usage
 //   - MOCK_SCRIPT_DIR: directory containing call_0.txt, call_1.txt, etc. for sequential scripted
 //     responses. A shared .call_count file tracks which response to serve next. Falls through to
 //     MOCK_OUTPUT if the script file doesn't exist.
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -31,18 +33,36 @@ func main() {
 		fmt.Fprint(os.Stderr, stderr)
 	}
 
+	var output string
 	if os.Getenv("MOCK_ECHO_ARGS") == "1" {
-		fmt.Print(strings.Join(os.Args[1:], "\n"))
+		output = strings.Join(os.Args[1:], "\n")
 	} else if os.Getenv("MOCK_ECHO_STDIN") == "1" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Print(string(data))
+		output = string(data)
 	} else if scriptDir := os.Getenv("MOCK_SCRIPT_DIR"); scriptDir != "" {
-		printScriptedResponse(scriptDir)
-	} else if output := os.Getenv("MOCK_OUTPUT"); output != "" {
+		output = getScriptedResponse(scriptDir)
+	} else {
+		output = os.Getenv("MOCK_OUTPUT")
+	}
+
+	if os.Getenv("MOCK_JSON_WRAP") == "1" && output != "" {
+		envelope := map[string]interface{}{
+			"result":         output,
+			"total_cost_usd": 0.001,
+			"usage": map[string]int{
+				"input_tokens":                10,
+				"output_tokens":               5,
+				"cache_creation_input_tokens":  2,
+				"cache_read_input_tokens":      3,
+			},
+		}
+		data, _ := json.Marshal(envelope)
+		fmt.Print(string(data))
+	} else if output != "" {
 		fmt.Print(output)
 	}
 
@@ -50,7 +70,7 @@ func main() {
 	os.Exit(exitCode)
 }
 
-func printScriptedResponse(scriptDir string) {
+func getScriptedResponse(scriptDir string) string {
 	counterPath := filepath.Join(scriptDir, ".call_count")
 
 	// Read current counter (default 0)
@@ -70,10 +90,7 @@ func printScriptedResponse(scriptDir string) {
 	data, err := os.ReadFile(scriptFile)
 	if err != nil {
 		// Fall through to MOCK_OUTPUT
-		if output := os.Getenv("MOCK_OUTPUT"); output != "" {
-			fmt.Print(output)
-		}
-		return
+		return os.Getenv("MOCK_OUTPUT")
 	}
-	fmt.Print(string(data))
+	return string(data)
 }

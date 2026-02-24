@@ -27,17 +27,17 @@ type RunParallelOptions struct {
 }
 
 // RunParallel spawns agents for each branch in parallel, collects results,
-// and returns a verdict based on the configured strategy.
-func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptions) (string, error) {
+// and returns a verdict and accumulated usage based on the configured strategy.
+func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptions) (string, arc.Usage, error) {
 	cfg := opts.Config
 	if cfg == nil || len(cfg.Branches) == 0 {
-		return "", fmt.Errorf("no parallel branches configured")
+		return "", arc.Usage{}, fmt.Errorf("no parallel branches configured")
 	}
 
 	stateName := opts.PhaseState.CurrentState
 	resultsDir := filepath.Join(opts.PhaseDir, fmt.Sprintf("parallel_%s", stateName))
 	if err := os.MkdirAll(resultsDir, 0755); err != nil {
-		return "", fmt.Errorf("creating results dir: %w", err)
+		return "", arc.Usage{}, fmt.Errorf("creating results dir: %w", err)
 	}
 
 	branchNames := make([]string, len(cfg.Branches))
@@ -46,12 +46,13 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 	}
 
 	if err := state.StartParallel(opts.StateFile, resultsDir, branchNames); err != nil {
-		return "", fmt.Errorf("starting parallel tracking: %w", err)
+		return "", arc.Usage{}, fmt.Errorf("starting parallel tracking: %w", err)
 	}
 
 	type branchResult struct {
 		name     string
 		exitCode int
+		usage    arc.Usage
 		err      error
 	}
 
@@ -97,10 +98,12 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 			})
 
 			exitCode := -1
+			var branchUsage arc.Usage
 			if err != nil {
 				logger.Error("parallel branch spawn failed", "branch", b.Name, "error", err)
 			} else {
 				exitCode = spawnResult.ExitCode
+				branchUsage = spawnResult.Usage
 			}
 
 			// Write log and exit code
@@ -117,25 +120,27 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 				logger.Error("failed to update parallel branch", "branch", b.Name, "error", updateErr)
 			}
 
-			resultsCh <- branchResult{name: b.Name, exitCode: exitCode, err: err}
+			resultsCh <- branchResult{name: b.Name, exitCode: exitCode, usage: branchUsage, err: err}
 		}(branch)
 	}
 
 	wg.Wait()
 	close(resultsCh)
 
+	var totalUsage arc.Usage
 	exitCodes := make(map[string]int, len(cfg.Branches))
 	for r := range resultsCh {
 		exitCodes[r.name] = r.exitCode
+		totalUsage = totalUsage.Add(r.usage)
 	}
 
 	verdict, err := JoinParallel(cfg.Strategy, exitCodes, cfg.N)
 	if err != nil {
-		return "", fmt.Errorf("joining parallel results: %w", err)
+		return "", totalUsage, fmt.Errorf("joining parallel results: %w", err)
 	}
 
 	if err := state.FinishParallel(opts.StateFile, verdict); err != nil {
-		return "", fmt.Errorf("finishing parallel tracking: %w", err)
+		return "", totalUsage, fmt.Errorf("finishing parallel tracking: %w", err)
 	}
 
 	logger.Info("parallel execution complete",
@@ -143,5 +148,5 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 		"verdict", verdict,
 	)
 
-	return verdict, nil
+	return verdict, totalUsage, nil
 }

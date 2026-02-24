@@ -42,44 +42,51 @@ If scope is too large, identify split points:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain ALL THREE sections below, in this exact order. Omitting any section makes your response invalid.
 
-```
+### Section 1: Scope Analysis
+
+Provide metrics and findings:
+
+- **Metrics table** — count files, functions, types, test cases, crates against the thresholds above
+- **Concerns** — specific items that push scope beyond comfortable limits
+- **Suggested Split** — if scope is too large, how to break it into smaller phases
+
+### Section 2: Verdict
+
+End your analysis with a verdict line:
+
 ## Verdict
 scope_appropriate
-```
+
 OR
-```
+
 ## Verdict
 scope_too_large
-```
 
-Before the verdict, provide your analysis:
+### Section 3: Suggestions (MANDATORY when verdict is scope_too_large)
 
-```markdown
-## Scope Analysis
+If your verdict is scope_too_large, you MUST include a ## Suggestions section AFTER the verdict. If you do not include suggestions when the verdict is scope_too_large, your response is INCOMPLETE and INVALID.
 
-### Metrics
-| Metric | Value | Status |
-|--------|-------|--------|
-| Files to create | X | OK/WARNING/CRITICAL |
-| Files to modify | X | OK/WARNING/CRITICAL |
-| Total files | X | OK/WARNING/CRITICAL |
-| Functions | X | OK/WARNING/CRITICAL |
-| Types | X | OK/WARNING/CRITICAL |
-| Test cases | X | OK/WARNING/CRITICAL |
-| Crates affected | X | OK/WARNING/CRITICAL |
+The suggestions section uses find-and-replace blocks to fix the plan. Write them as raw text, NOT inside code fences:
 
-### Concerns
-- [ ] Phase affects 4 crates - high coordination overhead
-- [ ] 15 functions to implement - cognitive load concern
+## Suggestions
 
-### Suggested Split (if needed)
-1. Phase A: Types and core functions (files X, Y)
-2. Phase B: Integration and edge cases (files Z, W)
+<<<ORIGINAL
+exact text copied from plan.md
+>>>
+<<<SUGGESTED
+replacement text with scope reduced
+>>>
 
-## Verdict
-[verdict here - lowercase, one of: scope_appropriate, scope_too_large]
-```
+You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
+
+RULES for suggestions:
+- The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Issue 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
+- Keep changes minimal — only reduce scope
+- Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items
+- Do NOT remove critical functionality — reduce scope by deferring, not deleting
 
 When in doubt, smaller is better.

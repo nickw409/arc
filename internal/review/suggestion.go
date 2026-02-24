@@ -1,6 +1,7 @@
 package review
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -23,7 +24,52 @@ type Suggestion struct {
 	Suggested string
 }
 
+// isBlockCloser returns true if the line is a block-closing delimiter.
+// Accepts both ">>>" and "<<<END" which LLMs commonly produce.
+func isBlockCloser(trimmed string) bool {
+	return trimmed == ">>>" || trimmed == "<<<END"
+}
+
+// debrisPattern matches adversary analysis headings that LLMs inject into
+// suggested replacement text. These are the adversary's own section headers
+// (e.g. "### Fix 1: Clarify instructions") and editorial comments
+// (e.g. "**(REMOVED — covered elsewhere)**") that should not appear in plan content.
+var debrisPattern = regexp.MustCompile(
+	`(?m)^###\s+(?:Fix|Issue|Gap|Suggestion)\s+\d+\s*:.*$|` +
+		`(?m)^\*\*\((?:REMOVED|CHANGED|ADDED|NOTE)\s*[—–-].*\)\*\*$`,
+)
+
+// cleanSuggested strips adversary analysis debris from suggested replacement text.
+// When adversaries produce <<<SUGGESTED blocks, they sometimes include their own
+// section headings (### Fix 1: ...) or editorial comments (**(REMOVED — ...)** )
+// that are not plan content and cause oscillation between adversaries.
+func cleanSuggested(s string) string {
+	cleaned := debrisPattern.ReplaceAllString(s, "")
+	// Collapse runs of 3+ blank lines down to 2
+	for strings.Contains(cleaned, "\n\n\n") {
+		cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
+	}
+	return strings.TrimRight(cleaned, "\n ")
+}
+
+// stripCodeFences removes leading/trailing code fence lines (```lang / ```)
+// from a block of text. LLMs sometimes wrap suggestion content in code fences.
+func stripCodeFences(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) < 2 {
+		return s
+	}
+	first := strings.TrimSpace(lines[0])
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if strings.HasPrefix(first, "```") && last == "```" {
+		return strings.Join(lines[1:len(lines)-1], "\n")
+	}
+	return s
+}
+
 // ParseSuggestions extracts <<<ORIGINAL/<<<SUGGESTED blocks from adversary output.
+// The parser is lenient about block closing: it accepts >>>, <<<END, and also
+// treats <<<SUGGESTED as implicitly closing a preceding ORIGINAL block.
 func ParseSuggestions(adversaryName string, output string) []Suggestion {
 	priority := adversaryPriority[adversaryName]
 
@@ -38,40 +84,61 @@ func ParseSuggestions(adversaryName string, output string) []Suggestion {
 			continue
 		}
 
-		// Collect ORIGINAL block
+		// Collect ORIGINAL block — ends at >>>, <<<END, or <<<SUGGESTED
 		i++
 		var origLines []string
+		hitSuggested := false
 		for i < len(lines) {
-			if strings.TrimSpace(lines[i]) == ">>>" {
+			t := strings.TrimSpace(lines[i])
+			if isBlockCloser(t) {
 				i++
+				break
+			}
+			if t == "<<<SUGGESTED" {
+				// <<<SUGGESTED implicitly closes the ORIGINAL block
+				hitSuggested = true
 				break
 			}
 			origLines = append(origLines, lines[i])
 			i++
 		}
 
-		// Expect <<<SUGGESTED
-		for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
-			i++
-		}
-		if i >= len(lines) || strings.TrimSpace(lines[i]) != "<<<SUGGESTED" {
-			continue
+		// Find <<<SUGGESTED if we haven't already hit it
+		if !hitSuggested {
+			for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+				i++
+			}
+			if i >= len(lines) || strings.TrimSpace(lines[i]) != "<<<SUGGESTED" {
+				continue
+			}
 		}
 
-		// Collect SUGGESTED block
+		// Collect SUGGESTED block — ends at >>>, <<<END, or <<<ORIGINAL (next pair)
 		i++
 		var sugLines []string
 		for i < len(lines) {
-			if strings.TrimSpace(lines[i]) == ">>>" {
+			t := strings.TrimSpace(lines[i])
+			if isBlockCloser(t) {
 				i++
+				break
+			}
+			if t == "<<<ORIGINAL" {
+				// Next pair starts — implicitly closes this SUGGESTED block
 				break
 			}
 			sugLines = append(sugLines, lines[i])
 			i++
 		}
 
-		original := strings.Join(origLines, "\n")
-		suggested := strings.Join(sugLines, "\n")
+		original := stripCodeFences(strings.Join(origLines, "\n"))
+		suggested := stripCodeFences(strings.Join(sugLines, "\n"))
+
+		// Trim trailing blank lines from both blocks
+		original = strings.TrimRight(original, "\n ")
+		suggested = strings.TrimRight(suggested, "\n ")
+
+		// Strip adversary analysis debris from suggested text
+		suggested = cleanSuggested(suggested)
 
 		if original == "" || original == suggested {
 			continue

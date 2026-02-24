@@ -39,6 +39,7 @@ type PhaseState struct {
 	CompletedAt         string          `json:"completed_at,omitempty"`
 	BlockedReason       string          `json:"blocked_reason,omitempty"`
 	BlockedAt           string          `json:"blocked_at,omitempty"`
+	Usage               Usage           `json:"usage,omitempty"`
 }
 
 type Iteration struct {

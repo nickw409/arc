@@ -3,12 +3,15 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/nwiley/arc/internal/arc"
 )
 
 // SpawnOptions configures agent subprocess spawning.
@@ -27,6 +30,7 @@ type SpawnResult struct {
 	Output   string
 	ExitCode int
 	TimedOut bool
+	Usage    arc.Usage
 }
 
 // Spawn launches a Claude CLI sub-agent as a subprocess.
@@ -48,7 +52,7 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 
 	outputFormat := opts.OutputFormat
 	if outputFormat == "" {
-		outputFormat = "text"
+		outputFormat = "json"
 	}
 
 	allowedTools := opts.AllowedTools
@@ -86,31 +90,73 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 	}
 
 	err := cmd.Wait()
+
+	var result *SpawnResult
 	if err != nil {
 		if timeoutCtx.Err() != nil && ctx.Err() == nil {
-			return &SpawnResult{
+			result = &SpawnResult{
 				Output:   stdout.String(),
 				ExitCode: -1,
 				TimedOut: true,
-			}, nil
-		}
-		if ctx.Err() != nil {
+			}
+		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
+		} else {
+			exitCode := 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			result = &SpawnResult{
+				Output:   stdout.String(),
+				ExitCode: exitCode,
+				TimedOut: false,
+			}
 		}
-		exitCode := 1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-		return &SpawnResult{
+	} else {
+		result = &SpawnResult{
 			Output:   stdout.String(),
-			ExitCode: exitCode,
+			ExitCode: 0,
 			TimedOut: false,
-		}, nil
+		}
 	}
 
-	return &SpawnResult{
-		Output:   stdout.String(),
-		ExitCode: 0,
-		TimedOut: false,
-	}, nil
+	// Parse JSON envelope if present
+	if text, usage, ok := parseJSONOutput(result.Output); ok {
+		result.Output = text
+		result.Usage = usage
+	}
+
+	return result, nil
+}
+
+// claudeJSONResult is the JSON envelope returned by `claude --output-format json`.
+type claudeJSONResult struct {
+	Result    string  `json:"result"`
+	TotalCost float64 `json:"total_cost_usd"`
+	Usage     struct {
+		InputTokens              int `json:"input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+// parseJSONOutput attempts to parse the Claude CLI JSON envelope.
+// Returns the extracted text, usage, and whether parsing succeeded.
+func parseJSONOutput(raw string) (string, arc.Usage, bool) {
+	var envelope claudeJSONResult
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return "", arc.Usage{}, false
+	}
+	if envelope.Result == "" && envelope.Usage.InputTokens == 0 {
+		return "", arc.Usage{}, false
+	}
+	usage := arc.Usage{
+		InputTokens:              envelope.Usage.InputTokens,
+		OutputTokens:             envelope.Usage.OutputTokens,
+		CacheCreationInputTokens: envelope.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     envelope.Usage.CacheReadInputTokens,
+		CostUSD:                  envelope.TotalCost,
+	}
+	return envelope.Result, usage, true
 }

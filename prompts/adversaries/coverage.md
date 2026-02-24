@@ -74,6 +74,7 @@ You may include multiple <<<ORIGINAL/<<<SUGGESTED blocks.
 RULES for suggestions:
 - The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
 - The ORIGINAL text must be an exact character-for-character substring of the plan
+- The SUGGESTED text must contain ONLY plan content — do NOT include your own analysis headings (e.g. "### Fix 1:", "### Gap 2:"), editorial comments (e.g. "**(REMOVED — ...)**"), or any other text that is not part of the plan itself
 - Keep changes minimal — only fix the coverage gap
 - Add missing test cases, edge case specifications, or error handling requirements
 - Do NOT remove existing content unless replacing it with something better

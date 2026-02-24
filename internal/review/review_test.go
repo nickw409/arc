@@ -469,18 +469,21 @@ func TestReviewMaxIterationEnforcement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Run(context.Background(), ReviewOptions{
+	result, err := Run(context.Background(), ReviewOptions{
 		PlanName: "test-plan",
 		PlansDir: plansDir,
 		ArcHome:  t.TempDir(),
 		Phase:    "phase-1",
 		Logger:   testLogger(),
 	})
-	if err == nil {
-		t.Fatal("expected error for max iterations exceeded")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "maximum of 5 review iterations") {
-		t.Fatalf("unexpected error message: %v", err)
+	if result.Status != "conditional" {
+		t.Fatalf("expected status 'conditional' at max iterations, got %q", result.Status)
+	}
+	if result.Iteration != MaxReviewIterations {
+		t.Fatalf("expected iteration %d, got %d", MaxReviewIterations, result.Iteration)
 	}
 }
 

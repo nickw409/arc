@@ -47,7 +47,7 @@ func TestRunParallelAllSucceed(t *testing.T) {
 	// All branches succeed (exit 0)
 	t.Setenv("MOCK_OUTPUT", "done\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -107,7 +107,7 @@ func TestRunParallelAllFail(t *testing.T) {
 	t.Setenv("MOCK_EXIT_CODE", "1")
 	t.Setenv("MOCK_OUTPUT", "error output\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -148,7 +148,7 @@ func TestRunParallelAnyStrategyAllFail(t *testing.T) {
 	t.Setenv("MOCK_EXIT_CODE", "1")
 	t.Setenv("MOCK_OUTPUT", "fail\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -184,7 +184,7 @@ func TestRunParallelAnyStrategyOneSucceeds(t *testing.T) {
 	t.Setenv("MOCK_SCRIPT_DIR", scriptDir)
 	t.Setenv("MOCK_OUTPUT", "success\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -223,7 +223,7 @@ func TestRunParallelNOfMStrategy(t *testing.T) {
 	// All branches succeed, n=2 of 3
 	t.Setenv("MOCK_OUTPUT", "done\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -254,7 +254,7 @@ func TestRunParallelNOfMInsufficient(t *testing.T) {
 	t.Setenv("MOCK_EXIT_CODE", "1")
 	t.Setenv("MOCK_OUTPUT", "fail\n")
 
-	verdict, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -281,7 +281,7 @@ func TestRunParallelCreatesResultsDir(t *testing.T) {
 
 	t.Setenv("MOCK_OUTPUT", "output content\n")
 
-	_, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -327,7 +327,7 @@ func TestRunParallelNoBranches(t *testing.T) {
 	phaseDir, sf := setupParallelTestPlan(t)
 	ps, _ := sf.Read()
 
-	_, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -346,7 +346,7 @@ func TestRunParallelNilConfig(t *testing.T) {
 	phaseDir, sf := setupParallelTestPlan(t)
 	ps, _ := sf.Read()
 
-	_, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,
@@ -370,7 +370,7 @@ func TestRunParallelContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	verdict, err := RunParallel(ctx, testLogger(), RunParallelOptions{
+	verdict, _, err := RunParallel(ctx, testLogger(), RunParallelOptions{
 		PhaseDir:   phaseDir,
 		StateFile:  sf,
 		PhaseState: ps,

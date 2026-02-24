@@ -117,6 +117,14 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			ArcHome:      opts.ArcHome,
 		})
 
+		// Accumulate usage from this iteration into phase state
+		if !result.Usage.IsZero() {
+			sf.Update(func(s *arc.PhaseState) error {
+				s.Usage = s.Usage.Add(result.Usage)
+				return nil
+			})
+		}
+
 		if result.Err != nil {
 			switch result.Action {
 			case arc.ActionRetry:
