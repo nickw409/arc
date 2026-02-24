@@ -10,15 +10,16 @@ import (
 
 // rawState is a helper for YAML parsing that uses yaml.Node for the "next" field.
 type rawState struct {
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Prompt      string              `yaml:"prompt"`
-	Verdicts    []string            `yaml:"verdicts"`
-	Next        *arc.Transition      `yaml:"next"`
+	Name        string                `yaml:"name"`
+	Description string                `yaml:"description"`
+	Prompt      string                `yaml:"prompt"`
+	Verdicts    []string              `yaml:"verdicts"`
+	Next        *arc.Transition       `yaml:"next"`
 	Constraints *arc.ConstraintConfig `yaml:"constraints"`
 	Escalation  []arc.EscalationRule  `yaml:"escalation"`
 	After       []arc.HookConfig      `yaml:"after"`
 	Parallel    *arc.ParallelConfig   `yaml:"parallel"`
+	Agent       *arc.AgentConfig      `yaml:"agent"`
 }
 
 // rawWorkflow is a helper for top-level YAML parsing.
@@ -72,6 +73,7 @@ func LoadBytes(data []byte) (*arc.Workflow, error) {
 			Escalation:  rs.Escalation,
 			After:       rs.After,
 			Parallel:    rs.Parallel,
+			Agent:       rs.Agent,
 		}
 
 		if rs.Next != nil {

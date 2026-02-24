@@ -17,6 +17,7 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var timeout int
+	var useWorktree bool
 
 	cmd := &cobra.Command{
 		Use:   "run [plan-name]",
@@ -106,16 +107,19 @@ func newRunCmd() *cobra.Command {
 			}))
 
 			return orchestrator.Launch(ctx, orchestrator.LaunchOptions{
-				PlanName: planName,
-				PlansDir: plansDir,
-				ArcHome:  arcHome,
-				Config:   cfg,
-				Logger:   logger,
-				Timeout:  timeout,
+				PlanName:    planName,
+				PlansDir:    plansDir,
+				ArcHome:     arcHome,
+				ProjectDir:  projectRoot,
+				Config:      cfg,
+				Logger:      logger,
+				Timeout:     timeout,
+				UseWorktree: useWorktree,
 			})
 		},
 	}
 
 	cmd.Flags().IntVar(&timeout, "timeout", 14400, "Wall-clock timeout in seconds")
+	cmd.Flags().BoolVar(&useWorktree, "worktree", true, "Run agents in isolated git worktrees")
 	return cmd
 }

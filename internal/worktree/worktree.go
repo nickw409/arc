@@ -1,0 +1,98 @@
+package worktree
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+)
+
+// Worktree represents an isolated git worktree for running agents.
+type Worktree struct {
+	Branch     string // e.g., "arc/plan-name/phase-name"
+	Dir        string // absolute path to worktree directory
+	ProjectDir string // original project root
+}
+
+// sanitizeRe matches characters that are not allowed in git branch names.
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9/_.-]`)
+
+// sanitizeBranch converts a string into a valid git branch name.
+func sanitizeBranch(s string) string {
+	s = sanitizeRe.ReplaceAllString(s, "-")
+	// Collapse consecutive dashes/dots
+	s = regexp.MustCompile(`[-]{2,}`).ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-./")
+	return s
+}
+
+// Create creates a new worktree branch and checks it out in a temp directory.
+// Branch is created from current HEAD. Returns the worktree handle.
+func Create(projectDir, planName, phaseName string) (*Worktree, error) {
+	branch := "arc/" + sanitizeBranch(planName) + "/" + sanitizeBranch(phaseName)
+
+	dir, err := os.MkdirTemp("", "arc-worktree-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, dir)
+	cmd.Dir = projectDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return &Worktree{
+		Branch:     branch,
+		Dir:        dir,
+		ProjectDir: projectDir,
+	}, nil
+}
+
+// Remove cleans up the worktree directory and prunes git worktree metadata.
+func Remove(wt *Worktree) error {
+	// Remove the worktree
+	cmd := exec.Command("git", "worktree", "remove", "--force", wt.Dir)
+	cmd.Dir = wt.ProjectDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Try manual cleanup if the command fails
+		os.RemoveAll(wt.Dir)
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = wt.ProjectDir
+		pruneCmd.Run()
+		_ = out
+	}
+
+	// Delete the branch
+	cmd = exec.Command("git", "branch", "-D", wt.Branch)
+	cmd.Dir = wt.ProjectDir
+	cmd.Run() // best-effort; branch may already be deleted
+
+	return nil
+}
+
+// MergeBack merges the worktree branch into the current branch.
+// Returns the merge commit hash or error if conflicts exist.
+func MergeBack(wt *Worktree) (string, error) {
+	cmd := exec.Command("git", "merge", "--no-ff", wt.Branch, "-m", fmt.Sprintf("Merge %s", wt.Branch))
+	cmd.Dir = wt.ProjectDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Abort the merge on conflict
+		abortCmd := exec.Command("git", "merge", "--abort")
+		abortCmd.Dir = wt.ProjectDir
+		abortCmd.Run()
+		return "", fmt.Errorf("merge conflict: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Get the merge commit hash
+	hashCmd := exec.Command("git", "rev-parse", "HEAD")
+	hashCmd.Dir = wt.ProjectDir
+	out, err := hashCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse: %w", err)
+	}
+
+	return strings.TrimSpace(string(out)), nil
+}

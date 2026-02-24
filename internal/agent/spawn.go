@@ -24,6 +24,7 @@ type SpawnOptions struct {
 	OutputFormat string
 	Model        string
 	CommandName  string
+	WorkingDir   string // if set, the subprocess runs in this directory
 }
 
 // SpawnResult is the outcome of a spawned agent subprocess.
@@ -78,6 +79,9 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 	cmd := exec.CommandContext(timeoutCtx, cmdName, args...)
 	cmd.Stdin = strings.NewReader(opts.Prompt)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if opts.WorkingDir != "" {
+		cmd.Dir = opts.WorkingDir
+	}
 
 	// Clear CLAUDECODE env var so subprocesses aren't blocked by the
 	// nested-session check when arc is invoked from within Claude Code.

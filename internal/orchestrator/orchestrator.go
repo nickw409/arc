@@ -20,13 +20,14 @@ import (
 
 // LaunchOptions configures the orchestrator launcher.
 type LaunchOptions struct {
-	PlanName   string
-	PlansDir   string
-	ArcHome    string
-	ProjectDir string // working directory for git commits; empty uses process cwd
-	Config     *config.Config
-	Logger     *slog.Logger
-	Timeout    int // wall-clock timeout in seconds (0 = no timeout)
+	PlanName    string
+	PlansDir    string
+	ArcHome     string
+	ProjectDir  string // working directory for git commits; empty uses process cwd
+	Config      *config.Config
+	Logger      *slog.Logger
+	Timeout     int  // wall-clock timeout in seconds (0 = no timeout)
+	UseWorktree bool // if true, run agents in isolated git worktrees
 }
 
 // Launch starts the orchestrator for a plan.
@@ -117,13 +118,14 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 		fmt.Printf("\n[%s] Starting phase\n", next)
 
 		err := RunPhase(ctx, RunPhaseOptions{
-			PlanName:   opts.PlanName,
-			PhaseName:  next,
-			PlansDir:   opts.PlansDir,
-			ArcHome:    opts.ArcHome,
-			ProjectDir: opts.ProjectDir,
-			Config:     opts.Config,
-			Logger:     opts.Logger,
+			PlanName:    opts.PlanName,
+			PhaseName:   next,
+			PlansDir:    opts.PlansDir,
+			ArcHome:     opts.ArcHome,
+			ProjectDir:  opts.ProjectDir,
+			Config:      opts.Config,
+			Logger:      opts.Logger,
+			UseWorktree: opts.UseWorktree,
 		})
 
 		if err != nil {

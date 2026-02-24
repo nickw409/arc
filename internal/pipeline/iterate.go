@@ -34,6 +34,7 @@ type IterateOptions struct {
 	Instructions string
 	PlansDir     string
 	ArcHome      string
+	WorkingDir   string // if set, agent runs in this directory (e.g. worktree)
 }
 
 // RunIteration executes a single iteration of the phase state machine.
@@ -209,12 +210,11 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		rendered += fmt.Sprintf("\n\nInstructions: %s", opts.Instructions)
 	}
 
+	// Build spawn options, applying per-state agent config if present
+	spawnOpts := buildSpawnOptions(stateConfig, &phaseState, rendered, opts.WorkingDir)
+
 	// Spawn agent
-	spawnResult, err := agent.Spawn(ctx, agent.SpawnOptions{
-		Prompt:      rendered,
-		CommandName: agentCommandName,
-		Model:       phaseState.ModelOverride,
-	})
+	spawnResult, err := agent.Spawn(ctx, spawnOpts)
 	if err != nil {
 		if ctx.Err() != nil {
 			return &arc.IterationResult{Action: arc.ActionAbort, Err: ctx.Err()}
@@ -308,9 +308,44 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 }
 
+// buildSpawnOptions constructs agent.SpawnOptions from state config and defaults.
+// When stateConfig.Agent is non-nil, its fields override defaults.
+func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState, prompt string, workingDir string) agent.SpawnOptions {
+	opts := agent.SpawnOptions{
+		Prompt:      prompt,
+		CommandName: agentCommandName,
+		Model:       phaseState.ModelOverride,
+		WorkingDir:  workingDir,
+	}
+
+	if stateConfig != nil && stateConfig.Agent != nil {
+		ac := stateConfig.Agent
+		if ac.MaxTurns > 0 {
+			opts.MaxTurns = ac.MaxTurns
+		}
+		if len(ac.AllowedTools) > 0 {
+			opts.AllowedTools = ac.AllowedTools
+		}
+		if ac.Timeout > 0 {
+			opts.Timeout = time.Duration(ac.Timeout) * time.Second
+		}
+		if ac.Model != "" && phaseState.ModelOverride == "" {
+			opts.Model = ac.Model
+		}
+	}
+
+	return opts
+}
+
 // MapStateToStatus maps a workflow state name to a phase_status value.
 func MapStateToStatus(stateName string) string {
-	switch stateName {
+	// Strip block namespace prefix (e.g., "adversary-loop.adversary" → "adversary")
+	base := stateName
+	if idx := strings.LastIndex(stateName, "."); idx >= 0 {
+		base = stateName[idx+1:]
+	}
+
+	switch base {
 	case "qa":
 		return "qa"
 	case "qa_review", "test_review", "char_review", "fix_review", "review", "verify", "benchmark", "impl_review":
@@ -319,7 +354,12 @@ func MapStateToStatus(stateName string) string {
 		return "complete"
 	case "blocked":
 		return "blocked"
+	case "adversary":
+		return "adversary"
 	default:
+		if strings.Contains(base, "review") {
+			return "qa_review"
+		}
 		return "implementing"
 	}
 }

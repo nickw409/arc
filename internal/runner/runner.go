@@ -20,6 +20,7 @@ type RunOptions struct {
 	Filter   string
 	Timeout  time.Duration
 	ArcHome  string
+	Dir      string // working directory for the test command; empty uses process cwd
 }
 
 // Run executes the appropriate test runner and returns parsed results.
@@ -55,6 +56,9 @@ func Run(ctx context.Context, opts RunOptions) (*TestResult, error) {
 	}
 
 	cmd := exec.CommandContext(timeoutCtx, scriptPath, args...)
+	if opts.Dir != "" {
+		cmd.Dir = opts.Dir
+	}
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err = cmd.Run()
@@ -77,7 +81,12 @@ func SupportedRunners() []string {
 }
 
 // RunAll executes all test files for a phase concurrently and returns aggregated results.
-func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout time.Duration, arcHome string) (*TestResult, error) {
+// The optional dir parameter sets the working directory for all test commands.
+func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout time.Duration, arcHome string, dir ...string) (*TestResult, error) {
+	workDir := ""
+	if len(dir) > 0 {
+		workDir = dir[0]
+	}
 	agg := &TestResult{
 		FailedNames: []string{},
 	}
@@ -103,6 +112,7 @@ func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout 
 				TestFile: testFile,
 				Timeout:  timeout,
 				ArcHome:  arcHome,
+				Dir:      workDir,
 			})
 			results[idx] = fileResult{result: r, err: err}
 		}(i, tf)

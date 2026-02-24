@@ -11,6 +11,14 @@ type Workflow struct {
 	InterventionTriggers []InterventionTrigger `yaml:"intervention_triggers"`
 }
 
+// AgentConfig configures per-state agent behavior. Nil means use defaults.
+type AgentConfig struct {
+	MaxTurns     int      `yaml:"max_turns"`
+	AllowedTools []string `yaml:"allowed_tools"`
+	Timeout      int      `yaml:"timeout"`
+	Model        string   `yaml:"model"`
+}
+
 // StateConfig is the canonical internal representation of a workflow state.
 type StateConfig struct {
 	Name        string            `yaml:"name"`
@@ -22,6 +30,7 @@ type StateConfig struct {
 	Escalation  []EscalationRule  `yaml:"escalation"`
 	After       []HookConfig      `yaml:"after"`
 	Parallel    *ParallelConfig   `yaml:"parallel"`
+	Agent       *AgentConfig      `yaml:"agent"`
 }
 
 // Transition is the canonical transition format.

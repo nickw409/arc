@@ -16,17 +16,20 @@ import (
 	"github.com/nwiley/arc/internal/runner"
 	"github.com/nwiley/arc/internal/state"
 	"github.com/nwiley/arc/internal/workflow"
+	"github.com/nwiley/arc/internal/worktree"
 )
 
 // RunPhaseOptions configures execution of a single phase.
 type RunPhaseOptions struct {
-	PlanName   string
-	PhaseName  string
-	PlansDir   string
-	ArcHome    string
-	ProjectDir string // working directory for git commits; empty uses process cwd
-	Config     *config.Config
-	Logger     *slog.Logger
+	PlanName     string
+	PhaseName    string
+	PlansDir     string
+	ArcHome      string
+	ProjectDir   string // working directory for git commits; empty uses process cwd
+	Config       *config.Config
+	Logger       *slog.Logger
+	UseWorktree  bool   // if true, run agents in an isolated git worktree
+	WorkingDir   string // override working directory for agents (set by worktree)
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
@@ -56,6 +59,31 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 		phaseState.CurrentState = machine.EntryState()
 		if err := sf.Write(phaseState); err != nil {
 			return fmt.Errorf("writing initial state: %w", err)
+		}
+	}
+
+	// Set up worktree isolation if requested
+	var wt *worktree.Worktree
+	if opts.UseWorktree {
+		projectDir := opts.ProjectDir
+		if projectDir == "" {
+			projectDir, _ = os.Getwd()
+		}
+		wt, err = worktree.Create(projectDir, opts.PlanName, opts.PhaseName)
+		if err != nil {
+			opts.Logger.Warn("failed to create worktree, running in-tree", "error", err)
+		} else {
+			opts.WorkingDir = wt.Dir
+			defer func() {
+				if phaseState != nil && phaseState.PhaseStatus == "complete" {
+					if hash, mergeErr := worktree.MergeBack(wt); mergeErr != nil {
+						opts.Logger.Warn("worktree merge failed", "error", mergeErr)
+					} else {
+						fmt.Printf("[%s] Merged worktree: %s\n", opts.PhaseName, hash[:7])
+					}
+				}
+				worktree.Remove(wt)
+			}()
 		}
 	}
 
@@ -140,6 +168,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			Instructions: instructions,
 			PlansDir:     opts.PlansDir,
 			ArcHome:      opts.ArcHome,
+			WorkingDir:   opts.WorkingDir,
 		})
 
 		// Accumulate usage from this iteration into phase state
@@ -252,7 +281,11 @@ func runAndRecordTests(ctx context.Context, opts RunPhaseOptions, sf *state.Stat
 		runnerName = opts.Config.Runner
 	}
 
-	result, err := runner.RunAll(ctx, runnerName, phaseState.TestFiles, 0, opts.ArcHome)
+	var runArgs []string
+	if opts.WorkingDir != "" {
+		runArgs = append(runArgs, opts.WorkingDir)
+	}
+	result, err := runner.RunAll(ctx, runnerName, phaseState.TestFiles, 0, opts.ArcHome, runArgs...)
 	if err != nil {
 		return fmt.Errorf("running tests: %w", err)
 	}
