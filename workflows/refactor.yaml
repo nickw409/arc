@@ -10,7 +10,12 @@ states:
   - name: char_review
     description: Review characterization tests
     prompt: prompts/refactor/char-review.md
-    next: refactor
+    verdicts:
+      - approved
+      - gaps_found
+    next:
+      approved: refactor
+      gaps_found: characterize
   - name: refactor
     description: Perform structural changes
     prompt: prompts/refactor/refactor.md
@@ -18,7 +23,12 @@ states:
   - name: verify
     description: Verify behavior unchanged
     prompt: prompts/refactor/verify.md
-    next: complete
+    verdicts:
+      - approved
+      - concerns
+    next:
+      approved: complete
+      concerns: refactor
   - name: complete
     description: Refactor completed
     prompt: prompts/common/complete.md

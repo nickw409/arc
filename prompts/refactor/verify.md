@@ -57,4 +57,25 @@ CONCERNS - Address before proceeding: <list>
 - No behavior changes allowed
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the verification results and exit.
+## Response Format
+
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
+## Verdict
+
+approved
+```
+
+OR
+
+```
+## Verdict
+
+concerns
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+
+- **approved** — Refactoring is complete and correct, all tests pass
+- **concerns** — Address before proceeding (list specific concerns above the verdict)

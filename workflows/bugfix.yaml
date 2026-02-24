@@ -14,7 +14,12 @@ states:
   - name: test_review
     description: Review regression test coverage
     prompt: prompts/bugfix/test-review.md
-    next: fix
+    verdicts:
+      - approved
+      - gaps_found
+    next:
+      approved: fix
+      gaps_found: regression_tests
   - name: fix
     description: Implement the fix
     prompt: prompts/bugfix/fix.md
@@ -22,7 +27,12 @@ states:
   - name: fix_review
     description: Review fix implementation
     prompt: prompts/bugfix/fix-review.md
-    next: complete
+    verdicts:
+      - approved
+      - concerns
+    next:
+      approved: complete
+      concerns: fix
   - name: complete
     description: Phase completed
     prompt: prompts/common/complete.md

@@ -57,6 +57,21 @@ func ListWorkflows() []string {
 	return names
 }
 
+// ListPrompts returns all prompt file paths relative to "prompts/" (e.g., "feature/qa.md").
+func ListPrompts() []string {
+	var paths []string
+	fs.WalkDir(promptsFS, "prompts", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".md") {
+			paths = append(paths, strings.TrimPrefix(path, "prompts/"))
+		}
+		return nil
+	})
+	return paths
+}
+
 // GuideBytes returns the raw markdown for a guide file (e.g., "guide.md").
 func GuideBytes(name string) ([]byte, error) {
 	return guidesFS.ReadFile(filepath.Join("guides", name))
