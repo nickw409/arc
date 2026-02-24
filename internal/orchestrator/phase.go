@@ -78,6 +78,15 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			return nil
 		}
 
+		// Sync phase status with current state so the monitor reflects what's happening
+		if status := pipeline.MapStateToStatus(phaseState.CurrentState); phaseState.PhaseStatus != status && phaseState.PhaseStatus != "blocked" && phaseState.PhaseStatus != "disputed" {
+			sf.Update(func(s *arc.PhaseState) error {
+				s.PhaseStatus = status
+				return nil
+			})
+			phaseState.PhaseStatus = status
+		}
+
 		// Handle disputed state — needs AI judgment
 		if phaseState.PhaseStatus == "disputed" {
 			if err := handleDispute(ctx, opts, sf, phaseState); err != nil {
@@ -103,7 +112,21 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			}
 		}
 
-		fmt.Printf("[%s] %s iteration %d", opts.PhaseName, mode, phaseState.Iteration.Current+1)
+		// Increment per-state iteration counter before running
+		curState := phaseState.CurrentState
+		sf.Update(func(s *arc.PhaseState) error {
+			if s.StateIterations == nil {
+				s.StateIterations = make(map[string]int)
+			}
+			s.StateIterations[curState]++
+			return nil
+		})
+		if phaseState.StateIterations == nil {
+			phaseState.StateIterations = make(map[string]int)
+		}
+		phaseState.StateIterations[curState]++
+
+		fmt.Printf("[%s] %s iteration %d", opts.PhaseName, mode, phaseState.StateIterations[curState])
 		if phaseState.TestsTotal > 0 {
 			fmt.Printf(" (tests: %d/%d)", phaseState.TestsPassing, phaseState.TestsTotal)
 		}

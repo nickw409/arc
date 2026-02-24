@@ -29,6 +29,7 @@ type PhaseState struct {
 	ExecutedEscalations []string        `json:"executed_escalations"`
 	RollbackCount       int             `json:"rollback_count"`
 	GlobalIterations    int             `json:"global_iterations"`
+	StateIterations     map[string]int  `json:"state_iterations,omitempty"`
 	LastCommit          string          `json:"last_commit,omitempty"`
 	ModelOverride       string          `json:"model_override,omitempty"`
 	SplitInto           []string        `json:"split_into,omitempty"`

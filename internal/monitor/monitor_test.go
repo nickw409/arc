@@ -35,13 +35,15 @@ func TestNewModelEmptyPlanName(t *testing.T) {
 
 func TestPhaseViewFromState(t *testing.T) {
 	ps := &arc.PhaseState{
-		Phase:       "core",
-		PhaseStatus: "implementing",
-		Iteration:   arc.Iteration{Current: 5, Max: 25},
-		TestsPassing: 3,
-		TestsTotal:   10,
-		Disputes:    []arc.Dispute{{TestName: "t1", Reason: "r"}},
-		LastVerdict:  "concerns",
+		Phase:           "core",
+		PhaseStatus:     "implementing",
+		CurrentState:    "impl",
+		Iteration:       arc.Iteration{Current: 5, Max: 25},
+		StateIterations: map[string]int{"impl": 5},
+		TestsPassing:    3,
+		TestsTotal:      10,
+		Disputes:        []arc.Dispute{{TestName: "t1", Reason: "r"}},
+		LastVerdict:     "concerns",
 	}
 
 	pv := PhaseViewFromState(ps)

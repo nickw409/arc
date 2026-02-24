@@ -90,8 +90,8 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 		line := fmt.Sprintf("  %s %s", icon, phase)
 
 		// Add iteration info if in progress
-		if state.Iteration.Current > 0 {
-			line += fmt.Sprintf(" iter %d", state.Iteration.Current)
+		if iter := state.StateIterations[state.CurrentState]; iter > 0 {
+			line += fmt.Sprintf(" iter %d", iter)
 		}
 
 		// Add test counts if present

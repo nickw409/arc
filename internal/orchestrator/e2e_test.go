@@ -283,6 +283,60 @@ func TestE2EQAGapsLoop(t *testing.T) {
 	}
 }
 
+// TestE2EStateIterationTracking verifies per-state iteration counts persist across re-entry.
+// Flow: qa(1) → qa_review(gaps_found) → qa(2) → qa_review(approved) → impl(1) → impl_review(approved) → complete
+// qa should be at 2 (not reset to 1) when re-entered after qa_review, and impl should start at 1.
+func TestE2EStateIterationTracking(t *testing.T) {
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stateiter", []string{"core"}, "feature")
+
+	// Call 0: qa
+	writeScript(t, scriptDir, 0, "QA tests written.")
+	// Call 1: qa_review → gaps_found
+	writeScript(t, scriptDir, 1, "Gaps found.\n\n## Verdict\ngaps_found")
+	// Call 2: qa (re-run after gaps)
+	writeScript(t, scriptDir, 2, "Additional tests written.")
+	// Call 3: qa_review → approved
+	writeScript(t, scriptDir, 3, "Tests now adequate.\n\n## Verdict\napproved")
+	// Call 4: impl
+	writeScript(t, scriptDir, 4, "Implementation complete.")
+	// Call 5: impl_review → approved
+	writeScript(t, scriptDir, 5, "Looks good.\n\n## Verdict\napproved")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := RunPhase(ctx, RunPhaseOptions{
+		PlanName:   "e2e-stateiter",
+		PhaseName:  "core",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
+	})
+	if err != nil {
+		t.Fatalf("RunPhase failed: %v", err)
+	}
+
+	ps := readState(t, plansDir, "e2e-stateiter", "core")
+
+	// qa ran twice (once initially, once after gaps_found)
+	if ps.StateIterations["qa"] != 2 {
+		t.Fatalf("expected qa state_iterations=2, got %d", ps.StateIterations["qa"])
+	}
+	// qa_review ran twice (gaps_found then approved)
+	if ps.StateIterations["qa_review"] != 2 {
+		t.Fatalf("expected qa_review state_iterations=2, got %d", ps.StateIterations["qa_review"])
+	}
+	// impl ran once
+	if ps.StateIterations["impl"] != 1 {
+		t.Fatalf("expected impl state_iterations=1, got %d", ps.StateIterations["impl"])
+	}
+	// impl_review ran once
+	if ps.StateIterations["impl_review"] != 1 {
+		t.Fatalf("expected impl_review state_iterations=1, got %d", ps.StateIterations["impl_review"])
+	}
+}
+
 // TestE2EImplConcerns exercises the impl concerns loop:
 // qa → qa_review(approved) → impl → impl_review(concerns) → impl → impl_review(approved) → complete
 func TestE2EImplConcerns(t *testing.T) {

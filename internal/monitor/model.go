@@ -97,7 +97,7 @@ func PhaseViewFromState(state *arc.PhaseState) PhaseView {
 		Name:         state.Phase,
 		Status:       state.PhaseStatus,
 		Icon:         icon,
-		Iteration:    state.Iteration.Current,
+		Iteration:    state.StateIterations[state.CurrentState],
 		MaxIteration: state.Iteration.Max,
 		TestsPassing: state.TestsPassing,
 		TestsTotal:   state.TestsTotal,
