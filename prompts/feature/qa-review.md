@@ -44,11 +44,25 @@ For each public function/method, verify tests exist for:
 
 If negative tests are missing, verdict MUST be **gaps_found** with specific gaps listed.
 
-{{> common/reasoning-format.md}}
+## Response Format
 
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
 ## Verdict
 
-After your analysis, provide one of these verdicts:
+approved
+```
+
+OR
+
+```
+## Verdict
+
+gaps_found
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
 
 - **approved** — Tests adequately cover the specification
-- **gaps_found** — Tests are missing coverage (list specific gaps)
+- **gaps_found** — Tests are missing coverage (list specific gaps above the verdict)

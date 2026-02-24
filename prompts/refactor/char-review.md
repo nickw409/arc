@@ -17,34 +17,29 @@ Review the characterization tests to ensure they adequately capture current beha
 - [ ] Tests capture actual (not ideal) behavior
 - [ ] Any known bugs are documented, not fixed
 
-## Write Review
-
-Create `{{phase_dir}}/char_review.md`:
-
-```markdown
-# Characterization Review: {{phase}}
-
-## Coverage
-- Interfaces tested: X/Y
-- Edge cases: covered/missing
-
-## Issues Found
-- [ ] <missing interface>
-- [ ] <missing edge case>
-
-## Test Quality
-- [ ] Tests are deterministic
-- [ ] Tests are independent
-- [ ] Tests capture behavior, not implementation
-
-## Verdict
-APPROVED - Characterization is complete
-OR
-GAPS_FOUND - Must address: <list>
-```
-
 ## Rules
 - Ensure ALL interfaces are tested before refactoring begins
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+## Response Format
+
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
+## Verdict
+
+approved
+```
+
+OR
+
+```
+## Verdict
+
+gaps_found
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+
+- **approved** — Characterization is complete
+- **gaps_found** — Must address gaps (list specific gaps above the verdict)

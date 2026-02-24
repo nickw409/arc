@@ -20,34 +20,29 @@ Review the bug fix to ensure it:
 - [ ] No new warnings or errors introduced
 - [ ] Fix reasoning is sound
 
-## Write Review
-
-Create `{{phase_dir}}/fix_review.md`:
-
-```markdown
-# Fix Review: {{phase}}
-
-## Fix Summary
-<what was changed>
-
-## Root Cause Addressed?
-Yes/No - <explanation>
-
-## Concerns
-- [ ] <concern>
-
-## Test Results
-- Regression tests: X/Y passing
-- Other tests affected: None/List
-
-## Verdict
-APPROVED - Fix is correct and minimal
-OR
-CONCERNS - Address before proceeding: <list>
-```
-
 ## Rules
 - Be thorough - bugs can recur if fix is incomplete
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+## Response Format
+
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
+## Verdict
+
+approved
+```
+
+OR
+
+```
+## Verdict
+
+concerns
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+
+- **approved** — Fix is correct and minimal
+- **concerns** — Address before proceeding (list specific concerns above the verdict)

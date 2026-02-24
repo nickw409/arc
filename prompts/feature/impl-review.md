@@ -22,11 +22,25 @@ Review the implementation for:
 3. No test modifications (unless `allow_test_changes` was set)
 4. Code quality and maintainability
 
-{{> common/reasoning-format.md}}
+## Response Format
 
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
 ## Verdict
 
-After your analysis, provide one of these verdicts:
+approved
+```
+
+OR
+
+```
+## Verdict
+
+concerns
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
 
 - **approved** — Implementation is correct and complete
-- **concerns** — Implementation has issues (list specific concerns)
+- **concerns** — Implementation has issues (list specific concerns above the verdict)

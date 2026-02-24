@@ -20,28 +20,29 @@ Review the regression tests to ensure they:
 - [ ] Edge cases are covered (boundary values, empty inputs, etc.)
 - [ ] Tests don't rely on implementation details
 
-## Write Review
-
-Create `{{phase_dir}}/test_review.md`:
-
-```markdown
-# Test Review: {{phase}}
-
-## Coverage
-- Bug reproduction: Yes/No
-- Edge cases: X/Y covered
-
-## Issues Found
-- [ ] <issue>
-
-## Verdict
-APPROVED - Tests adequately cover the bug
-OR
-GAPS_FOUND - Must address: <list>
-```
-
 ## Rules
 - Be skeptical - ensure tests actually catch the bug
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+## Response Format
+
+Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
+
+```
+## Verdict
+
+approved
+```
+
+OR
+
+```
+## Verdict
+
+gaps_found
+```
+
+The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+
+- **approved** — Tests adequately cover the bug
+- **gaps_found** — Must address gaps (list specific gaps above the verdict)

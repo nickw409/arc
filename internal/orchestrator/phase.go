@@ -60,6 +60,8 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 	}
 
 	// Run iteration loop
+	const maxConsecutiveRetries = 5
+	consecutiveRetries := 0
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -128,7 +130,18 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 		if result.Err != nil {
 			switch result.Action {
 			case arc.ActionRetry:
-				opts.Logger.Warn("iteration failed, retrying", "error", result.Err)
+				consecutiveRetries++
+				if consecutiveRetries >= maxConsecutiveRetries {
+					fmt.Printf("[%s] Blocked: %d consecutive retries on %q\n", opts.PhaseName, consecutiveRetries, phaseState.CurrentState)
+					reason := fmt.Sprintf("max consecutive retries (%d) in state %s: %v", consecutiveRetries, phaseState.CurrentState, result.Err)
+					sf.Update(func(s *arc.PhaseState) error {
+						s.PhaseStatus = "blocked"
+						s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+						return nil
+					})
+					return fmt.Errorf("phase blocked: %s", reason)
+				}
+				opts.Logger.Warn("iteration failed, retrying", "error", result.Err, "consecutive_retries", consecutiveRetries)
 				continue
 			case arc.ActionEscalate:
 				if err := handleEscalation(ctx, opts, sf, phaseState); err != nil {
@@ -141,6 +154,9 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 				return result.Err
 			}
 		}
+
+		// Successful iteration — reset retry counter
+		consecutiveRetries = 0
 
 		// Re-read state after iteration (agent may have modified it)
 		phaseState, err = sf.Read()
