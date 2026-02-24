@@ -23,6 +23,8 @@ const (
 	VerdictBlocked            Verdict = "blocked"
 	VerdictScopeAppropriate   Verdict = "scope_appropriate"
 	VerdictScopeTooLarge      Verdict = "scope_too_large"
+	VerdictBugsFound          Verdict = "bugs_found"
+	VerdictNoBugsFound        Verdict = "no_bugs_found"
 	VerdictUnknown            Verdict = "unknown"
 )
 

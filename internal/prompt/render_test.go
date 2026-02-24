@@ -143,6 +143,7 @@ func TestStateToTemplateMapAllKeys(t *testing.T) {
 		"stuck_iterations", "hang_count", "last_verdict",
 		"last_reviewed_iteration", "last_qa_reviewed_iteration",
 		"rollback_count", "global_iterations", "last_commit", "model_override",
+		"adversary_round",
 	}
 
 	for _, key := range expectedKeys {
@@ -187,8 +188,8 @@ func TestStateToTemplateMapExactCount(t *testing.T) {
 		ModelOverride:      "",
 	}
 	m := StateToTemplateMap(state)
-	if len(m) != 18 {
-		t.Fatalf("got %d keys, want exactly 18", len(m))
+	if len(m) != 19 {
+		t.Fatalf("got %d keys, want exactly 19", len(m))
 	}
 }
 

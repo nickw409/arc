@@ -22,15 +22,16 @@ type Model struct {
 
 // PhaseView is the display state for a single phase.
 type PhaseView struct {
-	Name         string
-	Status       string
-	Icon         string
-	Iteration    int
-	MaxIteration int
-	TestsPassing int
-	TestsTotal   int
-	Disputes     int
-	LastVerdict  string
+	Name           string
+	Status         string
+	Icon           string
+	Iteration      int
+	MaxIteration   int
+	TestsPassing   int
+	TestsTotal     int
+	Disputes       int
+	LastVerdict    string
+	AdversaryRound int
 }
 
 // NewModel creates a monitor model.
@@ -94,15 +95,16 @@ func PhaseViewFromState(state *arc.PhaseState) PhaseView {
 	icon := statusIcon(state.PhaseStatus)
 
 	return PhaseView{
-		Name:         state.Phase,
-		Status:       state.PhaseStatus,
-		Icon:         icon,
-		Iteration:    state.StateIterations[state.CurrentState],
-		MaxIteration: state.Iteration.Max,
-		TestsPassing: state.TestsPassing,
-		TestsTotal:   state.TestsTotal,
-		Disputes:     len(state.Disputes),
-		LastVerdict:  state.LastVerdict,
+		Name:           state.Phase,
+		Status:         state.PhaseStatus,
+		Icon:           icon,
+		Iteration:      state.StateIterations[state.CurrentState],
+		MaxIteration:   state.Iteration.Max,
+		TestsPassing:   state.TestsPassing,
+		TestsTotal:     state.TestsTotal,
+		Disputes:       len(state.Disputes),
+		LastVerdict:    state.LastVerdict,
+		AdversaryRound: state.AdversaryRound,
 	}
 }
 
@@ -114,6 +116,8 @@ func statusIcon(status string) string {
 		return "[x]"
 	case "implementing", "qa", "qa_review", "impl_review":
 		return "[>]"
+	case "adversary":
+		return "[!]"
 	case "disputed":
 		return "[!]"
 	case "blocked":

@@ -59,6 +59,8 @@ func renderPhaseRow(pv PhaseView, width int) string {
 	switch pv.Status {
 	case "implementing", "qa", "qa_review", "impl_review":
 		style = activeStyle
+	case "adversary":
+		style = activeStyle
 	case "complete":
 		style = completedStyle
 	case "blocked":
@@ -78,7 +80,9 @@ func renderPhaseRow(pv PhaseView, width int) string {
 		detail = "blocked"
 	default:
 		detail = pv.Status
-		if pv.Iteration > 0 {
+		if pv.Status == "adversary" && pv.AdversaryRound > 0 {
+			detail = fmt.Sprintf("adversary (round %d)", pv.AdversaryRound)
+		} else if pv.Iteration > 0 {
 			detail += fmt.Sprintf(" (iter %d", pv.Iteration)
 			if pv.TestsTotal > 0 && width >= 60 {
 				detail += fmt.Sprintf(", %d/%d tests", pv.TestsPassing, pv.TestsTotal)

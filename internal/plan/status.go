@@ -89,6 +89,11 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 		icon := StatusIcon(state.PhaseStatus)
 		line := fmt.Sprintf("  %s %s", icon, phase)
 
+		// Add adversary round if applicable
+		if state.AdversaryRound > 0 {
+			line += fmt.Sprintf(" adversary-round:%d", state.AdversaryRound)
+		}
+
 		// Add iteration info if in progress
 		if iter := state.StateIterations[state.CurrentState]; iter > 0 {
 			line += fmt.Sprintf(" iter %d", iter)
@@ -132,6 +137,8 @@ func StatusIcon(status string) string {
 		return "[x]"
 	case "implementing", "qa", "qa_review":
 		return "[>]"
+	case "adversary":
+		return "[!]"
 	case "disputed":
 		return "[!]"
 	case "blocked":

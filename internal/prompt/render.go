@@ -290,7 +290,7 @@ func FormatDisputeList(disputes []arc.Dispute) string {
 
 // StateToTemplateMap converts a PhaseState into a flat map[string]string.
 func StateToTemplateMap(state *arc.PhaseState) map[string]string {
-	return map[string]string{
+	m := map[string]string{
 		"phase":                      state.Phase,
 		"plan":                       state.Plan,
 		"workflow_type":              state.WorkflowType,
@@ -309,5 +309,17 @@ func StateToTemplateMap(state *arc.PhaseState) map[string]string {
 		"global_iterations":          strconv.Itoa(state.GlobalIterations),
 		"last_commit":                state.LastCommit,
 		"model_override":             state.ModelOverride,
+		"adversary_round":            strconv.Itoa(state.AdversaryRound),
 	}
+
+	// Serialize adversary test files for template access
+	if len(state.AdversaryTests) > 0 {
+		var files []string
+		for _, roundFiles := range state.AdversaryTests {
+			files = append(files, roundFiles...)
+		}
+		m["adversary_test_files"] = strings.Join(files, "\n")
+	}
+
+	return m
 }

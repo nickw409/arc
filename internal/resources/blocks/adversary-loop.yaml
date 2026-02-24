@@ -1,0 +1,28 @@
+name: adversary-loop
+description: Adversary tries to break code, impl fixes, loop until convergence
+params:
+  max_rounds: {default: "3"}
+  max_turns: {default: "30"}
+  focus: {default: ""}
+entry: adversary
+exits: [converged]
+states:
+  - name: adversary
+    description: Write adversarial tests to find bugs
+    prompt: prompts/adversarial/adversary.md
+    agent:
+      max_turns: 30
+      allowed_tools: [Read, Grep, Glob, Write, Bash]
+    verdicts: [bugs_found, no_bugs_found]
+    next:
+      bugs_found: impl_fix
+      no_bugs_found: $converged
+
+  - name: impl_fix
+    description: Fix code to pass adversary tests
+    prompt: prompts/adversarial/impl-fix.md
+    agent:
+      max_turns: 30
+    constraints:
+      max_iterations: "${max_rounds}"
+    next: adversary
