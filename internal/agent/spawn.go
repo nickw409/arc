@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -77,6 +78,10 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 	cmd := exec.CommandContext(timeoutCtx, cmdName, args...)
 	cmd.Stdin = strings.NewReader(opts.Prompt)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Clear CLAUDECODE env var so subprocesses aren't blocked by the
+	// nested-session check when arc is invoked from within Claude Code.
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
@@ -159,4 +164,16 @@ func parseJSONOutput(raw string) (string, arc.Usage, bool) {
 		CostUSD:                  envelope.TotalCost,
 	}
 	return envelope.Result, usage, true
+}
+
+// filterEnv returns a copy of environ with the named variable removed.
+func filterEnv(environ []string, name string) []string {
+	prefix := name + "="
+	filtered := make([]string, 0, len(environ))
+	for _, e := range environ {
+		if !strings.HasPrefix(e, prefix) {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
