@@ -17,8 +17,8 @@ go test ./internal/runner/ -run TestName
 # Build the CLI binary
 go build -o arc ./cmd/arc/
 
-# Build + install to $GOPATH/bin
-go install ./cmd/arc/
+# Build + install to ~/.local/bin
+go build -o ~/.local/bin/arc ./cmd/arc/
 ```
 
 ## Project Structure
