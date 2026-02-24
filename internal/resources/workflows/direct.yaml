@@ -1,0 +1,20 @@
+name: direct
+version: 1
+description: Single-pass execution for simple tasks
+
+states:
+  - name: execute
+    description: Execute the task directly
+    prompt: prompts/direct/execute.md
+    next: complete
+
+  - name: complete
+    description: Task completed
+    prompt: prompts/common/complete.md
+
+  - name: blocked
+    description: Task blocked
+    prompt: prompts/common/blocked.md
+
+entry_state: execute
+terminal_states: [complete, blocked]

@@ -264,6 +264,7 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"common/",
 		"adversaries/",
 		"validate/",
+		"dev/", // agent prompts loaded outside workflow states
 	}
 	exemptFiles := map[string]bool{
 		"orchestrator.md":   true,

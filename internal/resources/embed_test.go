@@ -25,7 +25,7 @@ func TestEmbeddedWorkflowNotFound(t *testing.T) {
 
 func TestEmbeddedAllWorkflowTypes(t *testing.T) {
 	workflows := ListWorkflows()
-	expected := []string{"bugfix", "feature", "investigation", "performance", "refactor"}
+	expected := []string{"bugfix", "direct", "feature", "investigation", "performance", "refactor"}
 
 	sort.Strings(workflows)
 	if len(workflows) != len(expected) {
