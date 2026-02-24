@@ -39,67 +39,48 @@ For EVERY integration point:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain these sections in order:
 
-```
-## Verdict
-consistent
-```
-OR
-```
-## Verdict
-inconsistent
-```
+### 1. Consistency Analysis
 
-Before the verdict, provide your analysis:
+List all findings organized by category:
 
-```markdown
-## Consistency Analysis
+- **Type Mismatches** — field types, generic bounds, Option/Result wrapping differences
+- **Integration Misalignments** — output/input type mismatches, incompatible function signatures
+- **Naming Inconsistencies** — snake_case vs camelCase, module name mismatches
+- **Contradictory Requirements** — conflicting behavioral specs across phases
 
-### Type Mismatches
-- [ ] `TypeA` in Phase 1 has field `foo: String`, Phase 2 expects `foo: &str`
-- [ ] `ErrorType` in Phase 1 missing variant used in Phase 2
+### 2. Suggestions (REQUIRED when verdict is inconsistent)
 
-### Integration Misalignments
-- [ ] Phase 1 outputs `Vec<Item>`, Phase 2 expects `&[Item]`
-- [ ] Phase 1 returns `Result<T, E1>`, Phase 2 expects `Result<T, E2>`
-
-### Naming Inconsistencies
-- [ ] Phase 1 uses `user_id`, Phase 2 uses `userId`
-- [ ] Phase 1 module `data`, Phase 2 references `types`
-
-### Contradictory Requirements
-- [ ] Phase 1 says "must panic on error", Phase 2 says "return Err"
-```
+If you find inconsistencies, you MUST output a `## Suggestions` section containing find-and-replace blocks. Each block MUST be written exactly like this, with the markers on their own lines, NOT inside code fences:
 
 ## Suggestions
 
-If your verdict is `inconsistent`, you MUST include a `## Suggestions` section with concrete fixes.
-Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
-
-Format each suggestion as:
-
-```
 <<<ORIGINAL
-exact text from plan.md to find
+exact text copied from plan.md
 >>>
 <<<SUGGESTED
 replacement text with the inconsistency fixed
 >>>
-```
 
-Rules:
-- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
-- Keep suggestions minimal — only change what's needed to fix the inconsistency.
-- Align types, names, error handling, and integration points to be consistent.
-- When two things conflict, prefer the more specific or more correct version.
-- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+CRITICAL RULES for suggestions:
+- Write <<<ORIGINAL and <<<SUGGESTED and >>> as raw text, NOT inside code blocks
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- Keep changes minimal — only fix the inconsistency
+- Align types, names, error handling, and integration points to be consistent
+- When two things conflict, prefer the more specific or more correct version
+- You may include multiple suggestion blocks
 
-If your verdict is `consistent`, omit the Suggestions section.
+### 3. Verdict
 
-```markdown
+Your response MUST end with a verdict section:
+
 ## Verdict
-[verdict here - lowercase, one of: consistent, inconsistent]
-```
+consistent
+
+OR
+
+## Verdict
+inconsistent
 
 Assume nothing aligns. Verify everything explicitly.

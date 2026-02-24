@@ -42,71 +42,47 @@ If scope is too large, identify split points:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain these sections in order:
 
-```
-## Verdict
-scope_appropriate
-```
-OR
-```
-## Verdict
-scope_too_large
-```
+### 1. Scope Analysis
 
-Before the verdict, provide your analysis:
+Provide metrics and findings:
 
-```markdown
-## Scope Analysis
+- **Metrics table** — count files, functions, types, test cases, crates against the thresholds above
+- **Concerns** — specific items that push scope beyond comfortable limits
+- **Suggested Split** — if scope is too large, how to break it into smaller phases
 
-### Metrics
-| Metric | Value | Status |
-|--------|-------|--------|
-| Files to create | X | OK/WARNING/CRITICAL |
-| Files to modify | X | OK/WARNING/CRITICAL |
-| Total files | X | OK/WARNING/CRITICAL |
-| Functions | X | OK/WARNING/CRITICAL |
-| Types | X | OK/WARNING/CRITICAL |
-| Test cases | X | OK/WARNING/CRITICAL |
-| Crates affected | X | OK/WARNING/CRITICAL |
+### 2. Suggestions (REQUIRED when verdict is scope_too_large)
 
-### Concerns
-- [ ] Phase affects 4 crates - high coordination overhead
-- [ ] 15 functions to implement - cognitive load concern
-
-### Suggested Split (if needed)
-1. Phase A: Types and core functions (files X, Y)
-2. Phase B: Integration and edge cases (files Z, W)
-```
+If scope is too large, you MUST output a `## Suggestions` section containing find-and-replace blocks. Each block MUST be written exactly like this, with the markers on their own lines, NOT inside code fences:
 
 ## Suggestions
 
-If your verdict is `scope_too_large`, you MUST include a `## Suggestions` section with concrete fixes.
-Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
-
-Format each suggestion as:
-
-```
 <<<ORIGINAL
-exact text from plan.md to find
+exact text copied from plan.md
 >>>
 <<<SUGGESTED
 replacement text with scope reduced
 >>>
-```
 
-Rules:
-- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
-- Keep suggestions minimal — only change what's needed to reduce scope.
-- Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items.
-- Do NOT remove critical functionality — reduce scope by deferring, not deleting.
-- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+CRITICAL RULES for suggestions:
+- Write <<<ORIGINAL and <<<SUGGESTED and >>> as raw text, NOT inside code blocks
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- Keep changes minimal — only reduce scope
+- Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items
+- Do NOT remove critical functionality — reduce scope by deferring, not deleting
+- You may include multiple suggestion blocks
 
-If your verdict is `scope_appropriate`, omit the Suggestions section.
+### 3. Verdict
 
-```markdown
+Your response MUST end with a verdict section:
+
 ## Verdict
-[verdict here - lowercase, one of: scope_appropriate, scope_too_large]
-```
+scope_appropriate
+
+OR
+
+## Verdict
+scope_too_large
 
 When in doubt, smaller is better.

@@ -48,69 +48,48 @@ For EVERY file referenced:
 
 ## Output Format
 
-Your response MUST end with a verdict section in this exact format:
+Your response MUST contain these sections in order:
 
-```
-## Verdict
-executable
-```
-OR
-```
-## Verdict
-blocked
-```
+### 1. Executability Analysis
 
-Before the verdict, provide your analysis:
+List all findings organized by category:
 
-```markdown
-## Executability Analysis
+- **Blocking Issues** — missing servers, nonexistent files, hardware requirements
+- **Missing Dependencies** — unlisted libraries, nonexistent modules
+- **Implicit Assumptions** — references to undefined patterns, unnamed handlers
+- **Environment Requirements** — required env vars, system prerequisites
 
-### Blocking Issues
-- [ ] Requires a server running on port 50051 - no setup step defined
-- [ ] References `config.toml` that doesn't exist in repo
-- [ ] Test requires specific hardware but no availability check
+### 2. Suggestions (REQUIRED when verdict is blocked)
 
-### Missing Dependencies
-- [ ] Uses a library not listed in project dependencies
-- [ ] References a module that doesn't exist
-
-### Implicit Assumptions
-- [ ] "Follow the existing pattern" - which pattern?
-- [ ] "Similar to the other handlers" - which handlers?
-
-### Environment Requirements
-- [ ] Requires `DATABASE_URL` environment variable
-- [ ] Requires `CUDA_HOME` to be set
-```
+If you find blockers, you MUST output a `## Suggestions` section containing find-and-replace blocks. Each block MUST be written exactly like this, with the markers on their own lines, NOT inside code fences:
 
 ## Suggestions
 
-If your verdict is `blocked`, you MUST include a `## Suggestions` section with concrete fixes.
-Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
-
-Format each suggestion as:
-
-```
 <<<ORIGINAL
-exact text from plan.md to find
+exact text copied from plan.md
 >>>
 <<<SUGGESTED
 replacement text with the blocker resolved
 >>>
-```
 
-Rules:
-- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
-- Keep suggestions minimal — only change what's needed to unblock execution.
-- Add missing file paths, explicit dependency declarations, environment setup steps, or remove impossible requirements.
-- Do NOT remove functional requirements — fix the executability issue while preserving intent.
-- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+CRITICAL RULES for suggestions:
+- Write <<<ORIGINAL and <<<SUGGESTED and >>> as raw text, NOT inside code blocks
+- The ORIGINAL text must be an exact character-for-character substring of the plan
+- Keep changes minimal — only fix the executability blocker
+- Add missing file paths, explicit dependency declarations, environment setup steps, or remove impossible requirements
+- Do NOT remove functional requirements — fix the executability issue while preserving intent
+- You may include multiple suggestion blocks
 
-If your verdict is `executable`, omit the Suggestions section.
+### 3. Verdict
 
-```markdown
+Your response MUST end with a verdict section:
+
 ## Verdict
-[verdict here - lowercase, one of: executable, blocked]
-```
+executable
+
+OR
+
+## Verdict
+blocked
 
 If you can imagine a way it could fail, it will fail.
