@@ -18,8 +18,7 @@ Profile the code to identify performance bottlenecks.
 
 ## Profiling Tools
 
-- Rust: `cargo flamegraph`, `perf`, `valgrind --tool=callgrind`
-- General: CPU profilers, memory profilers, I/O profilers
+Use the profiling tools appropriate for the project's language (e.g. `go tool pprof` for Go, `perf` for C/C++, `py-spy` for Python).
 
 ## Analysis Document
 
@@ -61,4 +60,4 @@ Create `{{phase_dir}}/analysis.md`:
 - Document expected impact for each recommendation
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of your findings and exit.
