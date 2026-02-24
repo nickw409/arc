@@ -14,6 +14,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
+	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
 )
@@ -98,6 +99,15 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 			fmt.Println("\nAll phases complete.")
 			if err := generateCompletionReport(planDir, opts.PlanName, meta, phaseStates); err != nil {
 				return err
+			}
+			if _, err := plan.GenerateSummary(plan.SummaryOptions{
+				PlanDir:     planDir,
+				PlanName:    opts.PlanName,
+				Meta:        meta,
+				PhaseStates: phaseStates,
+				ProjectDir:  opts.ProjectDir,
+			}); err != nil {
+				opts.Logger.Warn("failed to generate summary", "error", err)
 			}
 			if meta.WorkflowType == "performance" {
 				printUsageSummary(meta, phaseStates)

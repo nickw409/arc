@@ -2,6 +2,7 @@ package review
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -16,12 +17,16 @@ var adversaryPriority = map[string]int{
 	"scope":         4,
 }
 
+// DefaultConfidenceThreshold is the minimum confidence for a suggestion to be applied.
+const DefaultConfidenceThreshold = 80
+
 // Suggestion represents a single find-and-replace suggestion from an adversary.
 type Suggestion struct {
-	Adversary string
-	Priority  int
-	Original  string
-	Suggested string
+	Adversary  string
+	Priority   int
+	Original   string
+	Suggested  string
+	Confidence int // 0-100, parsed from adversary output. Default 100 if not specified.
 }
 
 // isBlockCloser returns true if the line is a block-closing delimiter.
@@ -76,10 +81,35 @@ func ParseSuggestions(adversaryName string, output string) []Suggestion {
 	var suggestions []Suggestion
 	lines := strings.Split(output, "\n")
 
+	confidenceRe := regexp.MustCompile(`^<<<ORIGINAL\s*\(confidence:\s*(-?\d+)\s*\)$`)
+	// Broader pattern to match <<<ORIGINAL with any parenthetical annotation
+	originalWithParenRe := regexp.MustCompile(`^<<<ORIGINAL\s*\(`)
+
 	i := 0
 	for i < len(lines) {
 		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "<<<ORIGINAL" {
+
+		// Parse confidence annotation from <<<ORIGINAL line
+		confidence := 100
+		isOriginal := false
+		if trimmed == "<<<ORIGINAL" {
+			isOriginal = true
+		} else if m := confidenceRe.FindStringSubmatch(trimmed); m != nil {
+			isOriginal = true
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				confidence = n
+				if confidence < 0 {
+					confidence = 0
+				}
+				if confidence > 100 {
+					confidence = 100
+				}
+			}
+		} else if originalWithParenRe.MatchString(trimmed) {
+			// Non-numeric confidence or other annotation — treat as ORIGINAL with default confidence
+			isOriginal = true
+		}
+		if !isOriginal {
 			i++
 			continue
 		}
@@ -145,10 +175,11 @@ func ParseSuggestions(adversaryName string, output string) []Suggestion {
 		}
 
 		suggestions = append(suggestions, Suggestion{
-			Adversary: adversaryName,
-			Priority:  priority,
-			Original:  original,
-			Suggested: suggested,
+			Adversary:  adversaryName,
+			Priority:   priority,
+			Original:   original,
+			Suggested:  suggested,
+			Confidence: confidence,
 		})
 	}
 
@@ -213,4 +244,15 @@ func stableSortSuggestions(s []Suggestion) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
+}
+
+// FilterByConfidence removes suggestions below the given threshold.
+func FilterByConfidence(suggestions []Suggestion, threshold int) []Suggestion {
+	result := make([]Suggestion, 0)
+	for _, s := range suggestions {
+		if s.Confidence >= threshold {
+			result = append(result, s)
+		}
+	}
+	return result
 }

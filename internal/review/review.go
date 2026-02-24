@@ -172,6 +172,7 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		for _, v := range verdicts {
 			if v.Status == "failed" {
 				suggestions := ParseSuggestions(v.Name, v.Output)
+				suggestions = FilterByConfidence(suggestions, DefaultConfidenceThreshold)
 				allSuggestions = append(allSuggestions, suggestions...)
 			}
 		}
