@@ -81,7 +81,34 @@ Before the verdict, provide your analysis:
 ### Environment Requirements
 - [ ] Requires `DATABASE_URL` environment variable
 - [ ] Requires `CUDA_HOME` to be set
+```
 
+## Suggestions
+
+If your verdict is `blocked`, you MUST include a `## Suggestions` section with concrete fixes.
+Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
+
+Format each suggestion as:
+
+```
+<<<ORIGINAL
+exact text from plan.md to find
+>>>
+<<<SUGGESTED
+replacement text with the blocker resolved
+>>>
+```
+
+Rules:
+- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
+- Keep suggestions minimal — only change what's needed to unblock execution.
+- Add missing file paths, explicit dependency declarations, environment setup steps, or remove impossible requirements.
+- Do NOT remove functional requirements — fix the executability issue while preserving intent.
+- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+
+If your verdict is `executable`, omit the Suggestions section.
+
+```markdown
 ## Verdict
 [verdict here - lowercase, one of: executable, blocked]
 ```

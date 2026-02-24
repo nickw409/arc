@@ -558,6 +558,141 @@ func TestReviewCachedRunNoIterationIncrement(t *testing.T) {
 	}
 }
 
+func TestReviewAutoRemediation(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Write a plan.md that the mock agent can suggest fixes for
+	planContent := "# Phase 1\n\nfunc Foo() {\n    return nil\n}\n"
+	if err := os.WriteFile(filepath.Join(planDir, "phases", "phase-1", "plan.md"), []byte(planContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up scripted responses: first call returns a failure with suggestions,
+	// subsequent calls return passing verdicts.
+	// The mock agent uses MOCK_SCRIPT_DIR for sequential responses.
+	scriptDir := t.TempDir()
+
+	// We have 5 adversaries running in parallel, and each uses the same mock binary.
+	// Since we can't control which adversary gets which script call, we use
+	// MOCK_OUTPUT to return a consistent passing response with a suggestion.
+	// The first run: all agents return failure with a suggestion
+	// After remediation: plan.md changes, cache invalidates, second run: all pass
+
+	// Use MOCK_OUTPUT env to make all agents return a failure with suggestions on first call
+	failOutput := "## Coverage Analysis\n\nMissing error return.\n\n## Suggestions\n\n<<<ORIGINAL\nfunc Foo() {\n>>>\n<<<SUGGESTED\nfunc Foo() error {\n>>>\n\n## Verdict\ncoverage_gaps\n"
+
+	// For this test, use scripted responses:
+	// call_0 through call_4 (first run, 5 adversaries): all fail with suggestions
+	// call_5 through call_9 (second run, 5 adversaries): all pass
+	for i := 0; i < 5; i++ {
+		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(failOutput), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	passOutput := "## Coverage Analysis\n\nAll good.\n\n## Verdict\ncoverage_sufficient\n"
+	for i := 5; i < 10; i++ {
+		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(passOutput), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Override agent command to use scripted mock
+	original := agentCommandName
+	defer func() { agentCommandName = original }()
+
+	// Build a wrapper script that sets MOCK_SCRIPT_DIR
+	wrapperScript := fmt.Sprintf("#!/bin/sh\nexport MOCK_SCRIPT_DIR=%s\nexec %s \"$@\"\n", scriptDir, agentCommandName)
+	wrapperPath := filepath.Join(t.TempDir(), "wrapper.sh")
+	if err := os.WriteFile(wrapperPath, []byte(wrapperScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentCommandName = wrapperPath
+
+	result, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify plan.md was modified
+	updatedPlan, err := os.ReadFile(filepath.Join(planDir, "phases", "phase-1", "plan.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updatedPlan), "func Foo() error {") {
+		t.Fatalf("expected plan.md to be updated with suggestion, got: %s", string(updatedPlan))
+	}
+
+	// Verify suggestions were applied
+	if result.SuggestionsApplied == 0 {
+		t.Fatal("expected at least one suggestion to be applied")
+	}
+
+	// Verify iteration details were recorded
+	if len(result.IterationDetails) == 0 {
+		t.Fatal("expected iteration details to be recorded")
+	}
+}
+
+func TestReviewAutoRemediationNoSuggestions(t *testing.T) {
+	// When adversaries fail but provide no suggestions, the loop should stop
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+
+	result, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The mock agent output from the default binary won't contain valid suggestions,
+	// so the loop should run exactly once and stop
+	if len(result.IterationDetails) != 1 {
+		t.Fatalf("expected 1 iteration (no suggestions to apply), got %d", len(result.IterationDetails))
+	}
+}
+
+func TestReviewIterationDetails(t *testing.T) {
+	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
+
+	result, err := Run(context.Background(), ReviewOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		ArcHome:  t.TempDir(),
+		Phase:    "phase-1",
+		Logger:   testLogger(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Should have at least one iteration detail
+	if len(result.IterationDetails) == 0 {
+		t.Fatal("expected at least one iteration detail")
+	}
+
+	detail := result.IterationDetails[0]
+	if detail.Iteration != 1 {
+		t.Fatalf("expected first iteration to be 1, got %d", detail.Iteration)
+	}
+	if len(detail.Verdicts) != 5 {
+		t.Fatalf("expected 5 verdict entries, got %d", len(detail.Verdicts))
+	}
+}
+
 func TestReviewHistoryFirstRun(t *testing.T) {
 	plansDir := setupReviewPlan(t, "test-plan", []string{"phase-1"})
 	planDir := filepath.Join(plansDir, "test-plan")

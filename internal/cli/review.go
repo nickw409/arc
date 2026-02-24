@@ -115,6 +115,7 @@ func newReviewCmd() *cobra.Command {
 			// Print in phase order
 			overallStatus := "approved"
 			maxIteration := 0
+			totalSuggestions := 0
 			reviewResults := make(map[string]string)
 			for _, phase := range phases {
 				pr := phaseResults[phase]
@@ -126,11 +127,30 @@ func newReviewCmd() *cobra.Command {
 					continue
 				}
 
-				fmt.Printf("Phase: %s (iteration %d/%d)\n", phase, pr.Result.Iteration, review.MaxReviewIterations)
+				fmt.Printf("Phase: %s\n", phase)
+
+				// Show iteration details if there were multiple
+				for _, detail := range pr.Result.IterationDetails {
+					fmt.Printf("  Iteration %d/%d:\n", detail.Iteration, review.MaxReviewIterations)
+					for name, status := range detail.Verdicts {
+						mark := "PASS"
+						if status == "failed" || status == "error" {
+							mark = "FAIL"
+						}
+						fmt.Printf("    [%s] %s\n", mark, name)
+					}
+					if detail.SuggestionsApplied > 0 {
+						fmt.Printf("    Applied %d suggestion(s)\n", detail.SuggestionsApplied)
+					}
+				}
+
 				if pr.Result.Iteration > maxIteration {
 					maxIteration = pr.Result.Iteration
 				}
+				totalSuggestions += pr.Result.SuggestionsApplied
 
+				// Show final verdicts
+				fmt.Printf("  Final verdicts:\n")
 				for _, v := range pr.Result.Verdicts {
 					statusMark := "PASS"
 					if v.Status == "failed" || v.Status == "error" {
@@ -140,7 +160,7 @@ func newReviewCmd() *cobra.Command {
 					} else if v.Status == "cached" {
 						statusMark = "FAIL*"
 					}
-					fmt.Printf("  [%s] %s: verdict=%s\n", statusMark, v.Name, v.Verdict)
+					fmt.Printf("    [%s] %s: verdict=%s\n", statusMark, v.Name, v.Verdict)
 				}
 				fmt.Printf("  Phase result: %s\n\n", pr.Result.Status)
 
@@ -159,6 +179,9 @@ func newReviewCmd() *cobra.Command {
 				}
 			}
 
+			if totalSuggestions > 0 {
+				fmt.Printf("Total suggestions applied: %d\n", totalSuggestions)
+			}
 			fmt.Printf("Review complete: status=%s\n", overallStatus)
 
 			// Update plan.json with review results

@@ -72,9 +72,8 @@ arc init --force                            # Re-initialize existing project
 # Plan lifecycle
 arc plan <name> <phase1> [phase2] ...       # Create plan scaffolding
 arc plan --type bugfix <name> <phases...>   # Create with specific workflow type
-arc review <plan-name>                      # Run adversarial review (5 adversaries)
+arc review <plan-name>                      # Run adversarial review (5 adversaries, max 5 iterations)
 arc review <plan-name> --phase <phase>      # Review a single phase
-arc review <plan-name> --reset              # Clear cached results and re-review
 arc run <plan-name>                         # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>        # Run single iteration for a phase
 arc status [plan-name]                      # Show plan/phase status
@@ -93,6 +92,7 @@ arc manage <plan> <phase> note <text>       # Set phase notes
 arc manage <plan> <phase> iteration <n>     # Set iteration number
 arc manage <plan> <phase> copy-from <src>   # Copy state from another phase
 arc manage <plan> <phase> show              # Show phase state.json
+arc manage reset-review <plan> <phase>     # Clear review cache and iteration counter
 ```
 
 ### Workflow Types

@@ -63,7 +63,34 @@ Before the verdict, provide your analysis:
 
 ### Untested Error Variants
 - [ ] `ErrorType::Variant` - never triggered in tests
+```
 
+## Suggestions
+
+If your verdict is `coverage_gaps`, you MUST include a `## Suggestions` section with concrete fixes.
+Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
+
+Format each suggestion as:
+
+```
+<<<ORIGINAL
+exact text from plan.md to find
+>>>
+<<<SUGGESTED
+replacement text with the issue fixed
+>>>
+```
+
+Rules:
+- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
+- Keep suggestions minimal — only change what's needed to fix the coverage gap.
+- Add missing test cases, edge case specifications, or error handling requirements.
+- Do NOT remove existing content unless replacing it with something better.
+- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+
+If your verdict is `coverage_sufficient`, omit the Suggestions section.
+
+```markdown
 ## Verdict
 [verdict here - lowercase, one of: coverage_sufficient, coverage_gaps]
 ```

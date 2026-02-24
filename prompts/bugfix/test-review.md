@@ -19,6 +19,8 @@ Review the regression tests to ensure they:
 - [ ] Assertions will pass when bug is fixed (not overly strict)
 - [ ] Edge cases are covered (boundary values, empty inputs, etc.)
 - [ ] Tests don't rely on implementation details
+- [ ] Negative tests exist for adjacent inputs and related error paths
+- [ ] Malformed/corrupt input variants are tested
 
 ## Write Review
 

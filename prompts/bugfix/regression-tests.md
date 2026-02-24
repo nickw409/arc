@@ -26,6 +26,16 @@ Write regression tests that:
 - Tests MUST have clear names: `test_<bug>_<scenario>`
 - Tests MUST use assertions that will pass after fix
 
+### Negative Tests
+
+Beyond reproducing the bug, write negative tests for the surrounding code:
+
+1. **Inputs adjacent to the bug** — if the bug involves a specific value, test nearby values (off-by-one, empty, nil, max)
+2. **Related error paths** — if the bug is in error handling, verify other error paths in the same function aren't similarly broken
+3. **Malformed variants** — if the bug involves parsing or data handling, test with corrupt, truncated, or unexpected input
+
+Name these: `test_<bug>_negative_<scenario>`
+
 ## Test File Location
 
 Use descriptive names and register test files in state.json.

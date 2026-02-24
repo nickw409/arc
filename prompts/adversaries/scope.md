@@ -77,7 +77,34 @@ Before the verdict, provide your analysis:
 ### Suggested Split (if needed)
 1. Phase A: Types and core functions (files X, Y)
 2. Phase B: Integration and edge cases (files Z, W)
+```
 
+## Suggestions
+
+If your verdict is `scope_too_large`, you MUST include a `## Suggestions` section with concrete fixes.
+Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
+
+Format each suggestion as:
+
+```
+<<<ORIGINAL
+exact text from plan.md to find
+>>>
+<<<SUGGESTED
+replacement text with scope reduced
+>>>
+```
+
+Rules:
+- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
+- Keep suggestions minimal — only change what's needed to reduce scope.
+- Defer non-essential work to later phases, simplify overspecified sections, or remove unnecessary items.
+- Do NOT remove critical functionality — reduce scope by deferring, not deleting.
+- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+
+If your verdict is `scope_appropriate`, omit the Suggestions section.
+
+```markdown
 ## Verdict
 [verdict here - lowercase, one of: scope_appropriate, scope_too_large]
 ```

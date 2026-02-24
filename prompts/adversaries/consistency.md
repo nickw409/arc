@@ -70,7 +70,34 @@ Before the verdict, provide your analysis:
 
 ### Contradictory Requirements
 - [ ] Phase 1 says "must panic on error", Phase 2 says "return Err"
+```
 
+## Suggestions
+
+If your verdict is `inconsistent`, you MUST include a `## Suggestions` section with concrete fixes.
+Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
+
+Format each suggestion as:
+
+```
+<<<ORIGINAL
+exact text from plan.md to find
+>>>
+<<<SUGGESTED
+replacement text with the inconsistency fixed
+>>>
+```
+
+Rules:
+- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
+- Keep suggestions minimal — only change what's needed to fix the inconsistency.
+- Align types, names, error handling, and integration points to be consistent.
+- When two things conflict, prefer the more specific or more correct version.
+- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+
+If your verdict is `consistent`, omit the Suggestions section.
+
+```markdown
 ## Verdict
 [verdict here - lowercase, one of: consistent, inconsistent]
 ```

@@ -41,11 +41,22 @@ Write tests based on the **## Test Cases** section of the phase specification. T
 4. Use the project's standard test framework — do not add new test dependencies
 5. For concurrent tests, follow the spec's concurrency requirements
 
+### Negative Tests
+
+In addition to the spec's test cases, you MUST write negative tests that verify the code rejects bad input and handles failure modes correctly. For each public function or method in the spec:
+
+1. **Invalid inputs** — pass wrong types, nil/null, empty values, negative numbers where positive expected, strings where numbers expected
+2. **Boundary violations** — exceed documented limits, underflow, overflow, off-by-one at boundaries
+3. **Malformed data** — corrupt serialized input, truncated data, unexpected encoding, extra/missing fields
+4. **Error propagation** — verify errors from dependencies bubble up correctly, not swallowed or wrapped incorrectly
+5. **State violations** — call methods in wrong order, operate on closed/uninitialized resources, double-close, use-after-free patterns
+
+Name negative tests clearly: `Test<Function>_<InvalidCondition>` (e.g., `TestParsePlan_EmptyInput`, `TestRunPhase_NilContext`, `TestApply_MalformedYAML`).
+
 ### DO NOT
 
 - Do NOT implement production code — only write tests and any type stubs needed for compilation
 - Do NOT add dependencies beyond what the spec lists
-- Do NOT invent test cases — implement exactly what the spec defines
 - Do NOT skip tests that need fixtures — create the fixture files as specified
 
 ## Output Format

@@ -65,7 +65,34 @@ Before the verdict, provide your analysis:
 
 ### Minor (could be clearer)
 - [ ] **Line Z**: Consider specifying the exact error message format
+```
 
+## Suggestions
+
+If your verdict is `ambiguous`, you MUST include a `## Suggestions` section with concrete fixes.
+Each suggestion is a find-and-replace block targeting the exact text in the plan that needs to change.
+
+Format each suggestion as:
+
+```
+<<<ORIGINAL
+exact text from plan.md to find
+>>>
+<<<SUGGESTED
+replacement text with the ambiguity resolved
+>>>
+```
+
+Rules:
+- The ORIGINAL text must be an exact substring of the plan. Copy it character-for-character.
+- Keep suggestions minimal — only change what's needed to resolve the ambiguity.
+- Add explicit types, clarify behavioral specs, specify file paths, define terminology.
+- Do NOT remove existing content unless replacing it with something more specific.
+- Multiple suggestions are allowed. Each pair of ORIGINAL/SUGGESTED blocks is one suggestion.
+
+If your verdict is `unambiguous`, omit the Suggestions section.
+
+```markdown
 ## Verdict
 [verdict here - lowercase, one of: unambiguous, ambiguous]
 ```
