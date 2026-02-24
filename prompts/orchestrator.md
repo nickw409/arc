@@ -1,9 +1,8 @@
 ## CRITICAL: FORBIDDEN COMMANDS
 
 **YOU MUST NEVER RUN THESE COMMANDS DIRECTLY:**
-- `cargo` (any subcommand)
 - `bats`
-- `npm test`, `vitest`, `jest`, `pytest`, `go test`
+- `npm test`, `vitest`, `jest`, `pytest`, `go test`, `cargo test`
 - Any test runner
 
 **TO RUN TESTS, USE ONLY:**
@@ -108,7 +107,7 @@ $ARC_SCRIPTS_DIR/commit-phase.sh <plan> <phase>
 
 ## Plan Completion
 
-After integration phase completes:
+After the final phase completes:
 ```bash
 $ARC_SCRIPTS_DIR/generate-completion-report.sh $ORCHESTRATOR_PLAN
 ```

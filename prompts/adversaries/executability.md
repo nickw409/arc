@@ -22,13 +22,12 @@ For EVERY file referenced:
 - [ ] Does this require a running server?
 - [ ] Does this require network access?
 - [ ] Does this require GPU/CUDA?
-- [ ] Are all dependencies in Cargo.toml with correct versions?
+- [ ] Are all dependencies declared in the project manifest with correct versions?
 
 ### Build Requirements
 - [ ] Can the code compile with current dependencies?
 - [ ] Are there circular dependencies?
-- [ ] Are feature flags required?
-- [ ] Is the correct Rust edition specified?
+- [ ] Are feature flags or build tags required?
 
 ### Test Requirements
 - [ ] Can tests run in isolation?

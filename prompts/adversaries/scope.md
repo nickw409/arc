@@ -19,7 +19,7 @@ Count these metrics from the plan and compare to thresholds:
 | Functions | >12 | >18 |
 | Types (structs+enums) | >10 | >15 |
 | Test cases | >40 | >60 |
-| Crates affected | >2 | >3 |
+| Packages affected | >2 | >3 |
 
 ## Attack Checklist
 
@@ -48,7 +48,7 @@ Your response MUST contain ALL THREE sections below, in this exact order. Omitti
 
 Provide metrics and findings:
 
-- **Metrics table** — count files, functions, types, test cases, crates against the thresholds above
+- **Metrics table** — count files, functions, types, test cases, packages against the thresholds above
 - **Concerns** — specific items that push scope beyond comfortable limits
 - **Suggested Split** — if scope is too large, how to break it into smaller phases
 
