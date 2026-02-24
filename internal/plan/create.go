@@ -16,10 +16,12 @@ var planNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
 
 // CreateOptions configures plan creation.
 type CreateOptions struct {
-	PlansDir     string
-	Name         string
-	Phases       []string
-	WorkflowType string
+	PlansDir       string
+	Name           string
+	Phases         []string
+	WorkflowType   string
+	PlanContent    map[string]string // optional: phase name → plan.md content (skip template)
+	CustomWorkflow []byte            // optional: custom workflow YAML (written as workflow.yaml)
 }
 
 // Create creates a new plan with directory structure, state files, and templates.
@@ -85,8 +87,12 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		return nil, fmt.Errorf("write session_id: %w", err)
 	}
 
-	// 6. Copy workflow YAML for non-feature types
-	if opts.WorkflowType != "feature" {
+	// 6. Copy workflow YAML for non-feature types, or write custom workflow
+	if len(opts.CustomWorkflow) > 0 {
+		if err := os.WriteFile(filepath.Join(planDir, "workflow.yaml"), opts.CustomWorkflow, 0644); err != nil {
+			return nil, fmt.Errorf("write workflow.yaml: %w", err)
+		}
+	} else if opts.WorkflowType != "feature" {
 		workflowData, err := resources.WorkflowBytes(opts.WorkflowType)
 		if err != nil {
 			return nil, fmt.Errorf("read workflow %s: %w", opts.WorkflowType, err)
@@ -130,8 +136,14 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 			return nil, fmt.Errorf("write state.json for %s: %w", phase, err)
 		}
 
-		// Write plan.md
-		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), planTemplate, 0644); err != nil {
+		// Write plan.md — use custom content if provided, otherwise default template
+		planMD := planTemplate
+		if opts.PlanContent != nil {
+			if content, ok := opts.PlanContent[phase]; ok && content != "" {
+				planMD = []byte(content)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), planMD, 0644); err != nil {
 			return nil, fmt.Errorf("write plan.md for %s: %w", phase, err)
 		}
 	}

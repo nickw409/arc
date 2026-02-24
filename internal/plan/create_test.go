@@ -433,3 +433,244 @@ func TestCreatePlanStateJsonNonnullSlices(t *testing.T) {
 		t.Fatal("disputes should be [] not null")
 	}
 }
+
+// --- PlanContent and CustomWorkflow tests ---
+
+func TestCreateOptions_PlanContent(t *testing.T) {
+	dir := t.TempDir()
+
+	customContent := "# Custom Phase Content\n\nThis is custom plan.md content for phase1."
+	_, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "pc-test",
+		Phases:       []string{"phase1"},
+		WorkflowType: "feature",
+		PlanContent:  map[string]string{"phase1": customContent},
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+
+	planMD, err := os.ReadFile(filepath.Join(dir, "pc-test", "phases", "phase1", "plan.md"))
+	if err != nil {
+		t.Fatalf("ReadFile plan.md error: %v", err)
+	}
+	if string(planMD) != customContent {
+		t.Errorf("plan.md = %q, want %q", string(planMD), customContent)
+	}
+}
+
+func TestCreateOptions_CustomWorkflow(t *testing.T) {
+	dir := t.TempDir()
+
+	workflowYAML := []byte(`name: custom
+version: 1
+description: Custom workflow
+
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: impl_review
+
+  - name: impl_review
+    description: Review impl
+    prompt: prompts/feature/impl-review.md
+    verdicts:
+      - approved
+      - concerns
+    next:
+      approved: complete
+      concerns: impl
+
+  - name: complete
+    description: Task completed
+    prompt: prompts/common/complete.md
+
+  - name: blocked
+    description: Task blocked
+    prompt: prompts/common/blocked.md
+
+entry_state: impl
+terminal_states: [complete, blocked]
+`)
+
+	// Note: "custom" is not a built-in workflow type, so we must use a
+	// valid workflow type for the validation check. The CustomWorkflow
+	// content overrides whatever built-in workflow would have been copied.
+	// We use "direct" here since it's a valid type.
+	meta, err := Create(CreateOptions{
+		PlansDir:       dir,
+		Name:           "cw-test",
+		Phases:         []string{"impl"},
+		WorkflowType:   "direct",
+		CustomWorkflow: workflowYAML,
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+
+	// workflow.yaml should be written with custom content
+	workflowPath := filepath.Join(dir, "cw-test", "workflow.yaml")
+	data, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("workflow.yaml should exist: %v", err)
+	}
+	if !bytes.Equal(data, workflowYAML) {
+		t.Errorf("workflow.yaml content mismatch")
+	}
+
+	// state.json should have the WorkflowType we set
+	stateData, err := os.ReadFile(filepath.Join(dir, "cw-test", "phases", "impl", "state.json"))
+	if err != nil {
+		t.Fatalf("ReadFile state.json error: %v", err)
+	}
+	var state arc.PhaseState
+	if err := json.Unmarshal(stateData, &state); err != nil {
+		t.Fatalf("Unmarshal state.json error: %v", err)
+	}
+	if state.WorkflowType != "direct" {
+		t.Errorf("state.WorkflowType = %q, want %q", state.WorkflowType, "direct")
+	}
+	_ = meta
+}
+
+func TestCreateOptions_PlanContentPartial(t *testing.T) {
+	dir := t.TempDir()
+
+	customContent := "# Custom for phase-a\n\nCustom content."
+	_, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "partial-test",
+		Phases:       []string{"phase-a", "phase-b", "phase-c"},
+		WorkflowType: "feature",
+		PlanContent: map[string]string{
+			"phase-a": customContent,
+			"phase-b": "# Custom for phase-b",
+			// phase-c has no entry — should use default template
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+
+	// phase-a uses custom content
+	mdA, err := os.ReadFile(filepath.Join(dir, "partial-test", "phases", "phase-a", "plan.md"))
+	if err != nil {
+		t.Fatalf("ReadFile plan.md for phase-a error: %v", err)
+	}
+	if string(mdA) != customContent {
+		t.Errorf("phase-a plan.md = %q, want custom content", string(mdA))
+	}
+
+	// phase-b uses custom content
+	mdB, err := os.ReadFile(filepath.Join(dir, "partial-test", "phases", "phase-b", "plan.md"))
+	if err != nil {
+		t.Fatalf("ReadFile plan.md for phase-b error: %v", err)
+	}
+	if string(mdB) != "# Custom for phase-b" {
+		t.Errorf("phase-b plan.md = %q, want custom content", string(mdB))
+	}
+
+	// phase-c uses default template
+	mdC, err := os.ReadFile(filepath.Join(dir, "partial-test", "phases", "phase-c", "plan.md"))
+	if err != nil {
+		t.Fatalf("ReadFile plan.md for phase-c error: %v", err)
+	}
+	if strings.Contains(string(mdC), "Custom") {
+		t.Errorf("phase-c plan.md should use default template, got: %s", string(mdC))
+	}
+	// Should have default template content
+	if !strings.Contains(string(mdC), "Phase:") {
+		t.Errorf("phase-c plan.md should contain default template content")
+	}
+}
+
+func TestCreateOptions_CustomWorkflowInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+
+	// Invalid YAML — plan.Create should write it without validation
+	invalidYAML := []byte("invalid: yaml: syntax:")
+
+	_, err := Create(CreateOptions{
+		PlansDir:       dir,
+		Name:           "invalid-wf",
+		Phases:         []string{"impl"},
+		WorkflowType:   "feature",
+		CustomWorkflow: invalidYAML,
+	})
+	// Should succeed — validation happens later during workflow loading
+	if err != nil {
+		t.Fatalf("Create should not fail for invalid custom workflow YAML: %v", err)
+	}
+
+	// Verify the file was written as-is
+	data, err := os.ReadFile(filepath.Join(dir, "invalid-wf", "workflow.yaml"))
+	if err != nil {
+		t.Fatalf("workflow.yaml should exist: %v", err)
+	}
+	if !bytes.Equal(data, invalidYAML) {
+		t.Errorf("workflow.yaml content mismatch")
+	}
+}
+
+func TestCreateOptions_PlanContentEmptyString(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "empty-content",
+		Phases:       []string{"phase1"},
+		WorkflowType: "feature",
+		PlanContent:  map[string]string{"phase1": ""},
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+
+	// Empty string means skip custom content — use default template
+	planMD, err := os.ReadFile(filepath.Join(dir, "empty-content", "phases", "phase1", "plan.md"))
+	if err != nil {
+		t.Fatalf("ReadFile plan.md error: %v", err)
+	}
+	// Should have default template content (not empty)
+	if len(planMD) == 0 {
+		t.Error("plan.md should not be empty when PlanContent is empty string")
+	}
+	if !strings.Contains(string(planMD), "Phase:") {
+		t.Errorf("plan.md should contain default template content, got: %s", string(planMD))
+	}
+}
+
+func TestCreateOptions_PlanContentForNonexistentPhase(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "nonexist-phase",
+		Phases:       []string{"aa", "bb"},
+		WorkflowType: "feature",
+		PlanContent:  map[string]string{"cc": "content for nonexistent phase"},
+	})
+	// Should succeed — "cc" entry is just ignored
+	if err != nil {
+		t.Fatalf("Create should not fail for PlanContent with nonexistent phase: %v", err)
+	}
+
+	// Verify aa and bb exist with default templates
+	for _, phase := range []string{"aa", "bb"} {
+		planMD, err := os.ReadFile(filepath.Join(dir, "nonexist-phase", "phases", phase, "plan.md"))
+		if err != nil {
+			t.Fatalf("ReadFile plan.md for %s error: %v", phase, err)
+		}
+		if len(planMD) == 0 {
+			t.Errorf("plan.md for %s should not be empty", phase)
+		}
+	}
+
+	// Verify "cc" directory was NOT created
+	_, err = os.Stat(filepath.Join(dir, "nonexist-phase", "phases", "cc"))
+	if err == nil {
+		t.Error("phase directory 'cc' should not exist")
+	}
+}
