@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/block"
+	"github.com/nwiley/arc/internal/resources"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +33,7 @@ type rawWorkflow struct {
 	TerminalStates       []string                  `yaml:"terminal_states"`
 	InterventionTriggers []arc.InterventionTrigger `yaml:"intervention_triggers"`
 	States               []rawState                `yaml:"states"`
+	Pipeline             []block.PipelineStep      `yaml:"pipeline"`
 }
 
 // Load reads a workflow YAML file and returns a validated, normalized Workflow.
@@ -43,6 +46,8 @@ func Load(path string) (*arc.Workflow, error) {
 }
 
 // LoadBytes loads a workflow from raw YAML bytes.
+// If the YAML contains a "pipeline" key, it uses block composition.
+// Otherwise it loads as a traditional state-machine workflow.
 func LoadBytes(data []byte) (*arc.Workflow, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty workflow data")
@@ -51,6 +56,11 @@ func LoadBytes(data []byte) (*arc.Workflow, error) {
 	var raw rawWorkflow
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parsing workflow YAML: %w", err)
+	}
+
+	// Pipeline format: compose from blocks
+	if len(raw.Pipeline) > 0 {
+		return loadComposed(raw)
 	}
 
 	w := &arc.Workflow{
@@ -91,4 +101,81 @@ func LoadBytes(data []byte) (*arc.Workflow, error) {
 	}
 
 	return w, nil
+}
+
+// loadComposed resolves a pipeline-format workflow by loading blocks and composing them.
+func loadComposed(raw rawWorkflow) (*arc.Workflow, error) {
+	// Load all referenced blocks
+	blockDefs := make(map[string]*block.Block)
+	for _, step := range raw.Pipeline {
+		if step.Block != "" {
+			if _, ok := blockDefs[step.Block]; !ok {
+				b, err := loadBlockDef(step.Block)
+				if err != nil {
+					return nil, fmt.Errorf("loading block %q: %w", step.Block, err)
+				}
+				blockDefs[step.Block] = b
+			}
+		}
+		if step.Parallel != nil {
+			for _, pbr := range step.Parallel.Blocks {
+				if _, ok := blockDefs[pbr.Block]; !ok {
+					b, err := loadBlockDef(pbr.Block)
+					if err != nil {
+						return nil, fmt.Errorf("loading parallel block %q: %w", pbr.Block, err)
+					}
+					blockDefs[pbr.Block] = b
+				}
+			}
+		}
+	}
+
+	wf, parallelGroups, err := block.ComposePipeline(raw.Pipeline, blockDefs)
+	if err != nil {
+		return nil, fmt.Errorf("composing pipeline: %w", err)
+	}
+
+	wf.Name = raw.Name
+	wf.Description = raw.Description
+	wf.InterventionTriggers = raw.InterventionTriggers
+
+	// Override terminal states if specified in the workflow
+	if len(raw.TerminalStates) > 0 {
+		wf.TerminalStates = raw.TerminalStates
+	}
+
+	// Store parallel groups for orchestrator runtime
+	if len(parallelGroups) > 0 {
+		wf.ParallelGroups = make([]arc.ParallelGroup, len(parallelGroups))
+		for i, pg := range parallelGroups {
+			wf.ParallelGroups[i] = arc.ParallelGroup{
+				ForkState: pg.ForkState,
+				JoinState: pg.JoinState,
+				Strategy:  pg.Strategy,
+			}
+			for _, rb := range pg.Blocks {
+				wf.ParallelGroups[i].Blocks = append(wf.ParallelGroups[i].Blocks, arc.ParallelBlockInstance{
+					Name:   rb.Name,
+					Params: rb.Params,
+				})
+			}
+		}
+	}
+
+	// Validate the composed workflow
+	errs := block.ValidateComposition(wf, nil)
+	if len(errs) > 0 {
+		return nil, errs[0]
+	}
+
+	return wf, nil
+}
+
+// loadBlockDef loads a block definition from embedded resources.
+func loadBlockDef(name string) (*block.Block, error) {
+	data, err := resources.BlockBytes(name)
+	if err != nil {
+		return nil, err
+	}
+	return block.LoadBlock(data)
 }

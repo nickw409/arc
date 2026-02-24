@@ -226,6 +226,12 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 // postIterationActions handles test running, commits, and reviews after an iteration.
 func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState, machine *workflow.Machine, result *arc.IterationResult) error {
 	currentState := phaseState.CurrentState
+	status := pipeline.MapStateToStatus(currentState)
+
+	// Adversarial workflow actions
+	if status == "adversary" || isAdversarialState(currentState, result) {
+		return adversarialPostActions(ctx, opts, sf, phaseState, result)
+	}
 
 	switch {
 	// After QA review approved: log and continue to impl
@@ -233,16 +239,20 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 		fmt.Printf("[%s] QA Review: APPROVED\n", opts.PhaseName)
 
 	// In impl state: run tests after each iteration
-	case currentState == "impl" || pipeline.MapStateToStatus(currentState) == "implementing":
+	case currentState == "impl" || status == "implementing":
 		if err := runAndRecordTests(ctx, opts, sf); err != nil {
 			opts.Logger.Warn("test run failed", "error", err)
 		}
 
 	// Impl review approved: commit and mark complete
 	case currentState == "complete":
-		fmt.Printf("[%s] Impl Review: APPROVED\n", opts.PhaseName)
+		fmt.Printf("[%s] Phase COMPLETE\n", opts.PhaseName)
 		desc := phaseObjective(opts)
-		hash, err := commitPhase(opts, "feat", desc)
+		commitDir := opts.ProjectDir
+		if opts.WorkingDir != "" {
+			commitDir = opts.WorkingDir
+		}
+		hash, err := commitPhase(opts, "feat", desc, commitDir)
 		if err != nil {
 			opts.Logger.Warn("failed to commit implementation", "error", err)
 		} else if hash != "" {
@@ -263,6 +273,80 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 	}
 
 	return nil
+}
+
+// isAdversarialState checks if the current or previous state involves the adversary loop.
+func isAdversarialState(currentState string, result *arc.IterationResult) bool {
+	return result.Verdict == arc.VerdictBugsFound || result.Verdict == arc.VerdictNoBugsFound
+}
+
+// adversarialPostActions handles post-iteration logic specific to the adversarial workflow.
+func adversarialPostActions(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState, result *arc.IterationResult) error {
+	switch {
+	// After adversary found bugs → record new test files, increment round
+	case result.Verdict == arc.VerdictBugsFound:
+		round := phaseState.AdversaryRound + 1
+		fmt.Printf("[%s] Adversary round %d: BUGS_FOUND\n", opts.PhaseName, round)
+
+		// Discover new test files in the working directory
+		workDir := opts.WorkingDir
+		if workDir == "" {
+			workDir = opts.ProjectDir
+		}
+		newFiles := discoverNewTestFiles(workDir, phaseState.TestFiles)
+
+		sf.Update(func(s *arc.PhaseState) error {
+			s.AdversaryRound = round
+			if s.AdversaryTests == nil {
+				s.AdversaryTests = make(map[string][]string)
+			}
+			roundKey := fmt.Sprintf("round_%d", round)
+			s.AdversaryTests[roundKey] = newFiles
+			s.TestFiles = append(s.TestFiles, newFiles...)
+			return nil
+		})
+
+		if len(newFiles) > 0 {
+			fmt.Printf("[%s] Adversary added %d test files\n", opts.PhaseName, len(newFiles))
+		}
+
+	// After adversary found no bugs → convergence
+	case result.Verdict == arc.VerdictNoBugsFound:
+		fmt.Printf("[%s] Adversary: NO_BUGS_FOUND — converged\n", opts.PhaseName)
+
+	// After impl_fix → run tests as sanity check
+	case pipeline.MapStateToStatus(phaseState.CurrentState) == "adversary":
+		// We just left impl_fix and are back at adversary
+		if err := runAndRecordTests(ctx, opts, sf); err != nil {
+			opts.Logger.Warn("post-fix test run failed", "error", err)
+		}
+	}
+
+	return nil
+}
+
+// discoverNewTestFiles finds test files in dir that are not already in the existing list.
+func discoverNewTestFiles(dir string, existing []string) []string {
+	existingSet := make(map[string]bool, len(existing))
+	for _, f := range existing {
+		existingSet[f] = true
+	}
+
+	var newFiles []string
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, "_test.go") && !existingSet[name] {
+			newFiles = append(newFiles, name)
+		}
+	}
+	return newFiles
 }
 
 // runAndRecordTests runs all test files and updates state with results.
@@ -301,16 +385,22 @@ func runAndRecordTests(ctx context.Context, opts RunPhaseOptions, sf *state.Stat
 }
 
 // commitPhase creates a git commit for the phase.
-func commitPhase(opts RunPhaseOptions, commitType, description string) (string, error) {
+// If dir is provided, it overrides ProjectDir for the commit.
+func commitPhase(opts RunPhaseOptions, commitType, description string, dir ...string) (string, error) {
 	style := "conventional"
 	if opts.Config != nil {
 		style = opts.Config.Git.CommitStyle
 	}
 
+	commitDir := opts.ProjectDir
+	if len(dir) > 0 && dir[0] != "" {
+		commitDir = dir[0]
+	}
+
 	msg := gitops.FormatCommitMessage(style, commitType, opts.PhaseName, description)
 	return gitops.Commit(gitops.CommitOptions{
 		Message: msg,
-		Dir:     opts.ProjectDir,
+		Dir:     commitDir,
 		Config:  opts.Config,
 	})
 }
@@ -432,12 +522,23 @@ func phaseObjective(opts RunPhaseOptions) string {
 
 // deriveMode maps a workflow state name to a prompt mode string.
 func deriveMode(stateName string) string {
+	// Strip block namespace prefix for mode derivation
+	base := stateName
+	if idx := strings.LastIndex(stateName, "."); idx >= 0 {
+		base = stateName[idx+1:]
+	}
+
 	var mode string
-	if strings.Contains(stateName, "review") {
-		mode = stateName
-	} else if stateName == "qa" {
+	switch {
+	case strings.Contains(base, "review"):
+		mode = base
+	case base == "qa":
 		mode = "qa"
-	} else {
+	case base == "adversary":
+		mode = "adversary"
+	case base == "impl_fix":
+		mode = "impl-fix"
+	default:
 		mode = "impl"
 	}
 	return strings.ReplaceAll(mode, "_", "-")

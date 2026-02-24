@@ -231,6 +231,91 @@ func TestLoadBytesMalformedYAML(t *testing.T) {
 	}
 }
 
+func TestLoadAdversarialPipelineWorkflow(t *testing.T) {
+	data := []byte(`
+name: adversarial
+version: 1
+description: Adversarial testing
+
+pipeline:
+  - block: impl
+    params: {max_turns: "45"}
+  - block: adversary-loop
+    params: {max_rounds: "3", max_turns: "30"}
+
+terminal_states: [complete, blocked]
+`)
+
+	w, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes failed: %v", err)
+	}
+
+	if w.Name != "adversarial" {
+		t.Fatalf("expected name 'adversarial', got %q", w.Name)
+	}
+	if w.EntryState != "impl.impl" {
+		t.Fatalf("expected entry 'impl.impl', got %q", w.EntryState)
+	}
+
+	// Should have: impl.impl, adversary-loop.adversary, adversary-loop.impl_fix, complete, blocked
+	if len(w.States) != 5 {
+		t.Fatalf("expected 5 states, got %d", len(w.States))
+	}
+
+	stateNames := make(map[string]bool)
+	for _, s := range w.States {
+		stateNames[s.Name] = true
+	}
+	for _, name := range []string{"impl.impl", "adversary-loop.adversary", "adversary-loop.impl_fix", "complete", "blocked"} {
+		if !stateNames[name] {
+			t.Fatalf("missing state %q", name)
+		}
+	}
+
+	// Verify the machine works with the composed workflow
+	m := NewMachine(w)
+	if m.EntryState() != "impl.impl" {
+		t.Fatalf("machine entry != 'impl.impl'")
+	}
+
+	// impl.impl → adversary-loop.adversary (linear)
+	next, err := m.NextState("impl.impl", "")
+	if err != nil {
+		t.Fatalf("NextState from impl.impl: %v", err)
+	}
+	if next != "adversary-loop.adversary" {
+		t.Fatalf("expected adversary-loop.adversary, got %q", next)
+	}
+
+	// adversary-loop.adversary → bugs_found → adversary-loop.impl_fix
+	next, err = m.NextState("adversary-loop.adversary", "bugs_found")
+	if err != nil {
+		t.Fatalf("NextState from adversary bugs_found: %v", err)
+	}
+	if next != "adversary-loop.impl_fix" {
+		t.Fatalf("expected adversary-loop.impl_fix, got %q", next)
+	}
+
+	// adversary-loop.adversary → no_bugs_found → complete
+	next, err = m.NextState("adversary-loop.adversary", "no_bugs_found")
+	if err != nil {
+		t.Fatalf("NextState from adversary no_bugs_found: %v", err)
+	}
+	if next != "complete" {
+		t.Fatalf("expected complete, got %q", next)
+	}
+
+	// adversary-loop.impl_fix → adversary-loop.adversary (linear)
+	next, err = m.NextState("adversary-loop.impl_fix", "")
+	if err != nil {
+		t.Fatalf("NextState from impl_fix: %v", err)
+	}
+	if next != "adversary-loop.adversary" {
+		t.Fatalf("expected adversary-loop.adversary, got %q", next)
+	}
+}
+
 // containsString is a simple helper for checking substrings in error messages.
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)

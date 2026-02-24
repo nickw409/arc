@@ -38,9 +38,11 @@ type PhaseState struct {
 	ParentPhase         string          `json:"parent_phase,omitempty"`
 	Notes               string          `json:"notes,omitempty"`
 	CompletedAt         string          `json:"completed_at,omitempty"`
-	BlockedReason       string          `json:"blocked_reason,omitempty"`
-	BlockedAt           string          `json:"blocked_at,omitempty"`
-	Usage               Usage           `json:"usage,omitempty"`
+	BlockedReason       string              `json:"blocked_reason,omitempty"`
+	BlockedAt           string              `json:"blocked_at,omitempty"`
+	Usage               Usage               `json:"usage,omitempty"`
+	AdversaryRound      int                 `json:"adversary_round,omitempty"`
+	AdversaryTests      map[string][]string `json:"adversary_tests,omitempty"` // round → test file paths
 }
 
 type Iteration struct {

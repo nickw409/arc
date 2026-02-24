@@ -1,0 +1,15 @@
+name: impl
+description: Free-form implementation with high turn count
+params:
+  max_turns: {default: "45"}
+  timeout: {default: "900"}
+  model: {default: ""}
+entry: impl
+exits: [done]
+states:
+  - name: impl
+    description: Implement the feature freely, writing code and tests
+    prompt: prompts/adversarial/impl.md
+    agent:
+      max_turns: 45
+    next: $done

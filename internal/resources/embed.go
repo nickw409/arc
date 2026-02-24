@@ -22,6 +22,9 @@ var enforcementFS embed.FS
 //go:embed guides/*.md
 var guidesFS embed.FS
 
+//go:embed blocks/*.yaml
+var blocksFS embed.FS
+
 // WorkflowBytes returns the raw YAML for a workflow type (e.g., "feature").
 func WorkflowBytes(workflowType string) ([]byte, error) {
 	return workflowsFS.ReadFile(filepath.Join("workflows", workflowType+".yaml"))
@@ -75,4 +78,24 @@ func ListPrompts() []string {
 // GuideBytes returns the raw markdown for a guide file (e.g., "guide.md").
 func GuideBytes(name string) ([]byte, error) {
 	return guidesFS.ReadFile(filepath.Join("guides", name))
+}
+
+// BlockBytes returns the raw YAML for a block definition (e.g., "adversary-loop").
+func BlockBytes(name string) ([]byte, error) {
+	return blocksFS.ReadFile(filepath.Join("blocks", name+".yaml"))
+}
+
+// ListBlocks returns all available block names (without .yaml extension).
+func ListBlocks() []string {
+	entries, err := fs.ReadDir(blocksFS, "blocks")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
+		}
+	}
+	return names
 }

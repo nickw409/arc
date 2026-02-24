@@ -9,6 +9,21 @@ type Workflow struct {
 	EntryState           string                `yaml:"entry_state"`
 	TerminalStates       []string              `yaml:"terminal_states"`
 	InterventionTriggers []InterventionTrigger `yaml:"intervention_triggers"`
+	ParallelGroups       []ParallelGroup       `yaml:"-"` // populated by block composition
+}
+
+// ParallelGroup describes a set of blocks to run concurrently at a fork point.
+type ParallelGroup struct {
+	ForkState string                  // synthetic state triggering parallel execution
+	JoinState string                  // synthetic state after parallel completes
+	Strategy  string                  // "all" or "any"
+	Blocks    []ParallelBlockInstance // blocks to run in parallel
+}
+
+// ParallelBlockInstance is a named block reference within a parallel group.
+type ParallelBlockInstance struct {
+	Name   string
+	Params map[string]string
 }
 
 // AgentConfig configures per-state agent behavior. Nil means use defaults.

@@ -122,7 +122,7 @@ func Validate(w *arc.Workflow) []error {
 		}
 	}
 
-	// 6. all states reachable from entry_state via BFS
+	// 6. all states reachable from entry_state via BFS (forward reachability)
 	if stateNames[w.EntryState] {
 		reachable := make(map[string]bool)
 		queue := []string{w.EntryState}
@@ -149,6 +149,46 @@ func Validate(w *arc.Workflow) []error {
 				errs = append(errs, &ValidationError{
 					Field:   fmt.Sprintf("states.%s", s.Name),
 					Message: fmt.Sprintf("state %q is unreachable from entry state %q", s.Name, w.EntryState),
+				})
+			}
+		}
+	}
+
+	// 9. reverse reachability: all non-terminal states can reach a terminal state
+	if len(terminalSet) > 0 && stateNames[w.EntryState] {
+		// Build reverse edge map
+		reverseEdges := make(map[string][]string)
+		for _, s := range w.States {
+			if s.Transition.Branches != nil {
+				for _, target := range s.Transition.Branches {
+					reverseEdges[target] = append(reverseEdges[target], s.Name)
+				}
+			}
+		}
+
+		// BFS backward from terminal states
+		canReachTerminal := make(map[string]bool)
+		queue := make([]string, 0, len(w.TerminalStates))
+		for _, ts := range w.TerminalStates {
+			canReachTerminal[ts] = true
+			queue = append(queue, ts)
+		}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			for _, pred := range reverseEdges[current] {
+				if !canReachTerminal[pred] {
+					canReachTerminal[pred] = true
+					queue = append(queue, pred)
+				}
+			}
+		}
+
+		for _, s := range w.States {
+			if !terminalSet[s.Name] && !canReachTerminal[s.Name] {
+				errs = append(errs, &ValidationError{
+					Field:   fmt.Sprintf("states.%s", s.Name),
+					Message: fmt.Sprintf("state %q cannot reach any terminal state (possible infinite cycle)", s.Name),
 				})
 			}
 		}
