@@ -23,6 +23,16 @@ Review the tests for:
 4. Test naming conventions match the project's existing style
 5. Test quality and maintainability
 
+### Wiring Test Checklist
+
+For each integration point in the spec, verify tests exist that:
+- [ ] Call the top-level entry point and check it reaches inner functions (not just testing inner functions in isolation)
+- [ ] Pass a value through the full call chain and assert it arrives correctly
+- [ ] Return errors from inner functions and verify the outer function propagates them
+- [ ] Trigger side effects (file writes, state updates) through the real entry point, not by calling the helper directly
+
+If wiring tests are missing, verdict MUST be **gaps_found**. A test suite that only tests helpers in isolation but never tests that they're called is incomplete.
+
 ### Negative Test Checklist
 
 For each public function/method, verify tests exist for:

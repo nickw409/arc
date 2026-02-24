@@ -26,6 +26,10 @@ Write regression tests that:
 - Tests MUST have clear names: `test_<bug>_<scenario>`
 - Tests MUST use assertions that will pass after fix
 
+### Wiring Tests
+
+If the bug involves a function not being called, an argument not being passed through, or a return value being dropped, write a test that exercises the full call path — not just the inner function. Call the real entry point and verify the fix is reachable end-to-end.
+
 ### Negative Tests
 
 Beyond reproducing the bug, write negative tests for the surrounding code:

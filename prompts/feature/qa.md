@@ -41,6 +41,19 @@ Write tests based on the **## Test Cases** section of the phase specification. T
 4. Use the project's standard test framework — do not add new test dependencies
 5. For concurrent tests, follow the spec's concurrency requirements
 
+### Wiring Tests
+
+Unit tests verify individual functions work. Wiring tests verify they're actually connected. These catch the bugs where an agent implements a function correctly but forgets to call it, passes the wrong argument, or drops a return value.
+
+For each integration point in the spec, write a test that exercises the full path:
+
+1. **Call chain tests** — call the top-level entry point and verify it reaches the inner function. If `Run` is supposed to call `RunAdversary`, don't just test `RunAdversary` — test that `Run` actually invokes it and uses its result.
+2. **Argument passthrough** — verify that options/config from the caller actually arrive at the callee. Pass a distinctive value at the top and assert it appears at the bottom.
+3. **Return value propagation** — verify that results/errors from inner functions actually make it back to the caller. An inner function returning an error should cause the outer function to return an error, not silently succeed.
+4. **Side effect verification** — if a function is supposed to write a file, update state, or emit output, call it through its real entry point and check the side effect actually happened.
+
+Name these: `Test<EntryPoint>_<WhatReaches>` (e.g., `TestRun_CallsRunAdversary`, `TestReview_WritesOutputFiles`, `TestPlan_ConfigPassthrough`).
+
 ### Negative Tests
 
 In addition to the spec's test cases, you MUST write negative tests that verify the code rejects bad input and handles failure modes correctly. For each public function or method in the spec:
