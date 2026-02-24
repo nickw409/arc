@@ -55,4 +55,4 @@ Create `{{phase_dir}}/research_notes.md`:
 - Document everything you find
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of your findings and exit.

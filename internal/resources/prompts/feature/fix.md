@@ -27,4 +27,4 @@ The orchestrator has approved {{dispute_count}} dispute(s) to modify QA tests.
 - Do NOT weaken assertions - correct them
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of your changes and exit.

@@ -40,16 +40,16 @@ internal/         All Go packages:
   review/         Adversarial plan review
   gitops/         Git commit operations
   monitor/        Live TUI (bubbletea)
-  resources/      Embedded templates & prompts
+  resources/      Embedded resources (prompts, workflows, templates)
+    prompts/      Agent prompt templates (.md)
+    workflows/    Workflow state machine definitions (.yaml)
+    templates/    Plan scaffolding templates (.md)
   logging/        Structured logger
   selfupdate/     Self-update mechanism
   migrate/        State migration
   guide/          Agent-facing reference guide
   validate/       AI-powered test quality audit
   arc/            Core types (verdict, result, errors, state)
-templates/        Workflow YAML templates
-prompts/          Prompt templates (embedded at build)
-workflows/        Workflow definitions
 testdata/         Test fixtures
 ```
 
@@ -98,7 +98,7 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 ### Workflow Types
 
 - **feature** — TDD: `qa → qa_review → impl → impl_review → complete`
-- **bugfix** — Linear: `investigate → regression_tests → test_review → fix → fix_review → complete`
+- **bugfix** — `investigate → regression_tests → test_review → fix → fix_review → complete`
 - **investigation** — Research: `research → draft → review → complete`
 - **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`
 - **performance** — Benchmark-driven: `baseline → analyze → optimize → benchmark → complete`

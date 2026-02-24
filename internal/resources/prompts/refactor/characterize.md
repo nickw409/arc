@@ -78,4 +78,4 @@ Create `{{phase_dir}}/characterization.md`:
 - Do NOT fix bugs you find - just document them
 - **Do NOT commit** - orchestrator handles commits
 
-When done, exit.
+When done, output a summary of the characterization tests you wrote and exit.
