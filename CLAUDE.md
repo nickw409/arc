@@ -116,6 +116,19 @@ goreleaser check
 goreleaser build --snapshot --clean
 ```
 
+## Benchmarking
+
+The `bench/` directory contains a benchmarking suite that compares Arc orchestration
+against single-agent Claude Code. See `bench/README.md` for details.
+
+```bash
+# Run full benchmark (4 tasks × 3 approaches × 3 runs)
+bash bench/harness/bench.sh
+
+# Single task, single approach
+bash bench/harness/bench.sh --task task2-bugfix --approach arc --runs 1
+```
+
 ## Dependencies
 
 Runtime: `claude` (Claude Code CLI), `git`, `jq`, `yq` (mikefarah v4+), `python3`
