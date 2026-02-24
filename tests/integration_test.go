@@ -109,9 +109,9 @@ func TestE2EPlanCreatesStructure(t *testing.T) {
 		t.Fatalf("invalid plan.json: %v", err)
 	}
 
-	// Should have core, api, and auto-added integration
-	if len(meta.Phases) < 2 {
-		t.Errorf("expected at least 2 phases, got %d", len(meta.Phases))
+	// Should have core and api
+	if len(meta.Phases) != 2 {
+		t.Errorf("expected 2 phases, got %d: %v", len(meta.Phases), meta.Phases)
 	}
 
 	// Check session_id

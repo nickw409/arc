@@ -36,9 +36,6 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 
 	seen := make(map[string]bool)
 	for _, p := range opts.Phases {
-		if p == "integration" {
-			return nil, fmt.Errorf("phase name %q is reserved", p)
-		}
 		if seen[p] {
 			return nil, fmt.Errorf("duplicate phase %q", p)
 		}
@@ -74,16 +71,12 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		return nil, fmt.Errorf("plan %q already exists", opts.Name)
 	}
 
-	// 4. Append integration
-	phasesWithIntegration := append([]string{}, opts.Phases...)
-	phasesWithIntegration = append(phasesWithIntegration, "integration")
-
-	// 5. Create plan directory
+	// 4. Create plan directory
 	if err := os.MkdirAll(planDir, 0755); err != nil {
 		return nil, fmt.Errorf("create plan directory: %w", err)
 	}
 
-	// 6. Write session_id (UUID v4)
+	// 5. Write session_id (UUID v4)
 	sessionID, err := generateUUIDv4()
 	if err != nil {
 		return nil, fmt.Errorf("generate session ID: %w", err)
@@ -92,7 +85,7 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		return nil, fmt.Errorf("write session_id: %w", err)
 	}
 
-	// 7. Copy workflow YAML for non-feature types
+	// 6. Copy workflow YAML for non-feature types
 	if opts.WorkflowType != "feature" {
 		workflowData, err := resources.WorkflowBytes(opts.WorkflowType)
 		if err != nil {
@@ -103,13 +96,10 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		}
 	}
 
-	// 8. Build metadata
-	meta := arc.NewPlanMeta(opts.Name, opts.WorkflowType, phasesWithIntegration)
+	// 7. Build metadata
+	meta := arc.NewPlanMeta(opts.Name, opts.WorkflowType, opts.Phases)
 
-	// Fix integration dependencies: integration depends on ALL user phases
-	meta.Dependencies["integration"] = append([]string{}, opts.Phases...)
-
-	// 9. Write plan.json
+	// 8. Write plan.json
 	planData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal plan.json: %w", err)
@@ -118,17 +108,13 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		return nil, fmt.Errorf("write plan.json: %w", err)
 	}
 
-	// 10. Create phase directories with state.json and plan.md
+	// 9. Create phase directories with state.json and plan.md
 	planTemplate, err := resources.TemplateBytes("plan-template.md")
 	if err != nil {
 		return nil, fmt.Errorf("read plan template: %w", err)
 	}
-	integrationTemplate, err := resources.TemplateBytes("integration-template.md")
-	if err != nil {
-		return nil, fmt.Errorf("read integration template: %w", err)
-	}
 
-	for _, phase := range phasesWithIntegration {
+	for _, phase := range opts.Phases {
 		phaseDir := filepath.Join(planDir, "phases", phase)
 		if err := os.MkdirAll(phaseDir, 0755); err != nil {
 			return nil, fmt.Errorf("create phase directory %s: %w", phase, err)
@@ -145,11 +131,7 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		}
 
 		// Write plan.md
-		template := planTemplate
-		if phase == "integration" {
-			template = integrationTemplate
-		}
-		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), template, 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), planTemplate, 0644); err != nil {
 			return nil, fmt.Errorf("write plan.md for %s: %w", phase, err)
 		}
 	}

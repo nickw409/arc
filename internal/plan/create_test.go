@@ -33,7 +33,6 @@ func TestCreatePlanStructure(t *testing.T) {
 	dirs := []string{
 		"my-plan/phases/qa",
 		"my-plan/phases/impl",
-		"my-plan/phases/integration",
 	}
 	for _, d := range dirs {
 		full := filepath.Join(dir, d)
@@ -50,38 +49,11 @@ func TestCreatePlanStructure(t *testing.T) {
 		"my-plan/phases/qa/plan.md",
 		"my-plan/phases/impl/state.json",
 		"my-plan/phases/impl/plan.md",
-		"my-plan/phases/integration/state.json",
-		"my-plan/phases/integration/plan.md",
 	}
 	for _, f := range files {
 		full := filepath.Join(dir, f)
 		if _, err := os.Stat(full); os.IsNotExist(err) {
 			t.Fatalf("expected file %s to exist", f)
-		}
-	}
-}
-
-func TestCreatePlanAutoIntegration(t *testing.T) {
-	dir := t.TempDir()
-
-	meta, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"core", "api"},
-		WorkflowType: "feature",
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-
-	// Integration should be auto-appended
-	wantPhases := []string{"core", "api", "integration"}
-	if len(meta.Phases) != len(wantPhases) {
-		t.Fatalf("Phases = %v, want %v", meta.Phases, wantPhases)
-	}
-	for i, p := range wantPhases {
-		if meta.Phases[i] != p {
-			t.Fatalf("Phases[%d] = %q, want %q", i, meta.Phases[i], p)
 		}
 	}
 }
@@ -99,22 +71,10 @@ func TestCreatePlanDependencies(t *testing.T) {
 		t.Fatalf("Create error: %v", err)
 	}
 
-	// After integration added: Dependencies["api"] == ["core"]
+	// Dependencies["api"] == ["core"]
 	apiDeps := meta.Dependencies["api"]
 	if len(apiDeps) != 1 || apiDeps[0] != "core" {
 		t.Fatalf("Dependencies[api] = %v, want [core]", apiDeps)
-	}
-
-	// Dependencies["integration"] == ["core", "api"] (integration depends on ALL user phases)
-	integrationDeps := meta.Dependencies["integration"]
-	wantIntDeps := []string{"core", "api"}
-	if len(integrationDeps) != len(wantIntDeps) {
-		t.Fatalf("Dependencies[integration] = %v, want %v", integrationDeps, wantIntDeps)
-	}
-	for i, dep := range wantIntDeps {
-		if integrationDeps[i] != dep {
-			t.Fatalf("Dependencies[integration][%d] = %q, want %q", i, integrationDeps[i], dep)
-		}
 	}
 }
 
@@ -271,23 +231,6 @@ func TestCreatePlanNoPhases(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no phases specified") {
 		t.Fatalf("error = %q, want containing %q", err.Error(), "no phases specified")
-	}
-}
-
-func TestCreatePlanReservedIntegrationName(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"integration"},
-		WorkflowType: "feature",
-	})
-	if err == nil {
-		t.Fatal("expected error for reserved 'integration' phase name, got nil")
-	}
-	if !strings.Contains(err.Error(), "reserved") {
-		t.Fatalf("error = %q, want containing %q", err.Error(), "reserved")
 	}
 }
 
