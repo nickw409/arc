@@ -98,29 +98,20 @@ func TestMapStateToStatusAllVariants(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"impl", "implementing"},
-		{"fix", "implementing"},
-		{"refactor", "implementing"},
-		{"optimize", "implementing"},
-		{"draft", "implementing"},
-		{"research", "implementing"},
-		{"characterize", "implementing"},
-		{"baseline", "implementing"},
-		{"analyze", "implementing"},
-		{"investigate", "implementing"},
-		{"regression_tests", "implementing"},
-		{"qa", "qa"},
-		{"qa_review", "qa_review"},
-		{"test_review", "qa_review"},
-		{"char_review", "qa_review"},
-		{"fix_review", "qa_review"},
-		{"review", "qa_review"},
-		{"verify", "qa_review"},
-		{"benchmark", "qa_review"},
-		{"impl_review", "qa_review"},
+		// Non-namespaced: returned as-is
+		{"impl", "impl"},
+		{"adversary", "adversary"},
 		{"complete", "complete"},
 		{"blocked", "blocked"},
-		{"unknown_state", "implementing"},
+		{"tests", "tests"},
+		{"qa_review", "qa_review"},
+		// Namespaced: strips prefix
+		{"impl.act", "act"},
+		{"check.adversary", "adversary"},
+		{"regression_tests.tests", "tests"},
+		{"test_review.qa_review", "qa_review"},
+		{"fix_review.impl_review", "impl_review"},
+		{"verify.impl_review", "impl_review"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
@@ -134,8 +125,8 @@ func TestMapStateToStatusAllVariants(t *testing.T) {
 
 func TestMapStateToStatusEmptyString(t *testing.T) {
 	got := MapStateToStatus("")
-	if got != "implementing" {
-		t.Fatalf("MapStateToStatus(%q) = %q, want %q", "", got, "implementing")
+	if got != "" {
+		t.Fatalf("MapStateToStatus(%q) = %q, want %q", "", got, "")
 	}
 }
 

@@ -18,14 +18,15 @@ func TestStatusIconMapping(t *testing.T) {
 	}{
 		{"pending", "[ ]"},
 		{"complete", "[x]"},
-		{"implementing", "[>]"},
-		{"qa", "[>]"},
+		{"act", "[>]"},
+		{"tests", "[>]"},
 		{"qa_review", "[>]"},
+		{"adversary", "[!]"},
 		{"disputed", "[!]"},
 		{"blocked", "[X]"},
 		{"deferred", "[~]"},
 		{"split", "[/]"},
-		{"unknown_status", "[?]"},
+		{"unknown_state", "[>]"},
 	}
 	for _, tc := range tests {
 		got := StatusIcon(tc.status)

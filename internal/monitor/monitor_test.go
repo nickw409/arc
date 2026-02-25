@@ -92,8 +92,8 @@ func TestPhaseViewNilState(t *testing.T) {
 func TestPhaseViewUnknownStatus(t *testing.T) {
 	ps := &arc.PhaseState{PhaseStatus: "weird_status"}
 	pv := PhaseViewFromState(ps)
-	if pv.Icon != "[?]" {
-		t.Errorf("Icon=%q, want '[?]'", pv.Icon)
+	if pv.Icon != "[>]" {
+		t.Errorf("Icon=%q, want '[>]'", pv.Icon)
 	}
 }
 
@@ -104,9 +104,10 @@ func TestPhaseViewFromStateAllStatuses(t *testing.T) {
 	}{
 		{"pending", "[ ]"},
 		{"complete", "[x]"},
-		{"implementing", "[>]"},
-		{"qa", "[>]"},
+		{"act", "[>]"},
+		{"tests", "[>]"},
 		{"qa_review", "[>]"},
+		{"adversary", "[!]"},
 		{"disputed", "[!]"},
 		{"blocked", "[X]"},
 		{"deferred", "[~]"},

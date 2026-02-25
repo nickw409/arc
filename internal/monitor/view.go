@@ -180,14 +180,14 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 
 	// Style based on status
 	style := pendingStyle
-	switch pv.Status {
-	case "implementing", "qa", "qa_review", "impl_review", "adversary":
+	switch {
+	case isActiveStatus(pv.Status):
 		style = activeStyle
-	case "complete":
+	case pv.Status == "complete":
 		style = completedStyle
-	case "blocked":
+	case pv.Status == "blocked":
 		style = blockedStyle
-	case "disputed":
+	case pv.Status == "disputed":
 		style = disputedStyle
 	}
 

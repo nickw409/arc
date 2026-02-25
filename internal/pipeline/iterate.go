@@ -373,29 +373,11 @@ func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState,
 	return opts
 }
 
-// MapStateToStatus maps a workflow state name to a phase_status value.
+// MapStateToStatus maps a workflow state name to a phase_status value by
+// stripping the block namespace prefix (e.g., "check.adversary" → "adversary").
 func MapStateToStatus(stateName string) string {
-	// Strip block namespace prefix (e.g., "adversary.adversary" → "adversary")
-	base := stateName
 	if idx := strings.LastIndex(stateName, "."); idx >= 0 {
-		base = stateName[idx+1:]
+		return stateName[idx+1:]
 	}
-
-	switch base {
-	case "qa":
-		return "qa"
-	case "qa_review", "test_review", "char_review", "fix_review", "review", "verify", "benchmark", "impl_review":
-		return "qa_review"
-	case "complete":
-		return "complete"
-	case "blocked":
-		return "blocked"
-	case "adversary":
-		return "adversary"
-	default:
-		if strings.Contains(base, "review") {
-			return "qa_review"
-		}
-		return "implementing"
-	}
+	return stateName
 }

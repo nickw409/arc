@@ -341,7 +341,7 @@ func planSummaryFromViews(views []PhaseView, workflowType string) planSummary {
 		if pv.Status == "complete" {
 			s.PhasesComplete++
 		}
-		if pv.Status == "implementing" || pv.Status == "qa" || pv.Status == "qa_review" || pv.Status == "impl_review" || pv.Status == "adversary" {
+		if isActiveStatus(pv.Status) {
 			s.PhasesActive++
 		}
 		if pv.HasIntervention {
@@ -359,23 +359,32 @@ func planSummaryFromViews(views []PhaseView, workflowType string) planSummary {
 
 func statusIcon(status string) string {
 	switch status {
-	case "pending":
+	case "pending", "":
 		return "[ ]"
 	case "complete":
 		return "[x]"
-	case "implementing", "qa", "qa_review", "impl_review":
-		return "[>]"
+	case "blocked":
+		return "[X]"
 	case "adversary":
 		return "[!]"
 	case "disputed":
 		return "[!]"
-	case "blocked":
-		return "[X]"
 	case "deferred":
 		return "[~]"
 	case "split":
 		return "[/]"
 	default:
-		return "[?]"
+		return "[>]"
+	}
+}
+
+// isActiveStatus reports whether a status represents a phase that is currently
+// running (i.e. not pending, terminal, or otherwise inactive).
+func isActiveStatus(status string) bool {
+	switch status {
+	case "", "pending", "complete", "blocked", "deferred", "split", "disputed":
+		return false
+	default:
+		return true
 	}
 }

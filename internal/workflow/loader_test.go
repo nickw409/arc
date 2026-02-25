@@ -315,11 +315,11 @@ func TestConstraintsLoading(t *testing.T) {
 		wantMax  int
 		wantOn   string
 	}{
-		{"bugfix", "test_review", 3, "approved"},
-		{"bugfix", "fix_review", 3, "approved"},
-		{"refactor", "char_review", 3, "approved"},
-		{"refactor", "verify", 3, "approved"},
-		{"investigation", "review", 3, "approved"},
+		{"bugfix", "test_review.qa_review", 3, "approved"},
+		{"bugfix", "fix_review.impl_review", 3, "approved"},
+		{"refactor", "char_review.qa_review", 3, "approved"},
+		{"refactor", "verify.impl_review", 3, "approved"},
+		{"investigation", "review.judge", 3, "approved"},
 	}
 
 	for _, tt := range tests {

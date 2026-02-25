@@ -24,18 +24,16 @@ var (
 // StatusColor returns the appropriate lipgloss.AdaptiveColor for a status.
 func StatusColor(status string) lipgloss.AdaptiveColor {
 	switch status {
-	case "implementing", "qa", "qa_review":
-		return lipgloss.AdaptiveColor{Light: "28", Dark: "34"}
 	case "complete":
 		return lipgloss.AdaptiveColor{Light: "22", Dark: "46"}
 	case "blocked":
 		return lipgloss.AdaptiveColor{Light: "124", Dark: "196"}
 	case "disputed":
 		return lipgloss.AdaptiveColor{Light: "136", Dark: "226"}
-	case "pending":
+	case "pending", "":
 		return lipgloss.AdaptiveColor{Light: "240", Dark: "245"}
 	default:
-		return lipgloss.AdaptiveColor{Light: "15", Dark: "255"}
+		return lipgloss.AdaptiveColor{Light: "28", Dark: "34"}
 	}
 }
 

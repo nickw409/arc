@@ -345,6 +345,21 @@ terminal_states: [complete, blocked]
     no_bugs_found: complete
 ```
 
+### Block Selection Guide
+
+Pick blocks by **purpose**, not by verdict shape. Matching verdict names is not enough — using a block outside its domain produces semantically wrong workflows.
+
+| Block | Purpose | Verdicts | Do NOT use for |
+|-------|---------|----------|----------------|
+| `act` | Free-form implementation, any coding task | `done` (linear) | Writing tests — use `tests` |
+| `tests` | Writing tests specifically | `done` (linear) | General implementation — use `act` |
+| `test-review` | Reviewing **test** quality | `approved`, `gaps_found` | Code review, document review, any non-test domain |
+| `review` | Reviewing **implementation/code** quality | `approved`, `concerns` | Test review, document review, any non-code domain |
+| `judge` | Generic branching with custom verdicts | configurable | Nothing — this is the default when no other block fits |
+| `adversary` | Adversarially finding bugs by writing failing tests | `bugs_found`, `no_bugs_found` | Quality review — use `review` or `judge` |
+
+**Default rule:** if you need branching and the domain doesn't clearly match `test-review` or `review`, use `judge` with parameterized verdicts. Never pick a block solely because its exit names happen to match what you need.
+
 ### Writing Custom Prompts
 
 When writing a prompt for a custom pipeline, use params for any branching logic — never rely on `{{state.last_verdict}}` or other implicit workflow state:
@@ -369,6 +384,33 @@ The calling pipeline step sets the param explicitly:
 
 **Premade workflow prompts** (under `prompts/feature/`, `prompts/bugfix/`, etc.) are owned by their workflow and rely on workflow-internal state. Do not reference them from custom pipelines — write your own prompt instead.
 
+### Available Blocks
+
+All blocks support a `prompt` param to swap the agent prompt and a `max_turns` param to control agent length.
+
+| Block | Exits | Params | Purpose |
+|-------|-------|--------|---------|
+| `act` | `done` | `prompt`, `max_turns` (45), `timeout` (900), `model` | Generic linear work — does something and exits unconditionally |
+| `adversary` | `bugs_found`, `no_bugs_found` | `prompt`, `max_turns` (30) | Writes adversarial failing tests to expose bugs in existing code |
+| `qa` | `done` | `prompt`, `max_turns` (100), `timeout` (1800) | Writes tests capturing intended behavior |
+| `qa-review` | `approved`, `gaps_found` | `prompt`, `max_turns` (15), `max_state_iterations`, `on_max_iterations` | Reviews test coverage and quality |
+| `review` | `approved`, `concerns` | `prompt`, `max_turns` (50), `timeout` (900) | Reviews implementation quality |
+| `judge` | configurable | `prompt`, `max_turns` (15), `verdict_a` (approved), `verdict_b` (rejected), `max_state_iterations`, `on_max_iterations` | Generic two-verdict branching block; override `verdict_a`/`verdict_b` to name your own exits |
+
+**`judge` example** — approve or reject a draft:
+
+```yaml
+- block: judge
+  name: check
+  params:
+    prompt: "prompts/my-project/draft-review.md"
+    verdict_a: "ship_it"
+    verdict_b: "needs_work"
+  route:
+    needs_work: draft
+    ship_it: complete
+```
+
 <!-- /section: workflows -->
 
 <!-- section: execution -->
@@ -384,7 +426,7 @@ arc review <plan-name> --phase <phase>   # Review a single phase
 arc run <plan-name>                      # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase
 arc status <plan-name>                   # Show plan/phase status
-arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter (run from project root)
+arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter
 arc chat                                 # Launch interactive Claude session with Arc MCP tools
 ```
 
@@ -409,18 +451,13 @@ When adversaries find issues, they emit structured suggestions (find-and-replace
 
 All blocking adversaries must approve before a plan can run.
 
-### The Iteration Pipeline
+### Execution Model
 
-Each iteration of `arc run` or `arc iterate` executes an 8-step pipeline:
+Each phase runs as a single long-lived agent session (up to 200 turns / 3600s for implementation states). The agent works until it reaches a terminal verdict, then exits. The orchestrator reads the verdict from the agent's output, advances the state machine, and starts the next session.
 
-1. **Check intervention** — Stop if a human has flagged the phase
-2. **Check escalation** — Trigger stuck detection if iterations are stalling
-3. **Check pre-constraints** — Validate preconditions before spawning an agent
-4. **Render prompt and spawn agent** — Build the prompt from state + plan and run a sub-agent
-5. **Extract verdict** — Parse the agent's output for a state-machine verdict
-6. **Check post-constraints** — Validate postconditions after the agent runs
-7. **Run after-hooks** — Execute any registered post-iteration hooks
-8. **Update state** — Write the new state to `state.json`
+If a session crashes (non-zero exit, no extractable verdict), the orchestrator retries once. If it fails again, the phase is marked `blocked`.
+
+After each session the agent's `## Memory` output section is saved to `{phase-dir}/memory/{state-name}.md`. On re-entry to the same state (e.g., after a review loop sends impl back), that memory is injected into the prompt as `## Previous Run Notes` so the agent picks up where it left off.
 
 ### State Tracking
 
@@ -429,26 +466,44 @@ Each phase maintains a `state.json` file:
 ```json
 {
   "phase": "port-pcg",
-  "current_state": "impl",
-  "iteration": 5,
-  "stuck_iterations": 2,
+  "plan": "my-plan",
+  "workflow_type": "feature",
+  "phase_status": "in_progress",
+  "current_state": "impl.act",
+  "iteration": {"current": 2, "max": 25},
   "tests_passing": 8,
   "tests_total": 12,
-  "verdicts_history": ["gaps_found", "approved", "concerns", "concerns"],
-  "disputes": [],
-  "escalation_history": ["analyze_stuck@3"]
+  "last_verdict": "done",
+  "verdicts_history": [
+    {"iteration": 1, "state": "impl.act", "verdict": "done", "timestamp": "2025-01-01T00:00:00Z"}
+  ],
+  "notes": "Completed core types, working on error handling"
 }
 ```
 
-### Stuck Detection and Escalation
+Use `arc manage <plan> <phase> show` to print a phase's current `state.json`.
 
-When a phase makes no progress across multiple iterations (same state, same test results), the orchestrator triggers escalation. This can:
+### Arc Chat (MCP Mode)
 
-- Analyze what's stuck and adjust the approach
-- Escalate to a different agent strategy
-- Eventually mark the phase as `blocked` for human intervention
+`arc chat` launches an interactive Claude session with Arc registered as an MCP server. In this mode, Arc tools are available as MCP tool calls — use these instead of CLI commands.
 
-The `stuck_iterations` counter tracks consecutive non-progress iterations. The `escalation_history` records actions taken.
+**Call `arc_guide` first** if you're unsure of any Arc convention. The guide is authoritative.
+
+| MCP Tool | CLI Equivalent | Purpose |
+|----------|---------------|---------|
+| `arc_guide` | `arc guide` | Print Arc reference guide (call this first if unsure) |
+| `arc_list_plans` | `arc status` | List all active plans |
+| `arc_status` | `arc status <plan>` | Show phases and state for a specific plan |
+| `arc_plan` | `arc plan` | Create a new plan with phases |
+| `arc_review` | `arc review` | Run adversarial review on a plan |
+| `arc_run` | `arc run` | Launch orchestrator (runs async, returns immediately) |
+| `arc_run_status` | — | Check progress of a running orchestrator |
+| `arc_run_cancel` | — | Cancel a running orchestrator |
+| `arc_iterate` | `arc iterate` | Run a single phase iteration |
+| `arc_manage` | `arc manage` | Update phase state (complete, block, note, tests, etc.) |
+| `arc_archive` | `arc archive` | Archive a completed plan |
+
+`arc_run` is **asynchronous** — it returns immediately and the orchestrator runs in the background. Poll `arc_run_status` to check progress. While a run is in progress, you can do other work: plan the next task, answer questions, explore the codebase.
 
 <!-- /section: execution -->
 

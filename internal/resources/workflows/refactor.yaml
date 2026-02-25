@@ -1,58 +1,39 @@
 name: refactor
-version: 1
+version: 2
 description: Change structure without changing behavior
 
-states:
-  - name: characterize
-    description: Write tests capturing current behavior
-    prompt: prompts/refactor/characterize.md
-    next: char_review
-    agent:
-      max_turns: 100
-      timeout: 1800
-  - name: char_review
-    description: Review characterization tests
-    prompt: prompts/refactor/char-review.md
-    verdicts:
-      - approved
-      - gaps_found
-    constraints:
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
+pipeline:
+  - block: tests
+    name: characterize
+    params:
+      prompt: "prompts/refactor/characterize.md"
+      max_turns: "100"
+      timeout: "1800"
+  - block: test-review
+    name: char_review
+    params:
+      prompt: "prompts/refactor/char-review.md"
+      max_turns: "50"
+      max_state_iterations: "3"
+      on_max_iterations: "approved"
+    route:
       approved: refactor
       gaps_found: characterize
-    agent:
-      max_turns: 50
-      timeout: 900
-  - name: refactor
-    description: Perform structural changes
-    prompt: prompts/refactor/refactor.md
-    next: verify
-    agent:
-      max_turns: 200
-      timeout: 3600
-  - name: verify
-    description: Verify behavior unchanged
-    prompt: prompts/refactor/verify.md
-    verdicts:
-      - approved
-      - concerns
-    constraints:
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
+  - block: act
+    name: refactor
+    params:
+      prompt: "prompts/refactor/refactor.md"
+      max_turns: "200"
+      timeout: "3600"
+  - block: review
+    name: verify
+    params:
+      prompt: "prompts/refactor/verify.md"
+      max_turns: "50"
+      max_state_iterations: "3"
+      on_max_iterations: "approved"
+    route:
       approved: complete
       concerns: refactor
-    agent:
-      max_turns: 50
-      timeout: 900
-  - name: complete
-    description: Refactor completed
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Refactor blocked
-    prompt: prompts/common/blocked.md
 
-entry_state: characterize
 terminal_states: [complete, blocked]

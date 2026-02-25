@@ -135,19 +135,17 @@ func StatusIcon(status string) string {
 		return "[ ]"
 	case "complete":
 		return "[x]"
-	case "implementing", "qa", "qa_review":
-		return "[>]"
+	case "blocked":
+		return "[X]"
 	case "adversary":
 		return "[!]"
 	case "disputed":
 		return "[!]"
-	case "blocked":
-		return "[X]"
 	case "deferred":
 		return "[~]"
 	case "split":
 		return "[/]"
 	default:
-		return "[?]"
+		return "[>]"
 	}
 }

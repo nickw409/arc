@@ -1,5 +1,5 @@
 name: act
-description: Generic linear action block — does work and exits unconditionally
+description: Generic linear action block — use `tests` when specifically writing tests, not for general implementation
 params:
   max_turns: {default: "45"}
   timeout: {default: "900"}

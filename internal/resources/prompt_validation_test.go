@@ -270,8 +270,8 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"direct/multi-phase.md": true, // loaded by orchestrator for direct multi-phase plans
 		"blocks/act.md":         true, // default prompt for act block
 		"blocks/adversary.md":   true, // default prompt for adversary block
-		"blocks/qa.md":          true, // default prompt for qa block
-		"blocks/qa-review.md":   true, // default prompt for qa-review block
+		"blocks/tests.md":       true, // default prompt for tests block
+		"blocks/test-review.md": true, // default prompt for test-review block
 		"blocks/review.md":      true, // default prompt for review block
 	}
 

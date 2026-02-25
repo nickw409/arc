@@ -247,7 +247,7 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 		}
 
 	// QA review found gaps
-	case currentState == "qa" && result.Verdict == arc.VerdictGapsFound:
+	case currentState == "tests" && result.Verdict == arc.VerdictGapsFound:
 		fmt.Printf("[%s] QA Review: GAPS_FOUND — re-running QA\n", opts.PhaseName)
 
 	// Impl review has concerns

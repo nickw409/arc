@@ -1,43 +1,31 @@
 name: investigation
-version: 1
+version: 2
 description: Research and produce findings
 
-states:
-  - name: research
-    description: Examine codebase and gather information
-    prompt: prompts/investigation/research.md
-    next: draft
-    agent:
-      max_turns: 100
-      timeout: 1800
-  - name: draft
-    description: Write findings document
-    prompt: prompts/investigation/draft.md
-    next: review
-    agent:
-      max_turns: 100
-      timeout: 1800
-  - name: review
-    description: Review findings for completeness
-    prompt: prompts/investigation/review.md
-    verdicts:
-      - approved
-      - gaps_found
-    constraints:
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
+pipeline:
+  - block: act
+    name: research
+    params:
+      prompt: "prompts/investigation/research.md"
+      max_turns: "100"
+      timeout: "1800"
+  - block: act
+    name: draft
+    params:
+      prompt: "prompts/investigation/draft.md"
+      max_turns: "100"
+      timeout: "1800"
+  - block: judge
+    name: review
+    params:
+      prompt: "prompts/investigation/review.md"
+      max_turns: "50"
+      verdict_a: "approved"
+      verdict_b: "gaps_found"
+      max_state_iterations: "3"
+      on_max_iterations: "approved"
+    route:
       approved: complete
       gaps_found: draft
-    agent:
-      max_turns: 50
-      timeout: 900
-  - name: complete
-    description: Investigation completed
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Investigation blocked
-    prompt: prompts/common/blocked.md
 
-entry_state: research
 terminal_states: [complete, blocked]

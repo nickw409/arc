@@ -8,19 +8,19 @@ import (
 )
 
 func TestQABlockStructure(t *testing.T) {
-	data, err := resources.BlockBytes("qa")
+	data, err := resources.BlockBytes("tests")
 	if err != nil {
-		t.Fatalf("loading qa block: %v", err)
+		t.Fatalf("loading tests block: %v", err)
 	}
 	b, err := LoadBlock(data)
 	if err != nil {
-		t.Fatalf("parsing qa block: %v", err)
+		t.Fatalf("parsing tests block: %v", err)
 	}
 
 	if len(b.States) != 1 {
 		t.Fatalf("expected 1 state, got %d", len(b.States))
 	}
-	if b.Entry != "qa" {
+	if b.Entry != "tests" {
 		t.Errorf("expected entry 'qa', got %q", b.Entry)
 	}
 	if len(b.Exits) != 1 || b.Exits[0] != "done" {
@@ -53,13 +53,13 @@ func TestQABlockStructure(t *testing.T) {
 }
 
 func TestQAReviewBlockStructure(t *testing.T) {
-	data, err := resources.BlockBytes("qa-review")
+	data, err := resources.BlockBytes("test-review")
 	if err != nil {
-		t.Fatalf("loading qa-review block: %v", err)
+		t.Fatalf("loading test-review block: %v", err)
 	}
 	b, err := LoadBlock(data)
 	if err != nil {
-		t.Fatalf("parsing qa-review block: %v", err)
+		t.Fatalf("parsing test-review block: %v", err)
 	}
 
 	if len(b.States) != 1 {
@@ -234,7 +234,7 @@ func TestJudgeBlockInPipeline(t *testing.T) {
 
 func TestNewBlocksLoadClean(t *testing.T) {
 	// Verify all new blocks in this phase load without error.
-	newBlocks := []string{"qa", "qa-review"}
+	newBlocks := []string{"tests", "test-review"}
 	for _, name := range newBlocks {
 		t.Run(name, func(t *testing.T) {
 			data, err := resources.BlockBytes(name)

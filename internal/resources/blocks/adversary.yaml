@@ -1,5 +1,5 @@
 name: adversary
-description: Adversary writes adversarial tests to find bugs in existing code
+description: Write adversarial tests to find bugs — not for quality review; use `review` or `judge` for review tasks
 params:
   max_turns: {default: "30"}
   prompt: {default: "prompts/blocks/adversary.md"}
