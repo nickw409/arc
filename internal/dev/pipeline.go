@@ -88,15 +88,21 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	workflowType := ValidateWorkflowType(discovery.WorkflowType)
 
 	// Clarification step: ask user questions if discovery surfaced any
-	if !opts.AutoYes && ShouldAskQuestions(complexity, discovery.Questions) {
-		fmt.Print(FormatDiscoverySummary(discovery))
-		fmt.Println("\n[dev] The following questions need your input:")
-		clarifications, err := AskQuestions(discovery.Questions, os.Stdin, os.Stdout)
+	if !opts.AutoYes {
+		clarifications, clarifyUsage, err := RunClarificationLoop(ctx, ClarifyOptions{
+			Discovery:   discovery,
+			Complexity:  complexity,
+			MaxRounds:   3,
+			Model:       opts.Model,
+			CommandName: opts.CommandName,
+			Stdin:       os.Stdin,
+			Stdout:      os.Stdout,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("clarification failed: %w", err)
 		}
 		discovery.Clarifications = clarifications
-		fmt.Println()
+		result.Usage = result.Usage.Add(clarifyUsage)
 	}
 
 	// Generate plan name

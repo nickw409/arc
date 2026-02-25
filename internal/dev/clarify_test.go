@@ -2,6 +2,7 @@ package dev
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -237,5 +238,162 @@ func TestAskQuestions_EOFMidway(t *testing.T) {
 	}
 	if clarifications[2].Answer != "" {
 		t.Errorf("clarifications[2].Answer = %q, want empty", clarifications[2].Answer)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseFollowUpOutput tests
+// ---------------------------------------------------------------------------
+
+func TestParseFollowUpOutput_WithQuestions(t *testing.T) {
+	output := `Some reasoning text...
+
+` + "```json" + `
+{
+  "reasoning": "The user said 'whatever works' for the auth approach",
+  "questions": ["Should token refresh happen client-side or server-side?", "What token expiry?"]
+}
+` + "```" + `
+
+Done.`
+
+	questions, err := ParseFollowUpOutput(output)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 2 {
+		t.Fatalf("len(questions) = %d, want 2", len(questions))
+	}
+	if questions[0] != "Should token refresh happen client-side or server-side?" {
+		t.Errorf("questions[0] = %q, want %q", questions[0], "Should token refresh happen client-side or server-side?")
+	}
+	if questions[1] != "What token expiry?" {
+		t.Errorf("questions[1] = %q, want %q", questions[1], "What token expiry?")
+	}
+}
+
+func TestParseFollowUpOutput_EmptyQuestions(t *testing.T) {
+	output := "```json\n" + `{"reasoning": "All clear", "questions": []}` + "\n```"
+
+	questions, err := ParseFollowUpOutput(output)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 0 {
+		t.Errorf("len(questions) = %d, want 0", len(questions))
+	}
+}
+
+func TestParseFollowUpOutput_NoJSONBlock(t *testing.T) {
+	output := "Just some text with no JSON block"
+
+	_, err := ParseFollowUpOutput(output)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no JSON block") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "no JSON block")
+	}
+}
+
+func TestParseFollowUpOutput_InvalidJSON(t *testing.T) {
+	output := "```json\n{not valid json}\n```"
+
+	_, err := ParseFollowUpOutput(output)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unmarshal") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "unmarshal")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RunClarificationLoop tests
+// ---------------------------------------------------------------------------
+
+func TestRunClarificationLoop_SimpleSkips(t *testing.T) {
+	var stdout bytes.Buffer
+	clarifications, usage, err := RunClarificationLoop(context.Background(), ClarifyOptions{
+		Discovery: &DiscoveryResult{
+			Complexity: ComplexitySimple,
+			Questions:  []string{"Some question?"},
+		},
+		Complexity: ComplexitySimple,
+		Stdin:      strings.NewReader(""),
+		Stdout:     &stdout,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if clarifications != nil {
+		t.Errorf("clarifications = %v, want nil", clarifications)
+	}
+	if !usage.IsZero() {
+		t.Errorf("usage should be zero, got %+v", usage)
+	}
+}
+
+func TestRunClarificationLoop_NoQuestions(t *testing.T) {
+	var stdout bytes.Buffer
+	clarifications, usage, err := RunClarificationLoop(context.Background(), ClarifyOptions{
+		Discovery: &DiscoveryResult{
+			Complexity: ComplexityMedium,
+			Questions:  []string{},
+		},
+		Complexity: ComplexityMedium,
+		Stdin:      strings.NewReader(""),
+		Stdout:     &stdout,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if clarifications != nil {
+		t.Errorf("clarifications = %v, want nil", clarifications)
+	}
+	if !usage.IsZero() {
+		t.Errorf("usage should be zero, got %+v", usage)
+	}
+}
+
+func TestRunClarificationLoop_SingleRound(t *testing.T) {
+	// Provide answers for one round; follow-up agent will fail (no real agent)
+	// which is non-fatal, so the loop should return after round 0.
+	input := "Google and GitHub\nJWTs\n"
+	var stdout bytes.Buffer
+
+	clarifications, _, err := RunClarificationLoop(context.Background(), ClarifyOptions{
+		Discovery: &DiscoveryResult{
+			TaskSummary:  "Add OAuth",
+			Complexity:   ComplexityMedium,
+			WorkflowType: "feature",
+			Questions:    []string{"Which providers?", "JWT or sessions?"},
+		},
+		Complexity:  ComplexityMedium,
+		MaxRounds:   3,
+		CommandName: "false", // will fail immediately — simulates agent failure
+		Stdin:       strings.NewReader(input),
+		Stdout:      &stdout,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(clarifications) != 2 {
+		t.Fatalf("len(clarifications) = %d, want 2", len(clarifications))
+	}
+	if clarifications[0].Answer != "Google and GitHub" {
+		t.Errorf("clarifications[0].Answer = %q, want %q", clarifications[0].Answer, "Google and GitHub")
+	}
+	if clarifications[1].Answer != "JWTs" {
+		t.Errorf("clarifications[1].Answer = %q, want %q", clarifications[1].Answer, "JWTs")
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "The following questions need your input") {
+		t.Errorf("output missing initial prompt, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Evaluating answers") {
+		t.Errorf("output missing evaluation message, got:\n%s", output)
 	}
 }
