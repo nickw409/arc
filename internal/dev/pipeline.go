@@ -32,6 +32,7 @@ type DevOptions struct {
 	Timeout         int    // wall-clock timeout seconds (0 = default 14400)
 	CommandName     string // agent binary name for testing
 	SkipReview      bool
+	AutoYes         bool   // skip clarification questions (for CI)
 }
 
 // DevResult holds the outcome of an arc dev run.
@@ -85,6 +86,18 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	result.Complexity = complexity
 
 	workflowType := ValidateWorkflowType(discovery.WorkflowType)
+
+	// Clarification step: ask user questions if discovery surfaced any
+	if !opts.AutoYes && ShouldAskQuestions(complexity, discovery.Questions) {
+		fmt.Print(FormatDiscoverySummary(discovery))
+		fmt.Println("\n[dev] The following questions need your input:")
+		clarifications, err := AskQuestions(discovery.Questions, os.Stdin, os.Stdout)
+		if err != nil {
+			return nil, fmt.Errorf("clarification failed: %w", err)
+		}
+		discovery.Clarifications = clarifications
+		fmt.Println()
+	}
 
 	// Generate plan name
 	planName := GeneratePlanName(opts.TaskDescription, plansDir)

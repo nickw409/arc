@@ -20,6 +20,7 @@ func newDevCmd() *cobra.Command {
 	var timeout int
 	var skipReview bool
 	var model string
+	var autoYes bool
 
 	cmd := &cobra.Command{
 		Use:   "dev [task description...]",
@@ -78,6 +79,7 @@ func newDevCmd() *cobra.Command {
 				Model:           model,
 				Timeout:         timeout,
 				SkipReview:      skipReview,
+				AutoYes:         autoYes,
 			})
 			if err != nil {
 				return err
@@ -96,5 +98,6 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().IntVar(&timeout, "timeout", 14400, "Wall-clock timeout in seconds")
 	cmd.Flags().BoolVar(&skipReview, "skip-review", false, "Skip adversarial review")
 	cmd.Flags().StringVar(&model, "model", "", "Model override for all agents")
+	cmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Skip clarification questions (for CI)")
 	return cmd
 }

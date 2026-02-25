@@ -520,7 +520,7 @@ func TestValidateWorkflowType_Unknown(t *testing.T) {
 }
 
 func TestValidateWorkflowType_AllValidTypes(t *testing.T) {
-	validTypes := []string{"feature", "bugfix", "investigation", "refactor", "performance", "direct"}
+	validTypes := []string{"feature", "bugfix", "investigation", "refactor", "performance", "direct", "audit"}
 	for _, wt := range validTypes {
 		got := ValidateWorkflowType(wt)
 		if got != wt {
@@ -761,6 +761,51 @@ func TestParseDiscoveryOutput_OptionalFields(t *testing.T) {
 	}
 	if len(result.Risks) != 1 {
 		t.Errorf("len(Risks) = %d, want 1", len(result.Risks))
+	}
+}
+
+func TestParseDiscoveryOutput_WithQuestions(t *testing.T) {
+	input := "```json\n" +
+		`{
+  "task_summary": "Add OAuth",
+  "complexity": "medium",
+  "reasoning": "Multiple files",
+  "workflow_type": "feature",
+  "relevant_files": [],
+  "requirements": [],
+  "suggested_phases": [{"name": "impl", "description": "implement"}],
+  "questions": ["Which providers?", "JWT or sessions?"]
+}` + "\n```"
+
+	result, err := ParseDiscoveryOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Questions) != 2 {
+		t.Fatalf("len(Questions) = %d, want 2", len(result.Questions))
+	}
+	if result.Questions[0] != "Which providers?" {
+		t.Errorf("Questions[0] = %q, want %q", result.Questions[0], "Which providers?")
+	}
+	if result.Questions[1] != "JWT or sessions?" {
+		t.Errorf("Questions[1] = %q, want %q", result.Questions[1], "JWT or sessions?")
+	}
+}
+
+func TestParseDiscoveryOutput_NoQuestions(t *testing.T) {
+	input := "```json\n" +
+		`{"task_summary": "fix bug", "complexity": "simple", "reasoning": "small", "workflow_type": "direct"}` +
+		"\n```"
+
+	result, err := ParseDiscoveryOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Questions == nil {
+		t.Error("Questions is nil, want empty slice")
+	}
+	if len(result.Questions) != 0 {
+		t.Errorf("len(Questions) = %d, want 0", len(result.Questions))
 	}
 }
 

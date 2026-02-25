@@ -48,6 +48,15 @@ Systematically explore the codebase to produce a structured analysis that inform
 - **medium** — Multiple files, some design decisions, but clear approach
 - **complex** — Many files, architectural decisions needed, multiple valid approaches, cross-cutting concerns
 
+### Step 7: Clarifying Questions
+
+For medium and complex tasks, identify ambiguities that could lead to wasted work:
+- Are there multiple valid approaches where user preference matters?
+- Are requirements underspecified?
+- Are there architectural decisions that need user input?
+
+Output 1-5 specific, actionable questions. Skip this for simple tasks.
+
 ## Output Format
 
 You MUST output valid JSON in a ```json code fence matching this schema:
@@ -70,8 +79,9 @@ You MUST output valid JSON in a ```json code fence matching this schema:
     "file/path.go": ["imported/pkg1", "imported/pkg2"]
   },
   "conventions": ["Convention 1: description", "Convention 2: description"],
-  "risks": ["Risk 1: description", "Risk 2: description"]
+  "risks": ["Risk 1: description", "Risk 2: description"],
+  "questions": ["Question 1?", "Question 2?"]
 }
 ```
 
-The `dependencies`, `conventions`, and `risks` fields are optional but strongly encouraged for medium and complex tasks.
+The `dependencies`, `conventions`, `risks`, and `questions` fields are optional but strongly encouraged for medium and complex tasks.

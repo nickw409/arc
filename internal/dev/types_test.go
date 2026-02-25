@@ -133,6 +133,8 @@ func TestDiscoveryResultJSONRoundTrip(t *testing.T) {
 		SuggestedPhases: []PhaseSpec{{Name: "auth-types", Description: "Define OAuth types"}},
 		Conventions:     []string{"errors wrapped with fmt.Errorf"},
 		Risks:           []string{"breaking auth middleware"},
+		Questions:       []string{},
+		Clarifications:  []Clarification{},
 	}
 	data, err := json.Marshal(original)
 	if err != nil {

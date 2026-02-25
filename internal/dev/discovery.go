@@ -125,6 +125,7 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 		Dependencies    map[string][]string `json:"dependencies,omitempty"`
 		Conventions     []string            `json:"conventions,omitempty"`
 		Risks           []string            `json:"risks,omitempty"`
+		Questions       []string            `json:"questions,omitempty"`
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
@@ -156,6 +157,7 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 		Dependencies:    raw.Dependencies,
 		Conventions:     raw.Conventions,
 		Risks:           raw.Risks,
+		Questions:       raw.Questions,
 	}
 
 	if result.RelevantFiles == nil {
@@ -172,6 +174,9 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 	}
 	if result.Risks == nil {
 		result.Risks = []string{}
+	}
+	if result.Questions == nil {
+		result.Questions = []string{}
 	}
 
 	return result, nil

@@ -616,3 +616,88 @@ func TestGeneratePlan_PlanAlreadyExists(t *testing.T) {
 		t.Fatal("expected error for already-existing plan, got nil")
 	}
 }
+
+// --- Clarifications in plan.md tests ---
+
+func TestGenerateSimplePlanMD_WithClarifications(t *testing.T) {
+	discovery := &DiscoveryResult{
+		TaskSummary:  "Add OAuth authentication",
+		Approach:     "Token middleware",
+		Complexity:   ComplexitySimple,
+		WorkflowType: "direct",
+		Clarifications: []Clarification{
+			{Question: "Which providers?", Answer: "Google and GitHub"},
+			{Question: "JWT or sessions?", Answer: "JWTs"},
+		},
+	}
+
+	result := GenerateSimplePlanMD(discovery)
+
+	if !strings.Contains(result, "## Clarifications") {
+		t.Errorf("expected Clarifications section, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Which providers?") {
+		t.Errorf("expected question text, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Google and GitHub") {
+		t.Errorf("expected answer text, got:\n%s", result)
+	}
+	if !strings.Contains(result, "JWTs") {
+		t.Errorf("expected second answer, got:\n%s", result)
+	}
+}
+
+func TestGeneratePhasePlanMD_WithClarifications(t *testing.T) {
+	discovery := &DiscoveryResult{
+		TaskSummary:  "Add OAuth",
+		Complexity:   ComplexityMedium,
+		WorkflowType: "feature",
+		Clarifications: []Clarification{
+			{Question: "Which DB?", Answer: "Postgres"},
+		},
+	}
+	phase := PhaseSpec{Name: "impl", Description: "Implement it"}
+
+	result := GeneratePhasePlanMD(discovery, phase)
+
+	if !strings.Contains(result, "## Clarifications") {
+		t.Errorf("expected Clarifications section, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Which DB?") {
+		t.Errorf("expected question text, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Postgres") {
+		t.Errorf("expected answer text, got:\n%s", result)
+	}
+}
+
+func TestGenerateSimplePlanMD_NoClarifications(t *testing.T) {
+	discovery := &DiscoveryResult{
+		TaskSummary:    "Fix typo",
+		Complexity:     ComplexitySimple,
+		WorkflowType:   "direct",
+		Clarifications: []Clarification{},
+	}
+
+	result := GenerateSimplePlanMD(discovery)
+
+	if strings.Contains(result, "## Clarifications") {
+		t.Errorf("expected no Clarifications section when empty, got:\n%s", result)
+	}
+}
+
+func TestGeneratePhasePlanMD_NoClarifications(t *testing.T) {
+	discovery := &DiscoveryResult{
+		TaskSummary:    "Fix bug",
+		Complexity:     ComplexityMedium,
+		WorkflowType:   "bugfix",
+		Clarifications: nil,
+	}
+	phase := PhaseSpec{Name: "fix", Description: "Fix it"}
+
+	result := GeneratePhasePlanMD(discovery, phase)
+
+	if strings.Contains(result, "## Clarifications") {
+		t.Errorf("expected no Clarifications section when nil, got:\n%s", result)
+	}
+}

@@ -54,6 +54,12 @@ type PhaseSpec struct {
 	Description string `json:"description"`
 }
 
+// Clarification holds a question posed to the user and their answer.
+type Clarification struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
 // DiscoveryResult holds the structured output from a discovery agent.
 type DiscoveryResult struct {
 	TaskSummary     string              `json:"task_summary"`
@@ -67,6 +73,8 @@ type DiscoveryResult struct {
 	Dependencies    map[string][]string `json:"dependencies,omitempty"`
 	Conventions     []string            `json:"conventions,omitempty"`
 	Risks           []string            `json:"risks,omitempty"`
+	Questions       []string            `json:"questions,omitempty"`
+	Clarifications  []Clarification     `json:"clarifications,omitempty"`
 }
 
 // MarshalJSON ensures nil slices are marshaled as [] instead of null.
@@ -85,6 +93,12 @@ func (dr DiscoveryResult) MarshalJSON() ([]byte, error) {
 	}
 	if dr.Risks == nil {
 		dr.Risks = []string{}
+	}
+	if dr.Questions == nil {
+		dr.Questions = []string{}
+	}
+	if dr.Clarifications == nil {
+		dr.Clarifications = []Clarification{}
 	}
 	type Alias DiscoveryResult
 	return json.Marshal(Alias(dr))
@@ -115,6 +129,12 @@ func (dr *DiscoveryResult) UnmarshalJSON(data []byte) error {
 	}
 	if dr.Risks == nil {
 		dr.Risks = []string{}
+	}
+	if dr.Questions == nil {
+		dr.Questions = []string{}
+	}
+	if dr.Clarifications == nil {
+		dr.Clarifications = []Clarification{}
 	}
 	return nil
 }

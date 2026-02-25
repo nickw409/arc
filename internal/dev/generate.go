@@ -155,6 +155,17 @@ func GenerateSimplePlanMD(discovery *DiscoveryResult) string {
 		}
 	}
 
+	if len(discovery.Clarifications) > 0 {
+		b.WriteString("\n## Clarifications\n\n")
+		for _, c := range discovery.Clarifications {
+			b.WriteString("**Q:** ")
+			b.WriteString(c.Question)
+			b.WriteString("\n**A:** ")
+			b.WriteString(c.Answer)
+			b.WriteString("\n\n")
+		}
+	}
+
 	return b.String()
 }
 
@@ -186,6 +197,17 @@ func GeneratePhasePlanMD(discovery *DiscoveryResult, phase PhaseSpec) string {
 				b.WriteString(f.Description)
 			}
 			b.WriteString("\n")
+		}
+	}
+
+	if len(discovery.Clarifications) > 0 {
+		b.WriteString("\n## Clarifications\n\n")
+		for _, c := range discovery.Clarifications {
+			b.WriteString("**Q:** ")
+			b.WriteString(c.Question)
+			b.WriteString("\n**A:** ")
+			b.WriteString(c.Answer)
+			b.WriteString("\n\n")
 		}
 	}
 
