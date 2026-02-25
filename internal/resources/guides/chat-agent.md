@@ -18,7 +18,7 @@ Talk to the user. Clarify ambiguities about what they want. You don't need to ex
 
 ### Step 2: Discovery
 
-Use `arc_dev`-style discovery to analyze the codebase. This identifies relevant files, patterns, dependencies, and task complexity. Don't manually grep through the codebase to figure out what exists — let discovery do that work.
+Call `arc_discover` with the task description. It spawns a read-only agent that explores the codebase and returns structured analysis: relevant files, complexity estimate, suggested workflow type, phase breakdown, conventions, and risks. Don't manually grep through the codebase to figure out what exists — let discovery do that work.
 
 ### Step 3: Plan
 
@@ -73,6 +73,7 @@ Report results to the user. Suggest `arc_archive` to clean up.
 
 | Tool | Purpose |
 |------|---------|
+| `arc_discover` | Analyze the codebase for a task — returns files, complexity, workflow suggestion |
 | `arc_plan` | Create a plan with named phases and workflow type |
 | `arc_review` | Single-pass adversarial review with auto-remediation |
 | `arc_run` | Launch orchestrator async — returns immediately |
