@@ -14,7 +14,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/dev"
@@ -763,27 +762,19 @@ func (h *handlerContext) handleDiscover(ctx context.Context, req mcp.CallToolReq
 		return mcp.NewToolResultError("task_description is required"), nil
 	}
 
-	prompt := "You are a codebase analysis agent. Explore the codebase to answer the following request. " +
-		"Use Read, Glob, and Grep to examine actual files — do not guess. " +
-		"Return your analysis as clear, structured text (use markdown). " +
-		"Be thorough and precise: cite file paths, line numbers, and concrete evidence.\n\n" +
-		taskDescription
-
-	result, err := agent.Spawn(ctx, agent.SpawnOptions{
-		Prompt:       prompt,
-		AllowedTools: []string{"Read", "Glob", "Grep", "LS"},
-		Timeout:      180 * time.Second,
-		Model:        model,
+	out, err := dev.RunDiscovery(ctx, dev.DiscoveryOptions{
+		TaskDescription: taskDescription,
+		Model:           model,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("discovery failed: %v", err)), nil
 	}
 
-	output := strings.TrimSpace(result.Output)
-	if output == "" {
-		return mcp.NewToolResultError("discovery agent produced no output"), nil
+	data, err := json.MarshalIndent(out.Result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("marshaling result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(output), nil
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (h *handlerContext) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -14,11 +14,16 @@ You have Arc orchestration tools available via MCP. Arc is an AI-powered workflo
 
 ### Step 1: Understand the Task
 
-Talk to the user. Clarify ambiguities about what they want. You don't need to explore the codebase yourself — that's what discovery is for. Focus on understanding the *goal*.
+Talk to the user. Clarify ambiguities about what they want. Focus on understanding the *goal*.
 
-### Step 2: Discovery
+### Step 2: Explore & Discover
 
-Call `arc_discover` with the task description. It spawns a read-only agent that explores the codebase and returns structured analysis: relevant files, complexity estimate, suggested workflow type, phase breakdown, conventions, and risks. Don't manually grep through the codebase to figure out what exists — let discovery do that work.
+Two tools for understanding the codebase — use the right one:
+
+- **`arc_discover`** — Use when you're about to plan an Arc task. Pass the task description and get back structured JSON: relevant files, complexity, workflow type suggestion, phase breakdown, conventions, and risks. Feed this directly into your planning step.
+- **Your normal tools** (Read, Grep, Glob, Bash) — Use for freeform exploration: answering user questions, investigating failures, auditing code, or anything where you need unstructured analysis.
+
+Rule of thumb: if the next step is `arc_plan`, use `arc_discover`. Otherwise, explore yourself.
 
 ### Step 3: Plan
 
@@ -73,7 +78,7 @@ Report results to the user. Suggest `arc_archive` to clean up.
 
 | Tool | Purpose |
 |------|---------|
-| `arc_discover` | Analyze the codebase for a task — returns files, complexity, workflow suggestion |
+| `arc_discover` | Structured codebase analysis — returns JSON with files, complexity, workflow suggestion, phases |
 | `arc_plan` | Create a plan with named phases and workflow type |
 | `arc_review` | Single-pass adversarial review with auto-remediation |
 | `arc_run` | Launch orchestrator async — returns immediately |
@@ -161,7 +166,7 @@ Blocks accept parameters to tune behavior (max turns, max rounds, model). States
 ## Key Principles
 
 - **You are the supervisor, not the executor.** Sub-agents write code. The pipeline manages retries. You make judgment calls — what to build, how to structure it, what to do when something fails.
-- **Don't explore manually when arc can discover.** Use discovery for codebase analysis. Use your normal tools only for quick lookups or when you already know exactly what you need.
+- **Use the right exploration tool.** `arc_discover` for structured analysis before planning. Your own tools for freeform exploration, debugging, and answering questions.
 - **Don't over-review.** One auto-remediation pass catches the obvious problems. You catch the rest during intervention with real signal from actual failures.
 - **Stay unblocked.** While a run is in progress, do other work. Plan ahead, answer questions, explore. Don't sit idle polling.
 - **Fail fast, fix smart.** When the pipeline can't make progress, it stops and tells you why. Diagnose the real problem instead of blindly retrying.
