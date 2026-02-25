@@ -192,6 +192,51 @@ func TestManageTests(t *testing.T) {
 	}
 }
 
+func TestManageTestsNegativePassing(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = -1
+	opts.Total = 10
+	if err := ManageTests(opts); err == nil {
+		t.Fatal("expected error for negative passing count")
+	}
+}
+
+func TestManageTestsNegativeTotal(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 0
+	opts.Total = -1
+	if err := ManageTests(opts); err == nil {
+		t.Fatal("expected error for negative total count")
+	}
+}
+
+func TestManageTestsPassingExceedsTotal(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 999
+	opts.Total = 1
+	if err := ManageTests(opts); err == nil {
+		t.Fatal("expected error when passing exceeds total")
+	}
+}
+
+func TestManageTestsAllPassing(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 5
+	opts.Total = 5
+	if err := ManageTests(opts); err != nil {
+		t.Fatalf("passing == total should be valid, got error: %v", err)
+	}
+}
+
+func TestManageTestsNoTests(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 0
+	opts.Total = 0
+	if err := ManageTests(opts); err != nil {
+		t.Fatalf("0 passing and 0 total should be valid, got error: %v", err)
+	}
+}
+
 func TestManagePackages(t *testing.T) {
 	_, opts := setupManageTest(t)
 	opts.Packages = []string{"internal/plan", "internal/pipeline"}

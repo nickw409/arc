@@ -79,6 +79,15 @@ func ManageBlock(opts ManageOptions) error {
 
 // ManageTests updates test passing/total counts.
 func ManageTests(opts ManageOptions) error {
+	if opts.Passing < 0 {
+		return fmt.Errorf("passing count must be non-negative, got %d", opts.Passing)
+	}
+	if opts.Total < 0 {
+		return fmt.Errorf("total count must be non-negative, got %d", opts.Total)
+	}
+	if opts.Passing > opts.Total {
+		return fmt.Errorf("passing count (%d) cannot exceed total (%d)", opts.Passing, opts.Total)
+	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
 		s.TestsPassing = opts.Passing
 		s.TestsTotal = opts.Total
