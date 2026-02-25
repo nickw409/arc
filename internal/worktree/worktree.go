@@ -30,7 +30,10 @@ func sanitizeBranch(s string) string {
 // Create creates a new worktree branch and checks it out in a temp directory.
 // Branch is created from current HEAD. Returns the worktree handle.
 func Create(projectDir, planName, phaseName string) (*Worktree, error) {
-	branch := "arc/" + sanitizeBranch(planName) + "/" + sanitizeBranch(phaseName)
+	branch := "arc/" + sanitizeBranch(planName)
+	if phaseName != "" {
+		branch += "/" + sanitizeBranch(phaseName)
+	}
 
 	dir, err := os.MkdirTemp("", "arc-worktree-*")
 	if err != nil {

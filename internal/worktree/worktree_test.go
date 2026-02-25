@@ -187,12 +187,43 @@ func TestBranchNaming(t *testing.T) {
 		{"my-plan", "my-phase", "arc/my-plan/my-phase"},
 		{"plan with spaces", "phase/special", "arc/plan-with-spaces/phase/special"},
 		{"plan@#$%", "phase!!!", "arc/plan/phase"},
+		{"my-plan", "", "arc/my-plan"},
 	}
 
 	for _, tc := range tests {
-		branch := "arc/" + sanitizeBranch(tc.plan) + "/" + sanitizeBranch(tc.phase)
-		if branch != tc.want {
-			t.Errorf("sanitizeBranch(%q, %q) = %q, want %q", tc.plan, tc.phase, branch, tc.want)
+		branch := "arc/" + sanitizeBranch(tc.plan)
+		if tc.phase != "" {
+			branch += "/" + sanitizeBranch(tc.phase)
 		}
+		if branch != tc.want {
+			t.Errorf("branchName(%q, %q) = %q, want %q", tc.plan, tc.phase, branch, tc.want)
+		}
+	}
+}
+
+func TestCreatePlanLevel(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "shared-plan", "")
+	if err != nil {
+		t.Fatalf("Create with empty phaseName failed: %v", err)
+	}
+	defer Remove(wt)
+
+	// Verify branch name has no trailing slash
+	if wt.Branch != "arc/shared-plan" {
+		t.Fatalf("expected branch arc/shared-plan, got %q", wt.Branch)
+	}
+
+	// Verify the worktree is on the correct branch
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = wt.Dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch failed: %v", err)
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch != "arc/shared-plan" {
+		t.Fatalf("expected checked-out branch arc/shared-plan, got %q", branch)
 	}
 }

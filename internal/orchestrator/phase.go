@@ -28,7 +28,7 @@ type RunPhaseOptions struct {
 	ProjectDir   string // working directory for git commits; empty uses process cwd
 	Config       *config.Config
 	Logger       *slog.Logger
-	UseWorktree  bool   // if true, run agents in an isolated git worktree
+	UseWorktree  bool   // if true, create a per-phase worktree (instead of shared plan-level)
 	WorkingDir   string // override working directory for agents (set by worktree)
 	ChatMode     bool   // if true, skip escalation ladder and block immediately
 }
@@ -55,24 +55,15 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 	}
 	machine := workflow.NewMachine(wf)
 
-	// Set initial state if empty
-	if phaseState.CurrentState == "" {
-		phaseState.CurrentState = machine.EntryState()
-		if err := sf.Write(phaseState); err != nil {
-			return fmt.Errorf("writing initial state: %w", err)
-		}
-	}
-
-	// Set up worktree isolation if requested
-	var wt *worktree.Worktree
+	// Set up per-phase worktree isolation if requested
 	if opts.UseWorktree {
 		projectDir := opts.ProjectDir
 		if projectDir == "" {
 			projectDir, _ = os.Getwd()
 		}
-		wt, err = worktree.Create(projectDir, opts.PlanName, opts.PhaseName)
-		if err != nil {
-			opts.Logger.Warn("failed to create worktree, running in-tree", "error", err)
+		wt, wtErr := worktree.Create(projectDir, opts.PlanName, opts.PhaseName)
+		if wtErr != nil {
+			opts.Logger.Warn("failed to create worktree, running in-tree", "error", wtErr)
 		} else {
 			opts.WorkingDir = wt.Dir
 			defer func() {
@@ -85,6 +76,14 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 				}
 				worktree.Remove(wt)
 			}()
+		}
+	}
+
+	// Set initial state if empty
+	if phaseState.CurrentState == "" {
+		phaseState.CurrentState = machine.EntryState()
+		if err := sf.Write(phaseState); err != nil {
+			return fmt.Errorf("writing initial state: %w", err)
 		}
 	}
 

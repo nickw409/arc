@@ -18,6 +18,7 @@ import (
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
+	"github.com/nwiley/arc/internal/worktree"
 )
 
 // LaunchOptions configures the orchestrator launcher.
@@ -29,8 +30,9 @@ type LaunchOptions struct {
 	Config        *config.Config
 	Logger        *slog.Logger
 	Timeout       int  // wall-clock timeout in seconds (0 = no timeout)
-	UseWorktree   bool // if true, run agents in isolated git worktrees
-	StopOnFailure bool // if true, cancel in-progress phases and return on first failure
+	UseWorktree      bool // if true, run agents in isolated git worktrees
+	PerPhaseWorktree bool // if true, create a separate worktree per phase instead of one shared worktree
+	StopOnFailure    bool // if true, cancel in-progress phases and return on first failure
 	ChatMode      bool // if true, skip escalation ladder and block immediately for chat-agent intervention
 }
 
@@ -68,6 +70,28 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 	// Clean up review output files from previous adversarial reviews
 	if err := review.CleanupOutputFiles(planDir, meta.Phases); err != nil {
 		opts.Logger.Warn("failed to clean review output files", "error", err)
+	}
+
+	// Set up shared worktree for all phases (unless per-phase worktrees are requested)
+	var sharedWorktree *worktree.Worktree
+	workingDir := ""
+	if opts.UseWorktree && !opts.PerPhaseWorktree {
+		projectDir := opts.ProjectDir
+		if projectDir == "" {
+			projectDir, _ = os.Getwd()
+		}
+		wt, wtErr := worktree.Create(projectDir, opts.PlanName, "")
+		if wtErr != nil {
+			opts.Logger.Warn("failed to create shared worktree, running in-tree", "error", wtErr)
+		} else {
+			sharedWorktree = wt
+			workingDir = wt.Dir
+			defer func() {
+				if sharedWorktree != nil {
+					worktree.Remove(sharedWorktree)
+				}
+			}()
+		}
 	}
 
 	// Print header
@@ -135,6 +159,18 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 
 		if allDone {
 			fmt.Println("\nAll phases complete.")
+
+			// Merge shared worktree back before reporting completion
+			if sharedWorktree != nil {
+				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
+					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
+					sharedWorktree = nil // prevent deferred Remove from deleting the branch
+					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
+				} else {
+					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, hash[:7])
+				}
+			}
+
 			if err := generateCompletionReport(planDir, opts.PlanName, meta, phaseStates); err != nil {
 				return nil, err
 			}
@@ -205,7 +241,8 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 					ProjectDir:  opts.ProjectDir,
 					Config:      opts.Config,
 					Logger:      opts.Logger,
-					UseWorktree: opts.UseWorktree,
+					UseWorktree: opts.UseWorktree && opts.PerPhaseWorktree,
+					WorkingDir:  workingDir,
 					ChatMode:    opts.ChatMode,
 				})
 				results <- phaseResult{phase: phaseName, err: err}

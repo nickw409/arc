@@ -72,6 +72,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to run")),
 		mcp.WithNumber("timeout", mcp.Description("Wall-clock timeout in seconds (default: 14400)")),
 		mcp.WithBoolean("worktree", mcp.Description("Run agents in isolated git worktrees (default: true)")),
+		mcp.WithBoolean("per_phase_worktree", mcp.Description("Create a separate worktree per phase instead of one shared worktree (default: false)")),
 	), h.handleRun)
 
 	s.AddTool(mcp.NewTool("arc_iterate",
@@ -256,6 +257,10 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 	if w, ok := args["worktree"].(bool); ok {
 		useWorktree = w
 	}
+	perPhaseWorktree := false
+	if p, ok := args["per_phase_worktree"].(bool); ok {
+		perPhaseWorktree = p
+	}
 
 	// Check if plan is already running.
 	h.mu.Lock()
@@ -283,16 +288,17 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 	go func() {
 		defer close(job.Done)
 		job.Result, job.Err = orchestrator.Launch(jobCtx, orchestrator.LaunchOptions{
-			PlanName:      planName,
-			PlansDir:      h.plansDir(),
-			ArcHome:       h.arcHome,
-			ProjectDir:    h.projectDir,
-			Config:        cfg,
-			Logger:        h.logger,
-			Timeout:       timeout,
-			UseWorktree:   useWorktree,
-			StopOnFailure: true,
-			ChatMode:      true,
+			PlanName:         planName,
+			PlansDir:         h.plansDir(),
+			ArcHome:          h.arcHome,
+			ProjectDir:       h.projectDir,
+			Config:           cfg,
+			Logger:           h.logger,
+			Timeout:          timeout,
+			UseWorktree:      useWorktree,
+			PerPhaseWorktree: perPhaseWorktree,
+			StopOnFailure:    true,
+			ChatMode:         true,
 		})
 	}()
 
