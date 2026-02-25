@@ -147,8 +147,9 @@ func TestEmbeddedGuideNotFound(t *testing.T) {
 
 func TestEmbeddedWorkflowContent(t *testing.T) {
 	// Verify embedded workflows have expected content markers
-	types := []string{"feature", "bugfix", "investigation", "refactor", "performance"}
-	for _, wt := range types {
+	// Pipeline-based workflows use 'pipeline:'; state-based use 'states:'
+	statesWorkflows := []string{"bugfix", "direct", "investigation", "refactor", "performance"}
+	for _, wt := range statesWorkflows {
 		data, err := WorkflowBytes(wt)
 		if err != nil {
 			t.Fatalf("WorkflowBytes(%s) error: %v", wt, err)
@@ -159,6 +160,20 @@ func TestEmbeddedWorkflowContent(t *testing.T) {
 		}
 		if !strings.Contains(content, "states:") {
 			t.Fatalf("WorkflowBytes(%s) missing 'states:' field", wt)
+		}
+	}
+	pipelineWorkflows := []string{"feature", "audit"}
+	for _, wt := range pipelineWorkflows {
+		data, err := WorkflowBytes(wt)
+		if err != nil {
+			t.Fatalf("WorkflowBytes(%s) error: %v", wt, err)
+		}
+		content := string(data)
+		if !strings.Contains(content, "name:") {
+			t.Fatalf("WorkflowBytes(%s) missing 'name:' field", wt)
+		}
+		if !strings.Contains(content, "pipeline:") {
+			t.Fatalf("WorkflowBytes(%s) missing 'pipeline:' field", wt)
 		}
 	}
 }

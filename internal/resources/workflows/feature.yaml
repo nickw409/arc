@@ -1,51 +1,19 @@
 name: feature
-version: 2
-description: New capability using TDD - write tests first, then implement
+version: 3
+description: Implement a feature and harden it with adversarial review
 
-states:
-  - name: qa
-    description: Write tests based on specification
-    prompt: prompts/feature/qa.md
-    next: qa_review
+pipeline:
+  - block: act
+    name: impl
+    params:
+      prompt: "prompts/feature/impl.md"
+      max_turns: "200"
+      timeout: "3600"
+  - block: adversary
+    name: check
+    params: {max_turns: "30"}
+    route:
+      bugs_found: impl
+      no_bugs_found: complete
 
-  - name: qa_review
-    description: Review test coverage
-    prompt: prompts/feature/qa-review.md
-    verdicts:
-      - approved
-      - gaps_found
-    constraints:
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
-      approved: impl
-      gaps_found: qa
-
-  - name: impl
-    description: Implement to pass tests
-    prompt: prompts/feature/impl.md
-    next: impl_review
-
-  - name: impl_review
-    description: Review implementation
-    prompt: prompts/feature/impl-review.md
-    verdicts:
-      - approved
-      - concerns
-    constraints:
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
-      approved: complete
-      concerns: impl
-
-  - name: complete
-    description: Phase completed successfully
-    prompt: prompts/common/complete.md
-
-  - name: blocked
-    description: Phase blocked, requires human intervention
-    prompt: prompts/common/blocked.md
-
-entry_state: qa
 terminal_states: [complete, blocked]

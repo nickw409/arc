@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Override the agent command name so RunIteration uses our mock binary.
+	// Override the agent command name so RunState uses our mock binary.
 	agentCommandName = testBin
 
 	os.Exit(m.Run())
@@ -139,19 +139,19 @@ func TestMapStateToStatusEmptyString(t *testing.T) {
 	}
 }
 
-func TestIterateReturnsActionContinue(t *testing.T) {
-	// Use qa_review state which is branching (approved -> impl, gaps_found -> qa).
-	// Mock agent outputs a verdict of "approved".
+func TestRunStateReturnsActionContinue(t *testing.T) {
+	// Use check.adversary state which is branching (no_bugs_found -> complete, bugs_found -> impl.act).
+	// Mock agent outputs a verdict of "no_bugs_found".
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa_review"
-	state.PhaseStatus = "qa_review"
+	state.CurrentState = "check.adversary"
+	state.PhaseStatus = "check.adversary"
 
 	plansDir := setupTestPlan(t, state)
 
 	// Set mock agent to output a verdict.
-	t.Setenv("MOCK_OUTPUT", "Some analysis\n\n## Verdict\n\napproved\n")
+	t.Setenv("MOCK_OUTPUT", "Some analysis\n\n## Verdict\n\nno_bugs_found\n")
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -160,15 +160,15 @@ func TestIterateReturnsActionContinue(t *testing.T) {
 	if result.Action != arc.ActionContinue {
 		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
 	}
-	if result.NextState != "impl" {
-		t.Fatalf("got NextState=%q, want %q", result.NextState, "impl")
+	if result.NextState != "complete" {
+		t.Fatalf("got NextState=%q, want %q", result.NextState, "complete")
 	}
-	if result.Verdict != arc.VerdictApproved {
-		t.Fatalf("got Verdict=%q, want %q", result.Verdict, arc.VerdictApproved)
+	if result.Verdict != arc.VerdictNoBugsFound {
+		t.Fatalf("got Verdict=%q, want %q", result.Verdict, arc.VerdictNoBugsFound)
 	}
 }
 
-func TestIterateAgentTimeout(t *testing.T) {
+func TestRunStateAgentTimeout(t *testing.T) {
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
 	state.CurrentState = "qa"
 	state.PhaseStatus = "qa"
@@ -177,20 +177,16 @@ func TestIterateAgentTimeout(t *testing.T) {
 
 	t.Setenv("MOCK_SLEEP_MS", "5000")
 
-	// Note: We need the Spawn function to use the testBin.
-	// This test requires hooking into the agent spawn — for now,
-	// verify that a timeout scenario returns ActionRetry.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	result := RunIteration(ctx, testLogger(), IterateOptions{
+	result := RunState(ctx, testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
 	})
 
-	// Could be ActionRetry (timeout) or ActionAbort (context cancelled).
-	// The key thing is it doesn't hang or panic.
+	// Context cancelled → ActionAbort
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -199,34 +195,7 @@ func TestIterateAgentTimeout(t *testing.T) {
 	}
 }
 
-func TestIterateAgentEmptyOutput(t *testing.T) {
-	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa"
-	state.PhaseStatus = "qa"
-
-	plansDir := setupTestPlan(t, state)
-
-	t.Setenv("MOCK_OUTPUT", "")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionRetry {
-		t.Fatalf("got Action=%v, want ActionRetry", result.Action)
-	}
-	if result.Err == nil {
-		t.Fatal("expected error for empty output")
-	}
-	errStr := strings.ToLower(result.Err.Error())
-	if !strings.Contains(errStr, "no output") && !strings.Contains(errStr, "empty") {
-		t.Fatalf("expected error about no output, got: %v", result.Err)
-	}
-}
-
-func TestIterateContextCancelled(t *testing.T) {
+func TestRunStateContextCancelled(t *testing.T) {
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
 	state.CurrentState = "qa"
 	state.PhaseStatus = "qa"
@@ -236,7 +205,7 @@ func TestIterateContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	result := RunIteration(ctx, testLogger(), IterateOptions{
+	result := RunState(ctx, testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -250,17 +219,17 @@ func TestIterateContextCancelled(t *testing.T) {
 	}
 }
 
-func TestIterateLinearStateNoVerdicts(t *testing.T) {
-	// "qa" is a linear state (next: qa_review). No verdict extraction needed.
+func TestRunStateLinearStateNoVerdicts(t *testing.T) {
+	// "impl.act" is a linear state (next: check.adversary). No verdict extraction needed.
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa"
-	state.PhaseStatus = "qa"
+	state.CurrentState = "impl.act"
+	state.PhaseStatus = "impl.act"
 
 	plansDir := setupTestPlan(t, state)
 
-	t.Setenv("MOCK_OUTPUT", "Tests written successfully, no verdict needed.\n")
+	t.Setenv("MOCK_OUTPUT", "Implementation complete, no verdict needed.\n")
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -269,8 +238,8 @@ func TestIterateLinearStateNoVerdicts(t *testing.T) {
 	if result.Action != arc.ActionContinue {
 		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
 	}
-	if result.NextState != "qa_review" {
-		t.Fatalf("got NextState=%q, want %q", result.NextState, "qa_review")
+	if result.NextState != "check.adversary" {
+		t.Fatalf("got NextState=%q, want %q", result.NextState, "check.adversary")
 	}
 	// No verdict for linear states
 	if result.Verdict != "" {
@@ -278,18 +247,18 @@ func TestIterateLinearStateNoVerdicts(t *testing.T) {
 	}
 }
 
-func TestIterateTimeoutVsNonzeroExit(t *testing.T) {
+func TestRunStateNonzeroExit(t *testing.T) {
 	// Agent exits with code 1 but does NOT time out.
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa"
-	state.PhaseStatus = "qa"
+	state.CurrentState = "impl.act"
+	state.PhaseStatus = "impl.act"
 
 	plansDir := setupTestPlan(t, state)
 
 	t.Setenv("MOCK_EXIT_CODE", "1")
 	t.Setenv("MOCK_OUTPUT", "some output before crash")
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -307,17 +276,17 @@ func TestIterateTimeoutVsNonzeroExit(t *testing.T) {
 	}
 }
 
-func TestIterateVerdictUnknown(t *testing.T) {
-	// qa_review is branching; agent outputs invalid verdict.
+func TestRunStateVerdictUnknown(t *testing.T) {
+	// check.adversary is branching; agent outputs invalid verdict.
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa_review"
-	state.PhaseStatus = "qa_review"
+	state.CurrentState = "check.adversary"
+	state.PhaseStatus = "check.adversary"
 
 	plansDir := setupTestPlan(t, state)
 
 	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\ninvalid_verdict_value\n")
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -335,7 +304,7 @@ func TestIterateVerdictUnknown(t *testing.T) {
 	}
 }
 
-func TestIterateStateFileCorrupt(t *testing.T) {
+func TestRunStateStateFileCorrupt(t *testing.T) {
 	plansDir := t.TempDir()
 	planDir := filepath.Join(plansDir, "test-plan")
 	phaseDir := filepath.Join(planDir, "phases", "test-phase")
@@ -348,7 +317,7 @@ func TestIterateStateFileCorrupt(t *testing.T) {
 		t.Fatalf("failed to write corrupt state.json: %v", err)
 	}
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -362,10 +331,10 @@ func TestIterateStateFileCorrupt(t *testing.T) {
 	}
 }
 
-func TestIteratePlanMDMissing(t *testing.T) {
+func TestRunStatePlanMDMissing(t *testing.T) {
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa"
-	state.PhaseStatus = "qa"
+	state.CurrentState = "impl.act"
+	state.PhaseStatus = "impl.act"
 
 	plansDir := t.TempDir()
 	planDir := filepath.Join(plansDir, "test-plan")
@@ -396,7 +365,7 @@ func TestIteratePlanMDMissing(t *testing.T) {
 
 	// Deliberately do NOT create plan.md
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -413,7 +382,7 @@ func TestIteratePlanMDMissing(t *testing.T) {
 	}
 }
 
-func TestIterateTerminalStateEarlyReturn(t *testing.T) {
+func TestRunStateTerminalStateEarlyReturn(t *testing.T) {
 	// State is "complete" which is terminal — should return immediately without spawning.
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
 	state.CurrentState = "complete"
@@ -421,7 +390,7 @@ func TestIterateTerminalStateEarlyReturn(t *testing.T) {
 
 	plansDir := setupTestPlan(t, state)
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -435,14 +404,14 @@ func TestIterateTerminalStateEarlyReturn(t *testing.T) {
 	}
 }
 
-func TestIterateWorkflowBytesFailure(t *testing.T) {
+func TestRunStateWorkflowBytesFailure(t *testing.T) {
 	state := arc.NewPhaseState("test-plan", "test-phase", "nonexistent-workflow-type-xyz")
 	state.CurrentState = "qa"
 	state.PhaseStatus = "qa"
 
 	plansDir := setupTestPlan(t, state)
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -459,20 +428,14 @@ func TestIterateWorkflowBytesFailure(t *testing.T) {
 	}
 }
 
-func TestIteratePromptBytesFailure(t *testing.T) {
-	// To test this, we need a valid workflow but with a state pointing to a
-	// nonexistent prompt. We can't easily override the embedded workflow,
-	// but we can create a state that references a workflow state whose prompt
-	// doesn't exist. Since the feature workflow has fixed prompts, we'd need
-	// a custom workflow. Instead, we verify the error path by using a state
-	// that doesn't exist in the workflow.
+func TestRunStatePromptBytesFailure(t *testing.T) {
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
 	state.CurrentState = "nonexistent_state"
 	state.PhaseStatus = "implementing"
 
 	plansDir := setupTestPlan(t, state)
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
 		PhaseName: "test-phase",
 		PlansDir:  plansDir,
@@ -486,18 +449,17 @@ func TestIteratePromptBytesFailure(t *testing.T) {
 	}
 }
 
-func TestIterateModeInstructionsAppended(t *testing.T) {
-	// Use a linear state (qa) so no verdict extraction is needed.
-	// Mock agent echoes stdin to verify the rendered prompt includes mode/instructions.
+func TestRunStateModeInstructionsAppended(t *testing.T) {
+	// Use a linear state (impl.act) so no verdict extraction is needed.
 	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "qa"
-	state.PhaseStatus = "qa"
+	state.CurrentState = "impl.act"
+	state.PhaseStatus = "impl.act"
 
 	plansDir := setupTestPlan(t, state)
 
 	t.Setenv("MOCK_ECHO_STDIN", "1")
 
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:     "test-plan",
 		PhaseName:    "test-phase",
 		Mode:         "impl",
@@ -512,10 +474,7 @@ func TestIterateModeInstructionsAppended(t *testing.T) {
 		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
 	}
 
-	// Read the updated state to get the agent output (which is stdin echoed back).
-	// The mock agent echoes stdin, so the rendered prompt (with mode/instructions)
-	// should have been piped through. We verify the pipeline constructed the right prompt
-	// by checking the state file was updated (iteration incremented).
+	// Verify state was updated (iteration incremented proves pipeline ran fully)
 	stateFile := filepath.Join(plansDir, "test-plan", "phases", "test-phase", "state.json")
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
@@ -525,44 +484,81 @@ func TestIterateModeInstructionsAppended(t *testing.T) {
 	if err := json.Unmarshal(data, &updated); err != nil {
 		t.Fatalf("failed to parse state: %v", err)
 	}
-	// Verify iteration was incremented (proof the pipeline ran fully)
 	if updated.Iteration.Current != state.Iteration.Current+1 {
 		t.Fatalf("expected iteration to be incremented to %d, got %d", state.Iteration.Current+1, updated.Iteration.Current)
 	}
 }
 
-// testWorkflowWithCaps returns a minimal flat workflow YAML with a qa_review state
-// that has max_state_iterations and on_max_iterations set.
-func testWorkflowWithCaps(maxStateIter int, onMax string) []byte {
-	onMaxLine := ""
-	if onMax != "" {
-		onMaxLine = fmt.Sprintf("\n      on_max_iterations: %s", onMax)
+func TestRunStateMemoryInjection(t *testing.T) {
+	// Pre-seed a memory file; verify the run succeeds (memory was read and injected).
+	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
+	st.CurrentState = "impl.act"
+	st.PhaseStatus = "impl.act"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	// Write existing memory for the "impl.act" state
+	if err := WriteMemory(phaseDir, "impl.act", "previously explored: file X, file Y"); err != nil {
+		t.Fatalf("setup: WriteMemory failed: %v", err)
 	}
-	constraintsBlock := ""
-	if maxStateIter != 0 {
-		constraintsBlock = fmt.Sprintf(`    constraints:
-      max_state_iterations: %d%s
-`, maxStateIter, onMaxLine)
+
+	t.Setenv("MOCK_OUTPUT", "Work done.\n")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
 	}
-	return []byte(fmt.Sprintf(`name: test-caps
-version: 1
-entry_state: qa_review
-terminal_states: [complete, blocked]
-states:
-  - name: qa_review
-    description: Review test coverage
-    prompt: prompts/feature/qa-review.md
-    verdicts: [approved, gaps_found]
-%s    next:
-      approved: complete
-      gaps_found: qa_review
-  - name: complete
-    description: Phase completed successfully
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Phase blocked
-    prompt: prompts/common/blocked.md
-`, constraintsBlock))
+
+	// Verify iteration advanced (pipeline ran without error)
+	stateFile := filepath.Join(phaseDir, "state.json")
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("failed to read state file: %v", err)
+	}
+	var updated arc.PhaseState
+	if err := json.Unmarshal(data, &updated); err != nil {
+		t.Fatalf("failed to parse state: %v", err)
+	}
+	if updated.Iteration.Current != st.Iteration.Current+1 {
+		t.Fatalf("expected iteration incremented, got %d", updated.Iteration.Current)
+	}
+}
+
+func TestRunStateMemorySaved(t *testing.T) {
+	// Agent outputs a ## Memory section; verify it gets saved to disk.
+	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
+	st.CurrentState = "check.adversary"
+	st.PhaseStatus = "check.adversary"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	t.Setenv("MOCK_OUTPUT", "Analysis complete.\n\n## Memory\nexplored src/foo.go and src/bar.go\n\n## Verdict\n\nno_bugs_found\n")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+
+	// Verify memory file was written
+	mem, err := ReadMemory(phaseDir, "check.adversary")
+	if err != nil {
+		t.Fatalf("ReadMemory failed: %v", err)
+	}
+	if !strings.Contains(mem, "explored src/foo.go") {
+		t.Fatalf("expected memory to contain exploration notes, got: %q", mem)
+	}
 }
 
 // withTestWorkflow installs a custom workflow loader for the duration of the test.
@@ -578,271 +574,6 @@ func withTestWorkflow(t *testing.T, wfType string, data []byte) {
 	t.Cleanup(func() { workflowBytesFunc = orig })
 }
 
-// setupTestPlanWithWorkflow sets up a test plan using a custom workflow type.
-func setupTestPlanWithWorkflow(t *testing.T, phaseState *arc.PhaseState, wfType string, wfData []byte) string {
-	t.Helper()
-	withTestWorkflow(t, wfType, wfData)
-	return setupTestPlan(t, phaseState)
-}
-
-func TestRunIterationMaxStateIterationsForced(t *testing.T) {
-	// qa_review has been visited 4 times; cap is 3. Should force exit with "approved".
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"qa_review": 4}
-
-	wfData := testWorkflowWithCaps(3, "approved")
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	// Set mock to produce gaps_found — if agent ran it would give wrong verdict.
-	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\ngaps_found\n")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
-	}
-	if result.Verdict != "approved" {
-		t.Fatalf("got Verdict=%q, want %q", result.Verdict, "approved")
-	}
-	if result.NextState != "complete" {
-		t.Fatalf("got NextState=%q, want %q", result.NextState, "complete")
-	}
-
-	// Verify state was updated correctly.
-	stateFile := filepath.Join(plansDir, "test-plan", "phases", "test-phase", "state.json")
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		t.Fatalf("reading state file: %v", err)
-	}
-	var updated arc.PhaseState
-	if err := json.Unmarshal(data, &updated); err != nil {
-		t.Fatalf("parsing state: %v", err)
-	}
-	if updated.CurrentState != "complete" {
-		t.Errorf("CurrentState = %q, want %q", updated.CurrentState, "complete")
-	}
-	if updated.LastVerdict != "approved" {
-		t.Errorf("LastVerdict = %q, want %q", updated.LastVerdict, "approved")
-	}
-	if updated.Iteration.Current != st.Iteration.Current+1 {
-		t.Errorf("Iteration.Current = %d, want %d", updated.Iteration.Current, st.Iteration.Current+1)
-	}
-	if len(updated.VerdictsHistory) == 0 {
-		t.Fatal("expected a VerdictsHistory entry")
-	}
-	last := updated.VerdictsHistory[len(updated.VerdictsHistory)-1]
-	if last.State != "qa_review" || last.Verdict != "approved" {
-		t.Errorf("last verdict history: state=%q verdict=%q, want qa_review/approved", last.State, last.Verdict)
-	}
-}
-
-func TestRunIterationMaxStateIterationsBoundary(t *testing.T) {
-	// count == max (3 == 3) should NOT trigger cap; iteration runs normally.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"qa_review": 3}
-
-	wfData := testWorkflowWithCaps(3, "approved")
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue (boundary should not trigger); err=%v", result.Action, result.Err)
-	}
-	if result.Verdict != "approved" {
-		t.Fatalf("got Verdict=%q, want approved", result.Verdict)
-	}
-}
-
-func TestRunIterationMaxStateIterationsNoConstraint(t *testing.T) {
-	// No constraints set; iteration runs normally regardless of StateIterations.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"qa_review": 100}
-
-	wfData := testWorkflowWithCaps(0, "") // no constraints
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
-	}
-}
-
-func TestRunIterationMaxStateIterationsNilMap(t *testing.T) {
-	// StateIterations map is nil; count defaults to 0, cap not triggered.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = nil
-
-	wfData := testWorkflowWithCaps(3, "approved")
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
-	}
-}
-
-func TestRunIterationMaxStateIterationsMapMissingKey(t *testing.T) {
-	// StateIterations exists but does not contain current state; count = 0, cap not triggered.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"other_state": 5}
-
-	wfData := testWorkflowWithCaps(3, "approved")
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
-	}
-}
-
-func TestRunIterationMaxStateIterationsNoOnMax(t *testing.T) {
-	// Cap exceeded but on_max_iterations is empty; should abort.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"qa_review": 4}
-
-	wfData := testWorkflowWithCaps(3, "") // no on_max_iterations
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionAbort {
-		t.Fatalf("got Action=%v, want ActionAbort; err=%v", result.Action, result.Err)
-	}
-	if result.Err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(result.Err.Error(), "no on_max_iterations set") {
-		t.Fatalf("expected error containing 'no on_max_iterations set', got: %v", result.Err)
-	}
-}
-
-func TestRunIterationMaxStateIterationsInvalidTransition(t *testing.T) {
-	// on_max_iterations set to a verdict that is not valid from qa_review.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.StateIterations = map[string]int{"qa_review": 4}
-
-	wfData := testWorkflowWithCaps(3, "invalid_verdict")
-	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
-
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionAbort {
-		t.Fatalf("got Action=%v, want ActionAbort; err=%v", result.Action, result.Err)
-	}
-	if result.Err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(result.Err.Error(), "transition failed") {
-		t.Fatalf("expected error containing 'transition failed', got: %v", result.Err)
-	}
-}
-
-func TestRunIterationBothMaxIterationsConstraints(t *testing.T) {
-	// Both max_iterations (global) and max_state_iterations (per-state) are exceeded.
-	// Per-state check runs first, so we expect ActionContinue with forced verdict
-	// rather than ActionAbort from the global check.
-	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
-	st.CurrentState = "qa_review"
-	st.PhaseStatus = "qa_review"
-	st.Iteration.Current = 6           // exceeds global max_iterations: 5
-	st.StateIterations = map[string]int{"qa_review": 4} // exceeds max_state_iterations: 3
-
-	// Workflow has both constraints set.
-	wfData := []byte(`name: test-both-caps
-version: 1
-entry_state: qa_review
-terminal_states: [complete, blocked]
-states:
-  - name: qa_review
-    description: Review test coverage
-    prompt: prompts/feature/qa-review.md
-    verdicts: [approved, gaps_found]
-    constraints:
-      max_iterations: 5
-      max_state_iterations: 3
-      on_max_iterations: approved
-    next:
-      approved: complete
-      gaps_found: qa_review
-  - name: complete
-    description: Phase completed successfully
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Phase blocked
-    prompt: prompts/common/blocked.md
-`)
-	withTestWorkflow(t, "test-caps", wfData)
-	plansDir := setupTestPlan(t, st)
-
-	// Per-state cap fires first; forced verdict is approved → complete.
-	result := RunIteration(context.Background(), testLogger(), IterateOptions{
-		PlanName:  "test-plan",
-		PhaseName: "test-phase",
-		PlansDir:  plansDir,
-	})
-
-	if result.Action != arc.ActionContinue {
-		t.Fatalf("got Action=%v, want ActionContinue (per-state check precedes global); err=%v", result.Action, result.Err)
-	}
-	if result.Verdict != "approved" {
-		t.Fatalf("got Verdict=%q, want approved", result.Verdict)
-	}
-}
-
-// Ensure the pipeline _ imports are valid by referencing the types.
+// Ensure the pipeline types are valid by referencing them.
 var _ = IterateOptions{}
 var _ = (*arc.IterationResult)(nil)

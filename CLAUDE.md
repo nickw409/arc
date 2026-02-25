@@ -109,7 +109,7 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 
 ### Workflow Types
 
-- **feature** — TDD: `qa → qa_review → impl → impl_review → complete`
+- **feature** — Audit-style: `impl → check (adversary) → no_bugs_found → complete / bugs_found → impl`
 - **bugfix** — `investigate → regression_tests → test_review → fix → fix_review → complete`
 - **investigation** — Research: `research → draft → review → complete`
 - **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`

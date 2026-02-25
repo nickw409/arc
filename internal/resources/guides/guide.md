@@ -155,30 +155,53 @@ External dependency additions with exact versions.
 
 ## Workflow Types
 
-Arc provides six workflow types. Each defines a state machine that controls how a phase progresses.
+Arc provides these built-in workflow types. Each defines a state machine that controls how a phase progresses.
 
 ### feature
 
-New capability using test-driven development. Tests are written first, then implementation.
+Implement a feature, then harden it with adversarial review. The implementation step handles both initial development (with its own tests) and subsequent bug fixes after the adversary reports failures.
 
 ```
-qa → qa_review → impl → impl_review → complete
-       ↓                     ↓
-   gaps_found             concerns
-       ↓                     ↓
-       qa                  impl
+impl → check (adversary) → no_bugs_found → complete
+              ↓
+          bugs_found
+              ↓
+            impl
 ```
 
-| State | Purpose | Verdicts |
-|-------|---------|----------|
-| `qa` | Write tests based on the specification | — |
-| `qa_review` | Review test coverage and quality | `approved` → impl, `gaps_found` → qa |
-| `impl` | Implement code to pass all tests | — |
-| `impl_review` | Review implementation quality | `approved` → complete, `concerns` → impl |
-| `complete` | Phase done | — |
-| `blocked` | Requires human intervention | — |
+| State | Purpose |
+|-------|---------|
+| `impl` | Implement the feature with tests; on re-entry, fix bugs found by the adversary |
+| `check` | Write adversarial tests to find edge cases and bugs |
+| `complete` | Phase done |
+| `blocked` | Requires human intervention |
 
 **When to use:** Adding new functions, types, modules, commands, APIs, or any net-new capability.
+
+**TDD variant (example pipeline):** If you want tests written before implementation, compose a custom workflow:
+
+```yaml
+name: feature-tdd
+version: 1
+pipeline:
+  - block: act
+    name: qa
+    params:
+      prompt: "prompts/feature/qa.md"
+      max_turns: "100"
+  - block: act
+    name: impl
+    params:
+      prompt: "prompts/feature/impl.md"
+      max_turns: "200"
+  - block: adversary
+    name: check
+    params: {max_turns: "30"}
+    route:
+      bugs_found: impl
+      no_bugs_found: complete
+terminal_states: [complete, blocked]
+```
 
 ### bugfix
 

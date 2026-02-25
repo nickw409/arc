@@ -267,10 +267,14 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"dev/", // agent prompts loaded outside workflow states
 	}
 	exemptFiles := map[string]bool{
-		"orchestrator.md":   true,
-		"feature/fix.md":    true, // dispute resolution, loaded outside workflow
-		"feature/review.md": true, // dispute resolution
-		"feature/loop.md":   true, // iteration escalation
+		"orchestrator.md":          true,
+		"feature/fix.md":           true, // dispute resolution, loaded outside workflow
+		"feature/review.md":        true, // dispute resolution
+		"feature/loop.md":          true, // iteration escalation
+		"direct/multi-phase.md":    true, // loaded by orchestrator for direct multi-phase plans
+		"feature/qa.md":            true, // default prompt for qa block (custom TDD pipelines)
+		"feature/qa-review.md":     true, // default prompt for qa-review block (custom TDD pipelines)
+		"feature/impl-review.md":   true, // default prompt for review block (custom TDD pipelines)
 	}
 
 	refs := allWorkflowPromptRefs(t)

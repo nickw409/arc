@@ -315,8 +315,6 @@ func TestConstraintsLoading(t *testing.T) {
 		wantMax  int
 		wantOn   string
 	}{
-		{"feature", "qa_review", 3, "approved"},
-		{"feature", "impl_review", 3, "approved"},
 		{"bugfix", "test_review", 3, "approved"},
 		{"bugfix", "fix_review", 3, "approved"},
 		{"refactor", "char_review", 3, "approved"},

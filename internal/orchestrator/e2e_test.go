@@ -36,9 +36,10 @@ func TestMain(m *testing.M) {
 	}
 	mockAgentBin = bin
 
-	// Override both command name vars so all agent spawns use the mock.
+	// Override all command name vars so all agent spawns use the mock.
 	pipeline.SetAgentCommandNameForTest(bin)
 	judgeCommandName = bin
+	directAgentCmd = bin
 
 	os.Exit(m.Run())
 }
@@ -158,18 +159,14 @@ func e2eLogger() *slog.Logger {
 }
 
 // TestE2EHappyPath exercises the full happy path:
-// qa → qa_review(approved) → impl → impl_review(approved) → complete
+// impl.act → check.adversary(no_bugs_found) → complete
 func TestE2EHappyPath(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-happy", []string{"core"}, "feature")
 
-	// Call 0: qa (linear, no verdict needed)
-	writeScript(t, scriptDir, 0, "QA tests written successfully.")
-	// Call 1: qa_review → approved
-	writeScript(t, scriptDir, 1, "Review complete.\n\n## Verdict\napproved")
-	// Call 2: impl (linear, no verdict needed)
-	writeScript(t, scriptDir, 2, "Implementation complete.")
-	// Call 3: impl_review → approved
-	writeScript(t, scriptDir, 3, "Implementation looks good.\n\n## Verdict\napproved")
+	// Call 0: impl.act (linear, no verdict needed)
+	writeScript(t, scriptDir, 0, "Implementation complete.")
+	// Call 1: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 1, "No bugs found.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -193,49 +190,42 @@ func TestE2EHappyPath(t *testing.T) {
 	if ps.PhaseStatus != "complete" {
 		t.Fatalf("expected phase_status=complete, got %q", ps.PhaseStatus)
 	}
-	// 4 agent calls = 4 iterations
-	if ps.Iteration.Current != 4 {
-		t.Fatalf("expected iteration.current=4, got %d", ps.Iteration.Current)
+	// 2 agent calls = 2 iterations
+	if ps.Iteration.Current != 2 {
+		t.Fatalf("expected iteration.current=2, got %d", ps.Iteration.Current)
 	}
-	if ps.GlobalIterations != 4 {
-		t.Fatalf("expected global_iterations=4, got %d", ps.GlobalIterations)
+	if ps.GlobalIterations != 2 {
+		t.Fatalf("expected global_iterations=2, got %d", ps.GlobalIterations)
 	}
-	if ps.LastVerdict != "approved" {
-		t.Fatalf("expected last_verdict=approved, got %q", ps.LastVerdict)
+	if ps.LastVerdict != "no_bugs_found" {
+		t.Fatalf("expected last_verdict=no_bugs_found, got %q", ps.LastVerdict)
 	}
-	// Exactly 2 verdicts: qa_review→approved, impl_review→approved
-	if len(ps.VerdictsHistory) != 2 {
-		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// Exactly 1 verdict: check.adversary→no_bugs_found
+	if len(ps.VerdictsHistory) != 1 {
+		t.Fatalf("expected 1 verdict in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "approved" || ps.VerdictsHistory[0].State != "qa_review" {
+	if ps.VerdictsHistory[0].Verdict != "no_bugs_found" || ps.VerdictsHistory[0].State != "check.adversary" {
 		t.Fatalf("unexpected first verdict: %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "approved" || ps.VerdictsHistory[1].State != "impl_review" {
-		t.Fatalf("unexpected second verdict: %+v", ps.VerdictsHistory[1])
-	}
-	// Verify exactly 4 mock calls were made
-	if n := readCallCount(t, scriptDir); n != 4 {
-		t.Fatalf("expected 4 mock agent calls, got %d", n)
+	// Verify exactly 2 mock calls were made
+	if n := readCallCount(t, scriptDir); n != 2 {
+		t.Fatalf("expected 2 mock agent calls, got %d", n)
 	}
 }
 
-// TestE2EQAGapsLoop exercises the QA gaps loop:
-// qa → qa_review(gaps_found) → qa → qa_review(approved) → impl → impl_review(approved) → complete
-func TestE2EQAGapsLoop(t *testing.T) {
+// TestE2EBugsFoundLoop exercises the adversary bugs_found loop:
+// impl.act → check.adversary(bugs_found) → impl.act → check.adversary(no_bugs_found) → complete
+func TestE2EBugsFoundLoop(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-gaps", []string{"core"}, "feature")
 
-	// Call 0: qa
-	writeScript(t, scriptDir, 0, "QA tests written.")
-	// Call 1: qa_review → gaps_found
-	writeScript(t, scriptDir, 1, "Gaps found.\n\n## Verdict\ngaps_found")
-	// Call 2: qa (re-run)
-	writeScript(t, scriptDir, 2, "Additional tests written.")
-	// Call 3: qa_review → approved
-	writeScript(t, scriptDir, 3, "Tests now adequate.\n\n## Verdict\napproved")
-	// Call 4: impl
-	writeScript(t, scriptDir, 4, "Implementation complete.")
-	// Call 5: impl_review → approved
-	writeScript(t, scriptDir, 5, "Looks good.\n\n## Verdict\napproved")
+	// Call 0: impl.act
+	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 1: check.adversary → bugs_found
+	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
+	// Call 2: impl.act (re-run to fix bugs)
+	writeScript(t, scriptDir, 2, "Bugs fixed.")
+	// Call 3: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 3, "All clean.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -259,48 +249,41 @@ func TestE2EQAGapsLoop(t *testing.T) {
 	if ps.PhaseStatus != "complete" {
 		t.Fatalf("expected phase_status=complete, got %q", ps.PhaseStatus)
 	}
-	if ps.Iteration.Current != 6 {
-		t.Fatalf("expected iteration.current=6, got %d", ps.Iteration.Current)
+	if ps.Iteration.Current != 4 {
+		t.Fatalf("expected iteration.current=4, got %d", ps.Iteration.Current)
 	}
-	if ps.GlobalIterations != 6 {
-		t.Fatalf("expected global_iterations=6, got %d", ps.GlobalIterations)
+	if ps.GlobalIterations != 4 {
+		t.Fatalf("expected global_iterations=4, got %d", ps.GlobalIterations)
 	}
-	// 3 verdicts: gaps_found, approved (qa_review), approved (impl_review)
-	if len(ps.VerdictsHistory) != 3 {
-		t.Fatalf("expected 3 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// 2 verdicts: bugs_found, no_bugs_found (both from check.adversary)
+	if len(ps.VerdictsHistory) != 2 {
+		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "gaps_found" || ps.VerdictsHistory[0].State != "qa_review" {
-		t.Fatalf("expected first verdict gaps_found@qa_review, got %+v", ps.VerdictsHistory[0])
+	if ps.VerdictsHistory[0].Verdict != "bugs_found" || ps.VerdictsHistory[0].State != "check.adversary" {
+		t.Fatalf("expected first verdict bugs_found@check.adversary, got %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "approved" || ps.VerdictsHistory[1].State != "qa_review" {
-		t.Fatalf("expected second verdict approved@qa_review, got %+v", ps.VerdictsHistory[1])
+	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "check.adversary" {
+		t.Fatalf("expected second verdict no_bugs_found@check.adversary, got %+v", ps.VerdictsHistory[1])
 	}
-	if ps.VerdictsHistory[2].Verdict != "approved" || ps.VerdictsHistory[2].State != "impl_review" {
-		t.Fatalf("expected third verdict approved@impl_review, got %+v", ps.VerdictsHistory[2])
-	}
-	if n := readCallCount(t, scriptDir); n != 6 {
-		t.Fatalf("expected 6 mock agent calls, got %d", n)
+	if n := readCallCount(t, scriptDir); n != 4 {
+		t.Fatalf("expected 4 mock agent calls, got %d", n)
 	}
 }
 
 // TestE2EStateIterationTracking verifies per-state iteration counts persist across re-entry.
-// Flow: qa(1) → qa_review(gaps_found) → qa(2) → qa_review(approved) → impl(1) → impl_review(approved) → complete
-// qa should be at 2 (not reset to 1) when re-entered after qa_review, and impl should start at 1.
+// Flow: impl.act(1) → check.adversary(bugs_found) → impl.act(2) → check.adversary(no_bugs_found) → complete
+// impl.act should be at 2 when re-entered after bugs_found.
 func TestE2EStateIterationTracking(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stateiter", []string{"core"}, "feature")
 
-	// Call 0: qa
-	writeScript(t, scriptDir, 0, "QA tests written.")
-	// Call 1: qa_review → gaps_found
-	writeScript(t, scriptDir, 1, "Gaps found.\n\n## Verdict\ngaps_found")
-	// Call 2: qa (re-run after gaps)
-	writeScript(t, scriptDir, 2, "Additional tests written.")
-	// Call 3: qa_review → approved
-	writeScript(t, scriptDir, 3, "Tests now adequate.\n\n## Verdict\napproved")
-	// Call 4: impl
-	writeScript(t, scriptDir, 4, "Implementation complete.")
-	// Call 5: impl_review → approved
-	writeScript(t, scriptDir, 5, "Looks good.\n\n## Verdict\napproved")
+	// Call 0: impl.act
+	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 1: check.adversary → bugs_found
+	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
+	// Call 2: impl.act (re-run to fix bugs)
+	writeScript(t, scriptDir, 2, "Bugs fixed.")
+	// Call 3: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 3, "All clean.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -319,41 +302,33 @@ func TestE2EStateIterationTracking(t *testing.T) {
 
 	ps := readState(t, plansDir, "e2e-stateiter", "core")
 
-	// qa ran twice (once initially, once after gaps_found)
-	if ps.StateIterations["qa"] != 2 {
-		t.Fatalf("expected qa state_iterations=2, got %d", ps.StateIterations["qa"])
+	// impl.act ran twice (once initially, once after bugs_found)
+	if ps.StateIterations["impl.act"] != 2 {
+		t.Fatalf("expected impl.act state_iterations=2, got %d", ps.StateIterations["impl.act"])
 	}
-	// qa_review ran twice (gaps_found then approved)
-	if ps.StateIterations["qa_review"] != 2 {
-		t.Fatalf("expected qa_review state_iterations=2, got %d", ps.StateIterations["qa_review"])
-	}
-	// impl ran once
-	if ps.StateIterations["impl"] != 1 {
-		t.Fatalf("expected impl state_iterations=1, got %d", ps.StateIterations["impl"])
-	}
-	// impl_review ran once
-	if ps.StateIterations["impl_review"] != 1 {
-		t.Fatalf("expected impl_review state_iterations=1, got %d", ps.StateIterations["impl_review"])
+	// check.adversary ran twice (bugs_found then no_bugs_found)
+	if ps.StateIterations["check.adversary"] != 2 {
+		t.Fatalf("expected check.adversary state_iterations=2, got %d", ps.StateIterations["check.adversary"])
 	}
 }
 
-// TestE2EImplConcerns exercises the impl concerns loop:
-// qa → qa_review(approved) → impl → impl_review(concerns) → impl → impl_review(approved) → complete
-func TestE2EImplConcerns(t *testing.T) {
+// TestE2EBugsFoundLoopTwice exercises the adversary loop with two bugs_found iterations:
+// impl.act → check.adversary(bugs_found) → impl.act → check.adversary(bugs_found) → impl.act → check.adversary(no_bugs_found) → complete
+func TestE2EBugsFoundLoopTwice(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-concerns", []string{"core"}, "feature")
 
-	// Call 0: qa
-	writeScript(t, scriptDir, 0, "QA tests written.")
-	// Call 1: qa_review → approved
-	writeScript(t, scriptDir, 1, "Tests look good.\n\n## Verdict\napproved")
-	// Call 2: impl
-	writeScript(t, scriptDir, 2, "First implementation attempt.")
-	// Call 3: impl_review → concerns
-	writeScript(t, scriptDir, 3, "Has issues.\n\n## Verdict\nconcerns")
-	// Call 4: impl (re-run)
-	writeScript(t, scriptDir, 4, "Fixed implementation.")
-	// Call 5: impl_review → approved
-	writeScript(t, scriptDir, 5, "Now looks good.\n\n## Verdict\napproved")
+	// Call 0: impl.act
+	writeScript(t, scriptDir, 0, "First implementation attempt.")
+	// Call 1: check.adversary → bugs_found
+	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
+	// Call 2: impl.act (fix bugs)
+	writeScript(t, scriptDir, 2, "Fixed first round of bugs.")
+	// Call 3: check.adversary → bugs_found again
+	writeScript(t, scriptDir, 3, "More bugs found.\n\n## Verdict\nbugs_found")
+	// Call 4: impl.act (fix more bugs)
+	writeScript(t, scriptDir, 4, "Fixed second round of bugs.")
+	// Call 5: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 5, "All clean now.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -380,21 +355,18 @@ func TestE2EImplConcerns(t *testing.T) {
 	if ps.Iteration.Current != 6 {
 		t.Fatalf("expected iteration.current=6, got %d", ps.Iteration.Current)
 	}
-	if ps.GlobalIterations != 6 {
-		t.Fatalf("expected global_iterations=6, got %d", ps.GlobalIterations)
-	}
-	// 3 verdicts: approved (qa_review), concerns (impl_review), approved (impl_review)
+	// 3 verdicts: bugs_found, bugs_found, no_bugs_found
 	if len(ps.VerdictsHistory) != 3 {
 		t.Fatalf("expected 3 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "approved" || ps.VerdictsHistory[0].State != "qa_review" {
-		t.Fatalf("expected first verdict approved@qa_review, got %+v", ps.VerdictsHistory[0])
+	if ps.VerdictsHistory[0].Verdict != "bugs_found" || ps.VerdictsHistory[0].State != "check.adversary" {
+		t.Fatalf("expected first verdict bugs_found@check.adversary, got %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "concerns" || ps.VerdictsHistory[1].State != "impl_review" {
-		t.Fatalf("expected second verdict concerns@impl_review, got %+v", ps.VerdictsHistory[1])
+	if ps.VerdictsHistory[1].Verdict != "bugs_found" || ps.VerdictsHistory[1].State != "check.adversary" {
+		t.Fatalf("expected second verdict bugs_found@check.adversary, got %+v", ps.VerdictsHistory[1])
 	}
-	if ps.VerdictsHistory[2].Verdict != "approved" || ps.VerdictsHistory[2].State != "impl_review" {
-		t.Fatalf("expected third verdict approved@impl_review, got %+v", ps.VerdictsHistory[2])
+	if ps.VerdictsHistory[2].Verdict != "no_bugs_found" || ps.VerdictsHistory[2].State != "check.adversary" {
+		t.Fatalf("expected third verdict no_bugs_found@check.adversary, got %+v", ps.VerdictsHistory[2])
 	}
 	if n := readCallCount(t, scriptDir); n != 6 {
 		t.Fatalf("expected 6 mock agent calls, got %d", n)
@@ -402,14 +374,14 @@ func TestE2EImplConcerns(t *testing.T) {
 }
 
 // TestE2EDisputeApproved exercises the dispute-approved flow:
-// JudgeDispute → APPROVE_DISPUTE → fix iteration → impl continues → impl_review(approved) → complete
+// JudgeDispute → APPROVE_DISPUTE → fix iteration → impl.act continues → check.adversary(no_bugs_found) → complete
 func TestE2EDisputeApproved(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-dispute-ok", []string{"core"}, "feature")
 
-	// Pre-seed state to disputed status in impl state
+	// Pre-seed state to disputed status in impl.act state
 	phaseDir := filepath.Join(plansDir, "e2e-dispute-ok", "phases", "core")
 	ps := arc.NewPhaseState("e2e-dispute-ok", "core", "feature")
-	ps.CurrentState = "impl"
+	ps.CurrentState = "impl.act"
 	ps.PhaseStatus = "disputed"
 	ps.Disputes = []arc.Dispute{
 		{TestName: "TestFoo", Reason: "test is wrong"},
@@ -418,12 +390,12 @@ func TestE2EDisputeApproved(t *testing.T) {
 
 	// Call 0: JudgeDispute → approve
 	writeScript(t, scriptDir, 0, "APPROVE_DISPUTE: test wrong")
-	// Call 1: fix iteration (linear impl state, agent does fix work)
+	// Call 1: fix iteration (linear impl.act state, agent does fix work)
 	writeScript(t, scriptDir, 1, "Fixed the test.")
-	// Call 2: impl iteration (back to impl after dispute clear, linear → impl_review)
+	// Call 2: impl.act continues (linear → check.adversary)
 	writeScript(t, scriptDir, 2, "Implementation done.")
-	// Call 3: impl_review → approved
-	writeScript(t, scriptDir, 3, "All good.\n\n## Verdict\napproved")
+	// Call 3: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 3, "No bugs found.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -459,14 +431,14 @@ func TestE2EDisputeApproved(t *testing.T) {
 }
 
 // TestE2EDisputeRejected exercises the dispute-rejected flow:
-// JudgeDispute → REJECT_DISPUTE → impl continues → impl_review(approved) → complete
+// JudgeDispute → REJECT_DISPUTE → impl.act continues → check.adversary(no_bugs_found) → complete
 func TestE2EDisputeRejected(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-dispute-no", []string{"core"}, "feature")
 
-	// Pre-seed state to disputed status in impl state
+	// Pre-seed state to disputed status in impl.act state
 	phaseDir := filepath.Join(plansDir, "e2e-dispute-no", "phases", "core")
 	ps := arc.NewPhaseState("e2e-dispute-no", "core", "feature")
-	ps.CurrentState = "impl"
+	ps.CurrentState = "impl.act"
 	ps.PhaseStatus = "disputed"
 	ps.Disputes = []arc.Dispute{
 		{TestName: "TestBar", Reason: "impl is wrong"},
@@ -475,10 +447,10 @@ func TestE2EDisputeRejected(t *testing.T) {
 
 	// Call 0: JudgeDispute → reject
 	writeScript(t, scriptDir, 0, "REJECT_DISPUTE: impl wrong")
-	// Call 1: impl iteration continues (state stays impl, linear → impl_review)
+	// Call 1: impl.act continues (linear → check.adversary)
 	writeScript(t, scriptDir, 1, "Implementation fixed.")
-	// Call 2: impl_review → approved
-	writeScript(t, scriptDir, 2, "Looks good.\n\n## Verdict\napproved")
+	// Call 2: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 2, "No bugs found.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -522,17 +494,13 @@ func TestE2EDisputeRejected(t *testing.T) {
 func TestE2EMultiPhase(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-multi", []string{"core", "api"}, "feature")
 
-	// Phase "core": calls 0-3 (happy path)
-	writeScript(t, scriptDir, 0, "QA tests for core.")
-	writeScript(t, scriptDir, 1, "## Verdict\napproved")
-	writeScript(t, scriptDir, 2, "Core implementation.")
-	writeScript(t, scriptDir, 3, "## Verdict\napproved")
+	// Phase "core": calls 0-1 (happy path: impl.act → check.adversary)
+	writeScript(t, scriptDir, 0, "Core implementation.")
+	writeScript(t, scriptDir, 1, "No bugs.\n\n## Verdict\nno_bugs_found")
 
-	// Phase "api": calls 4-7 (happy path)
-	writeScript(t, scriptDir, 4, "QA tests for api.")
-	writeScript(t, scriptDir, 5, "## Verdict\napproved")
-	writeScript(t, scriptDir, 6, "API implementation.")
-	writeScript(t, scriptDir, 7, "## Verdict\napproved")
+	// Phase "api": calls 2-3 (happy path)
+	writeScript(t, scriptDir, 2, "API implementation.")
+	writeScript(t, scriptDir, 3, "No bugs.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -584,109 +552,12 @@ func TestE2EMultiPhase(t *testing.T) {
 		t.Fatal("completion report missing phase names")
 	}
 
-	// Verify all 8 mock calls were consumed
-	if n := readCallCount(t, scriptDir); n != 8 {
-		t.Fatalf("expected 8 mock agent calls, got %d", n)
+	// Verify all 4 mock calls were consumed
+	if n := readCallCount(t, scriptDir); n != 4 {
+		t.Fatalf("expected 4 mock agent calls, got %d", n)
 	}
 }
 
-// TestE2EEscalationBlocked verifies that a phase becomes blocked when stuck
-// iterations and rollback count are exhausted via handleEscalation.
-func TestE2EEscalationBlocked(t *testing.T) {
-	plansDir, scriptDir, _ := setupE2E(t, "e2e-blocked", []string{"core"}, "feature")
-
-	// Pre-seed state with high stuck_iterations and rollback_count
-	phaseDir := filepath.Join(plansDir, "e2e-blocked", "phases", "core")
-	ps := arc.NewPhaseState("e2e-blocked", "core", "feature")
-	ps.CurrentState = "impl"
-	ps.PhaseStatus = "implementing"
-	ps.StuckIterations = 6
-	ps.RollbackCount = 2
-	writeState(t, phaseDir, ps)
-
-	// The feature workflow has no escalation rules in the YAML, so
-	// CheckEscalation in the pipeline returns nil. The escalation path is
-	// driven by handleEscalation in phase.go when RunPhase receives
-	// ActionEscalate. We test handleEscalation directly because the pipeline
-	// won't produce ActionEscalate without escalation rules in the workflow.
-	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
-
-	writeScript(t, scriptDir, 0, "stuck output")
-
-	err := handleEscalation(context.Background(), RunPhaseOptions{
-		PlanName:  "e2e-blocked",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
-	}, sf, ps)
-	if err != nil {
-		t.Fatalf("handleEscalation failed: %v", err)
-	}
-
-	ps = readState(t, plansDir, "e2e-blocked", "core")
-	if ps.PhaseStatus != "blocked" {
-		t.Fatalf("expected phase_status=blocked, got %q", ps.PhaseStatus)
-	}
-	if !ps.Blocked.IsBlocked {
-		t.Fatal("expected blocked.is_blocked=true")
-	}
-	if ps.Blocked.Reason == nil || *ps.Blocked.Reason != "max rollbacks exhausted" {
-		t.Fatalf("expected blocked reason 'max rollbacks exhausted', got %v", ps.Blocked.Reason)
-	}
-	if ps.CurrentState != "impl" {
-		t.Fatalf("expected current_state to remain impl, got %q", ps.CurrentState)
-	}
-}
-
-// TestE2EEscalationRollback verifies that handleEscalation performs a rollback
-// when stuck_iterations >= 6 but rollback_count < 2.
-func TestE2EEscalationRollback(t *testing.T) {
-	plansDir, scriptDir, _ := setupE2E(t, "e2e-rollback", []string{"core"}, "feature")
-
-	phaseDir := filepath.Join(plansDir, "e2e-rollback", "phases", "core")
-	ps := arc.NewPhaseState("e2e-rollback", "core", "feature")
-	ps.CurrentState = "impl"
-	ps.PhaseStatus = "implementing"
-	ps.StuckIterations = 6
-	ps.RollbackCount = 0
-	ps.Iteration.Current = 10
-	ps.TestsPassing = 3
-	ps.TestsTotal = 5
-	writeState(t, phaseDir, ps)
-
-	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
-	writeScript(t, scriptDir, 0, "unused")
-
-	err := handleEscalation(context.Background(), RunPhaseOptions{
-		PlanName:  "e2e-rollback",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
-	}, sf, ps)
-	if err != nil {
-		t.Fatalf("handleEscalation failed: %v", err)
-	}
-
-	ps = readState(t, plansDir, "e2e-rollback", "core")
-	// Should have rolled back, not blocked
-	if ps.PhaseStatus == "blocked" {
-		t.Fatal("expected rollback, not blocked")
-	}
-	if ps.RollbackCount != 1 {
-		t.Fatalf("expected rollback_count=1, got %d", ps.RollbackCount)
-	}
-	if ps.Iteration.Current != 0 {
-		t.Fatalf("expected iteration.current reset to 0, got %d", ps.Iteration.Current)
-	}
-	if ps.StuckIterations != 0 {
-		t.Fatalf("expected stuck_iterations reset to 0, got %d", ps.StuckIterations)
-	}
-	if ps.TestsPassing != 0 || ps.TestsTotal != 0 {
-		t.Fatalf("expected test counts reset, got %d/%d", ps.TestsPassing, ps.TestsTotal)
-	}
-}
 
 // TestE2EBlockedPhaseReturnsError verifies that RunPhase returns an error
 // immediately when a phase has phase_status=blocked.
@@ -731,9 +602,9 @@ func TestE2EBlockedPhaseReturnsError(t *testing.T) {
 func TestE2EContextCancellation(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-cancel", []string{"core"}, "feature")
 
-	// Call 0: qa (this will succeed)
-	writeScript(t, scriptDir, 0, "QA tests written.")
-	// No further scripts — the phase will try to proceed to qa_review and
+	// Call 0: impl.act (this will succeed)
+	writeScript(t, scriptDir, 0, "Implementation written.")
+	// No further scripts — the phase will try to proceed to check.adversary and
 	// call the mock agent again. With MOCK_SCRIPT_DIR, call_1.txt is missing
 	// so it falls through to MOCK_OUTPUT (empty), yielding empty output which
 	// triggers ActionRetry in the loop. We cancel the context before that.
@@ -766,16 +637,12 @@ func TestE2EContextCancellation(t *testing.T) {
 func TestE2EInvalidVerdictRetries(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-badverdict", []string{"core"}, "feature")
 
-	// Call 0: qa (linear, succeeds)
-	writeScript(t, scriptDir, 0, "QA tests written.")
-	// Call 1: qa_review — missing ## Verdict header → triggers retry
+	// Call 0: impl.act (linear, succeeds)
+	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 1: check.adversary — missing ## Verdict header → triggers retry
 	writeScript(t, scriptDir, 1, "This review has no verdict section at all.")
-	// Call 2: qa_review retry — now with valid verdict
-	writeScript(t, scriptDir, 2, "Better review.\n\n## Verdict\napproved")
-	// Call 3: impl
-	writeScript(t, scriptDir, 3, "Implementation done.")
-	// Call 4: impl_review → approved
-	writeScript(t, scriptDir, 4, "Looks great.\n\n## Verdict\napproved")
+	// Call 2: check.adversary retry — now with valid verdict
+	writeScript(t, scriptDir, 2, "Better review.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -796,9 +663,9 @@ func TestE2EInvalidVerdictRetries(t *testing.T) {
 	if ps.CurrentState != "complete" {
 		t.Fatalf("expected complete after retry, got %q", ps.CurrentState)
 	}
-	// 5 calls total: qa, bad qa_review, good qa_review, impl, impl_review
-	if n := readCallCount(t, scriptDir); n != 5 {
-		t.Fatalf("expected 5 mock agent calls (including retry), got %d", n)
+	// 3 calls total: impl.act, bad check.adversary, good check.adversary
+	if n := readCallCount(t, scriptDir); n != 3 {
+		t.Fatalf("expected 3 mock agent calls (including retry), got %d", n)
 	}
 }
 
@@ -807,16 +674,12 @@ func TestE2EInvalidVerdictRetries(t *testing.T) {
 func TestE2EEmptyOutputRetries(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-empty", []string{"core"}, "feature")
 
-	// Call 0: qa — empty output → retry
+	// Call 0: impl.act — empty output → retry
 	writeScript(t, scriptDir, 0, "")
-	// Call 1: qa — retry with real output
-	writeScript(t, scriptDir, 1, "QA tests written.")
-	// Call 2: qa_review → approved
-	writeScript(t, scriptDir, 2, "Good.\n\n## Verdict\napproved")
-	// Call 3: impl
-	writeScript(t, scriptDir, 3, "Implementation done.")
-	// Call 4: impl_review → approved
-	writeScript(t, scriptDir, 4, "LGTM.\n\n## Verdict\napproved")
+	// Call 1: impl.act — retry with real output
+	writeScript(t, scriptDir, 1, "Implementation written.")
+	// Call 2: check.adversary → no_bugs_found
+	writeScript(t, scriptDir, 2, "No bugs.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -837,9 +700,9 @@ func TestE2EEmptyOutputRetries(t *testing.T) {
 	if ps.CurrentState != "complete" {
 		t.Fatalf("expected complete after retry, got %q", ps.CurrentState)
 	}
-	// 5 calls: empty qa, real qa, qa_review, impl, impl_review
-	if n := readCallCount(t, scriptDir); n != 5 {
-		t.Fatalf("expected 5 mock agent calls (including retry), got %d", n)
+	// 3 calls: empty impl.act, real impl.act, check.adversary
+	if n := readCallCount(t, scriptDir); n != 3 {
+		t.Fatalf("expected 3 mock agent calls (including retry), got %d", n)
 	}
 }
 
@@ -915,10 +778,10 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 }
 
 // TestE2EParallelPhasesNoDeps verifies that phases with no dependencies
-// run in parallel via Launch(). Two independent "direct" workflow phases
+// run in parallel via Launch(). Two independent "feature" workflow phases
 // should both complete without one waiting on the other.
 func TestE2EParallelPhasesNoDeps(t *testing.T) {
-	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "direct")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "feature")
 
 	// Override plan.json to remove dependencies (setupE2E creates serial deps)
 	planDir := filepath.Join(plansDir, "e2e-parallel")
@@ -935,11 +798,12 @@ func TestE2EParallelPhasesNoDeps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The direct workflow is: execute → complete (1 agent call each).
-	// With two phases running in parallel, call ordering is nondeterministic.
-	// Write enough scripts for both phases (at least 2 calls).
-	for i := 0; i < 4; i++ {
-		writeScript(t, scriptDir, i, "Task done.")
+	// Feature workflow: impl.act → check.adversary(no_bugs_found) → complete
+	// Each phase needs 2 calls. With 2 phases in parallel, ordering is nondeterministic.
+	// Write scripts: linear states accept any output; adversary needs no_bugs_found verdict.
+	// Using no_bugs_found works for both (linear states ignore the verdict section).
+	for i := 0; i < 6; i++ {
+		writeScript(t, scriptDir, i, "Done.\n\n## Verdict\nno_bugs_found")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -982,7 +846,7 @@ func TestE2EParallelPhasesNoDeps(t *testing.T) {
 // TestE2EStopOnFailure verifies that StopOnFailure returns a LaunchResult with
 // Status="failed" (no error) and populates FailedPhase when a phase has a hard failure.
 func TestE2EStopOnFailure(t *testing.T) {
-	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopfail", []string{"alpha", "beta"}, "direct")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopfail", []string{"alpha", "beta"}, "feature")
 
 	// Override plan.json to remove dependencies so both phases are ready.
 	planDir := filepath.Join(plansDir, "e2e-stopfail")
@@ -999,16 +863,16 @@ func TestE2EStopOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Alpha will succeed normally.
-	for i := 0; i < 4; i++ {
-		writeScript(t, scriptDir, i, "Task done.")
+	// Alpha will succeed normally (feature workflow: 4 calls per phase).
+	for i := 0; i < 8; i++ {
+		writeScript(t, scriptDir, i, "Done.\n\n## Verdict\napproved")
 	}
 
 	// Give beta an invalid workflow type so RunPhase fails hard at
 	// "loading workflow:" (after successfully reading state, so PhasesReady
 	// still considers it ready).
 	betaDir := filepath.Join(planDir, "phases", "beta")
-	betaState := arc.NewPhaseState("e2e-stopfail", "beta", "direct")
+	betaState := arc.NewPhaseState("e2e-stopfail", "beta", "feature")
 	betaState.WorkflowType = "nonexistent-workflow"
 	writeState(t, betaDir, betaState)
 
@@ -1041,63 +905,19 @@ func TestE2EStopOnFailure(t *testing.T) {
 	}
 }
 
-// TestE2EChatModeBlocksOnEscalation verifies that in chat mode, handleEscalation
-// blocks immediately instead of applying the escalation ladder (rollback, stuck instructions).
-func TestE2EChatModeBlocksOnEscalation(t *testing.T) {
-	plansDir, scriptDir, _ := setupE2E(t, "e2e-chatesc", []string{"core"}, "feature")
-
-	phaseDir := filepath.Join(plansDir, "e2e-chatesc", "phases", "core")
-	ps := arc.NewPhaseState("e2e-chatesc", "core", "feature")
-	ps.CurrentState = "impl"
-	ps.PhaseStatus = "implementing"
-	ps.StuckIterations = 3
-	ps.RollbackCount = 0
-	writeState(t, phaseDir, ps)
-
-	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
-	writeScript(t, scriptDir, 0, "unused")
-
-	err := handleEscalation(context.Background(), RunPhaseOptions{
-		PlanName:  "e2e-chatesc",
-		PhaseName: "core",
-		PlansDir:  plansDir,
-		ArcHome:   t.TempDir(),
-		Logger:    e2eLogger(),
-		ChatMode:  true,
-	}, sf, ps)
-	if err == nil {
-		t.Fatal("expected error from chat-mode escalation")
-	}
-	if !strings.Contains(err.Error(), "phase blocked") {
-		t.Fatalf("expected 'phase blocked' error, got: %v", err)
-	}
-
-	ps = readState(t, plansDir, "e2e-chatesc", "core")
-	if ps.PhaseStatus != "blocked" {
-		t.Fatalf("expected phase_status=blocked, got %q", ps.PhaseStatus)
-	}
-	if !ps.Blocked.IsBlocked {
-		t.Fatal("expected blocked.is_blocked=true")
-	}
-	if ps.Blocked.Reason == nil || !strings.Contains(*ps.Blocked.Reason, "stuck_iterations=3") {
-		t.Fatalf("expected blocked reason with stuck_iterations=3, got %v", ps.Blocked.Reason)
-	}
-	// In chat mode even with rollback_count=0, no rollback should have happened
-	if ps.RollbackCount != 0 {
-		t.Fatalf("expected no rollback in chat mode, got rollback_count=%d", ps.RollbackCount)
-	}
-}
 
 // TestE2EStopOnFailureBlockedPhase verifies that when StopOnFailure is true,
 // a phase that becomes blocked during execution causes the orchestrator to
 // return a failed result (instead of continuing past it as it does by default).
 func TestE2EStopOnFailureBlockedPhase(t *testing.T) {
-	// Use "direct" workflow: impl → complete (simplest path).
-	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopblock", []string{"core"}, "direct")
+	// Use "feature" workflow: qa → qa_review → impl → impl_review → complete.
+	// A non-zero exit on the first state (qa) causes it to block with ChatMode.
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopblock", []string{"core"}, "feature")
 
-	// Write 5 empty-output scripts to trigger maxConsecutiveRetries → blocked.
+	// Non-zero exit triggers ActionRetry → one retry → blocked.
+	t.Setenv("MOCK_EXIT_CODE", "1")
 	for i := 0; i < 5; i++ {
-		writeScript(t, scriptDir, i, "")
+		writeScript(t, scriptDir, i, "crash output")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
