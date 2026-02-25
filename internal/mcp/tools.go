@@ -695,6 +695,7 @@ func (h *handlerContext) handleArchive(_ context.Context, req mcp.CallToolReques
 		PlansDir:   h.plansDir(),
 		ArchiveDir: h.archiveDir(),
 		PlanName:   planName,
+		ProjectDir: h.projectDir,
 		Force:      force,
 	})
 	if err != nil {

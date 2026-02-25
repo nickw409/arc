@@ -76,6 +76,44 @@ func Remove(wt *Worktree) error {
 	return nil
 }
 
+// CleanupPlan removes all worktrees associated with a plan.
+// Matches branches with prefix "arc/<planName>" (shared) and "arc/<planName>/" (per-phase).
+func CleanupPlan(projectDir, planName string) int {
+	prefix := "arc/" + sanitizeBranch(planName)
+
+	// Parse `git worktree list --porcelain` to find matching worktrees
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	var removed int
+	var currentDir, currentBranch string
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			currentDir = strings.TrimPrefix(line, "worktree ")
+			currentBranch = ""
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
+		case line == "": // end of entry
+			if currentBranch == prefix || strings.HasPrefix(currentBranch, prefix+"/") {
+				Remove(&Worktree{
+					Branch:     currentBranch,
+					Dir:        currentDir,
+					ProjectDir: projectDir,
+				})
+				removed++
+			}
+			currentDir = ""
+			currentBranch = ""
+		}
+	}
+	return removed
+}
+
 // MergeBack merges the worktree branch into the current branch.
 // Returns the merge commit hash or error if conflicts exist.
 func MergeBack(wt *Worktree) (string, error) {

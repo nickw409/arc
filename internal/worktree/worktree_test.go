@@ -227,3 +227,60 @@ func TestCreatePlanLevel(t *testing.T) {
 		t.Fatalf("expected checked-out branch arc/shared-plan, got %q", branch)
 	}
 }
+
+func TestCleanupPlan(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	// Create two per-phase worktrees for "my-plan"
+	wt1, err := Create(projectDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("Create phase-a failed: %v", err)
+	}
+	wt2, err := Create(projectDir, "my-plan", "phase-b")
+	if err != nil {
+		t.Fatalf("Create phase-b failed: %v", err)
+	}
+
+	// Create a worktree for a different plan (should not be removed)
+	wtOther, err := Create(projectDir, "other-plan", "phase-x")
+	if err != nil {
+		t.Fatalf("Create other-plan failed: %v", err)
+	}
+
+	// Verify all worktree dirs exist
+	for _, wt := range []*Worktree{wt1, wt2, wtOther} {
+		if _, err := os.Stat(wt.Dir); os.IsNotExist(err) {
+			t.Fatalf("worktree dir %s should exist", wt.Dir)
+		}
+	}
+
+	// Clean up "my-plan"
+	n := CleanupPlan(projectDir, "my-plan")
+	if n != 2 {
+		t.Fatalf("expected 2 worktrees removed, got %d", n)
+	}
+
+	// my-plan worktrees should be gone
+	for _, wt := range []*Worktree{wt1, wt2} {
+		if _, err := os.Stat(wt.Dir); !os.IsNotExist(err) {
+			t.Fatalf("worktree dir %s should have been removed", wt.Dir)
+		}
+	}
+
+	// other-plan worktree should still exist
+	if _, err := os.Stat(wtOther.Dir); os.IsNotExist(err) {
+		t.Fatal("other-plan worktree should not have been removed")
+	}
+
+	// Clean up
+	Remove(wtOther)
+}
+
+func TestCleanupPlanNoWorktrees(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	n := CleanupPlan(projectDir, "nonexistent-plan")
+	if n != 0 {
+		t.Fatalf("expected 0 worktrees removed, got %d", n)
+	}
+}

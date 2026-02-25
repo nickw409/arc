@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/state"
+	"github.com/nwiley/arc/internal/worktree"
 )
 
 // ArchiveOptions configures plan archiving.
@@ -14,6 +15,7 @@ type ArchiveOptions struct {
 	PlansDir   string
 	ArchiveDir string
 	PlanName   string
+	ProjectDir string // git project root for worktree cleanup; empty derives from PlansDir
 	Force      bool
 }
 
@@ -62,6 +64,16 @@ func Archive(opts ArchiveOptions) error {
 	// Remove orchestrator lock if present
 	lockFile := filepath.Join(planDir, ".orchestrator.lock")
 	os.Remove(lockFile) // ignore error if not present
+
+	// Clean up any lingering worktrees for this plan
+	projectDir := opts.ProjectDir
+	if projectDir == "" {
+		// PlansDir is typically <projectDir>/.plans/active
+		projectDir = filepath.Dir(filepath.Dir(opts.PlansDir))
+	}
+	if n := worktree.CleanupPlan(projectDir, opts.PlanName); n > 0 {
+		fmt.Printf("Cleaned up %d worktree(s) for plan %q\n", n, opts.PlanName)
+	}
 
 	// Move to archive
 	if err := os.MkdirAll(opts.ArchiveDir, 0755); err != nil {
