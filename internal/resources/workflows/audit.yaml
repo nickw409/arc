@@ -9,7 +9,7 @@ pipeline:
     route:
       bugs_found: fix
       no_bugs_found: complete
-  - block: impl
+  - block: act
     name: fix
     params: {max_turns: "45"}
     route:

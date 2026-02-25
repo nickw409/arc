@@ -173,17 +173,17 @@ func TestJudgeBlockInPipeline(t *testing.T) {
 		t.Fatalf("parsing judge block: %v", err)
 	}
 
-	implData, err := resources.BlockBytes("impl")
+	actData, err := resources.BlockBytes("act")
 	if err != nil {
-		t.Fatalf("loading impl block: %v", err)
+		t.Fatalf("loading act block: %v", err)
 	}
-	implDef, err := LoadBlock(implData)
+	actDef, err := LoadBlock(actData)
 	if err != nil {
-		t.Fatalf("parsing impl block: %v", err)
+		t.Fatalf("parsing act block: %v", err)
 	}
 
 	steps := []PipelineStep{
-		{Block: "impl", Name: "qa", Params: map[string]string{"prompt": "prompts/feature/qa.md"}},
+		{Block: "act", Name: "qa", Params: map[string]string{"prompt": "prompts/feature/qa.md"}},
 		{
 			Block: "judge",
 			Name:  "qa-check",
@@ -197,11 +197,11 @@ func TestJudgeBlockInPipeline(t *testing.T) {
 				"gaps_found": "qa",
 			},
 		},
-		{Block: "impl", Name: "impl-step", Params: map[string]string{"prompt": "prompts/feature/impl.md"}},
+		{Block: "act", Name: "impl-step", Params: map[string]string{"prompt": "prompts/feature/impl.md"}},
 	}
 
 	blockDefs := map[string]*Block{
-		"impl":  implDef,
+		"act":   actDef,
 		"judge": judgeDef,
 	}
 
@@ -222,13 +222,13 @@ func TestJudgeBlockInPipeline(t *testing.T) {
 		t.Fatal("qa-check.judge state not found")
 	}
 
-	// approved → impl-step.impl
-	if next := judgeState.Transition.Branches["approved"]; next != "impl-step.impl" {
-		t.Errorf("approved → %q, want impl-step.impl", next)
+	// approved → impl-step.act
+	if next := judgeState.Transition.Branches["approved"]; next != "impl-step.act" {
+		t.Errorf("approved → %q, want impl-step.act", next)
 	}
-	// gaps_found → qa.impl (loops back)
-	if next := judgeState.Transition.Branches["gaps_found"]; next != "qa.impl" {
-		t.Errorf("gaps_found → %q, want qa.impl", next)
+	// gaps_found → qa.act (loops back)
+	if next := judgeState.Transition.Branches["gaps_found"]; next != "qa.act" {
+		t.Errorf("gaps_found → %q, want qa.act", next)
 	}
 }
 

@@ -1,15 +1,15 @@
-name: impl
-description: Free-form implementation with high turn count
+name: act
+description: Generic linear action block — does work and exits unconditionally
 params:
   max_turns: {default: "45"}
   timeout: {default: "900"}
   model: {default: ""}
   prompt: {default: "prompts/adversarial/impl.md"}
-entry: impl
+entry: act
 exits: [done]
 states:
-  - name: impl
-    description: Implement the feature freely, writing code and tests
+  - name: act
+    description: Execute the task described by the prompt
     prompt: ${prompt}
     agent:
       max_turns: ${max_turns}

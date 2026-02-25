@@ -239,7 +239,7 @@ version: 1
 description: Adversarial testing
 
 pipeline:
-  - block: impl
+  - block: act
     params: {max_turns: "45"}
   - block: adversary
     params: {max_turns: "30"}
@@ -255,11 +255,11 @@ terminal_states: [complete, blocked]
 	if w.Name != "adversarial" {
 		t.Fatalf("expected name 'adversarial', got %q", w.Name)
 	}
-	if w.EntryState != "impl.impl" {
-		t.Fatalf("expected entry 'impl.impl', got %q", w.EntryState)
+	if w.EntryState != "act.act" {
+		t.Fatalf("expected entry 'act.act', got %q", w.EntryState)
 	}
 
-	// Should have: impl.impl, adversary.adversary, complete, blocked
+	// Should have: act.act, adversary.adversary, complete, blocked
 	if len(w.States) != 4 {
 		t.Fatalf("expected 4 states, got %d", len(w.States))
 	}
@@ -268,7 +268,7 @@ terminal_states: [complete, blocked]
 	for _, s := range w.States {
 		stateNames[s.Name] = true
 	}
-	for _, name := range []string{"impl.impl", "adversary.adversary", "complete", "blocked"} {
+	for _, name := range []string{"act.act", "adversary.adversary", "complete", "blocked"} {
 		if !stateNames[name] {
 			t.Fatalf("missing state %q", name)
 		}
@@ -276,17 +276,17 @@ terminal_states: [complete, blocked]
 
 	// Verify the machine works with the composed workflow
 	m := NewMachine(w)
-	if m.EntryState() != "impl.impl" {
-		t.Fatalf("machine entry != 'impl.impl'")
+	if m.EntryState() != "act.act" {
+		t.Fatalf("machine entry != 'act.act'")
 	}
 
-	// impl.impl → adversary.adversary (linear)
-	next, err := m.NextState("impl.impl", "")
+	// act.act → adversary.adversary (linear)
+	next, err := m.NextState("act.act", "")
 	if err != nil {
 		t.Fatalf("NextState from impl.impl: %v", err)
 	}
 	if next != "adversary.adversary" {
-		t.Fatalf("expected adversary.adversary, got %q", next)
+		t.Fatalf("expected adversary.adversary from act.act, got %q", next)
 	}
 
 	// adversary.adversary → bugs_found → complete (both exits wire to next step)
