@@ -107,6 +107,44 @@ states:
 	}
 }
 
+func TestResolveParamsPrompt(t *testing.T) {
+	data := []byte(`
+name: test
+description: test
+params:
+  prompt: {default: "prompts/default.md"}
+entry: start
+exits: [done]
+states:
+  - name: start
+    prompt: ${prompt}
+    next: $done
+`)
+
+	b, err := LoadBlock(data)
+	if err != nil {
+		t.Fatalf("LoadBlock failed: %v", err)
+	}
+
+	// Default prompt
+	resolved, err := ResolveParams(b, nil)
+	if err != nil {
+		t.Fatalf("ResolveParams failed: %v", err)
+	}
+	if resolved.States[0].Prompt != "prompts/default.md" {
+		t.Fatalf("expected default prompt, got %q", resolved.States[0].Prompt)
+	}
+
+	// Override prompt
+	resolved, err = ResolveParams(b, map[string]string{"prompt": "prompts/custom.md"})
+	if err != nil {
+		t.Fatalf("ResolveParams failed: %v", err)
+	}
+	if resolved.States[0].Prompt != "prompts/custom.md" {
+		t.Fatalf("expected overridden prompt, got %q", resolved.States[0].Prompt)
+	}
+}
+
 func TestResolveParamsDefaults(t *testing.T) {
 	data := []byte(`
 name: test

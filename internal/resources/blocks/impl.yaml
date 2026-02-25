@@ -4,12 +4,15 @@ params:
   max_turns: {default: "45"}
   timeout: {default: "900"}
   model: {default: ""}
+  prompt: {default: "prompts/adversarial/impl.md"}
 entry: impl
 exits: [done]
 states:
   - name: impl
     description: Implement the feature freely, writing code and tests
-    prompt: prompts/adversarial/impl.md
+    prompt: ${prompt}
     agent:
-      max_turns: 45
+      max_turns: ${max_turns}
+      timeout: ${timeout}
+      model: ${model}
     next: $done

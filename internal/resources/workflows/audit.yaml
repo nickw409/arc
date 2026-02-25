@@ -1,14 +1,18 @@
 name: audit
 version: 1
-description: Adversarial audit - adversary finds bugs, then impl fixes them
+description: Adversarial audit - adversary finds bugs, impl fixes, repeat until clean
 
 pipeline:
   - block: adversary
-    params:
-      max_rounds: "5"
-      max_turns: "30"
+    name: audit
+    params: {max_turns: "30"}
+    route:
+      bugs_found: fix
+      no_bugs_found: complete
   - block: impl
-    params:
-      max_turns: "45"
+    name: fix
+    params: {max_turns: "45"}
+    route:
+      done: audit
 
 terminal_states: [complete, blocked]

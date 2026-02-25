@@ -62,7 +62,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("arc_plan",
 		mcp.WithDescription("Create a new plan with phase scaffolding. Creates the plan directory, plan.json, and phase directories with plan.md files."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name for the plan (used as directory name)")),
-		mcp.WithString("workflow_type", mcp.Required(), mcp.Description("Workflow type: feature, bugfix, investigation, refactor, performance, adversarial, audit, direct")),
+		mcp.WithString("workflow_type", mcp.Required(), mcp.Description("Workflow type: feature, bugfix, investigation, refactor, performance, audit, direct")),
 		mcp.WithArray("phases", mcp.Required(), mcp.WithStringItems(), mcp.Description("Ordered list of phase names")),
 	), h.handlePlan)
 
@@ -307,7 +307,7 @@ func (h *handlerContext) handleIterate(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(fmt.Sprintf("phase %q not found in plan %q", phaseName, planName)), nil
 	}
 
-	result := pipeline.RunIteration(ctx, h.logger, pipeline.IterateOptions{
+	result := pipeline.RunState(ctx, h.logger, pipeline.IterateOptions{
 		PlanName:  planName,
 		PhaseName: phaseName,
 		PlansDir:  h.plansDir(),

@@ -40,6 +40,15 @@ func TestQABlockStructure(t *testing.T) {
 	if parseInt(param.Default) <= 0 {
 		t.Errorf("max_turns default must be positive, got %q", param.Default)
 	}
+
+	// prompt param must exist with non-empty default
+	promptParam, ok := b.Params["prompt"]
+	if !ok {
+		t.Fatal("expected prompt param")
+	}
+	if promptParam.Default == "" {
+		t.Error("prompt param default must be non-empty")
+	}
 }
 
 func TestQAReviewBlockStructure(t *testing.T) {
@@ -86,6 +95,15 @@ func TestQAReviewBlockStructure(t *testing.T) {
 	}
 	if parseInt(param.Default) <= 0 {
 		t.Errorf("max_turns default must be positive, got %q", param.Default)
+	}
+
+	// prompt param must exist with non-empty default
+	promptParam, ok := b.Params["prompt"]
+	if !ok {
+		t.Fatal("expected prompt param")
+	}
+	if promptParam.Default == "" {
+		t.Error("prompt param default must be non-empty")
 	}
 }
 

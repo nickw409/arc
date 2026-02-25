@@ -53,6 +53,21 @@ Break the work into phases that can be executed and tested independently. For ea
 - The full list of files touched
 - Type signatures for new functions or types
 
+> **Pipeline routing note:** When writing custom pipeline workflows, pipeline steps can use `name:` to give them an addressable identity and `route:` to route individual block exits to specific downstream steps or terminals. Block prompts are overridable via `params: {prompt: "prompts/..."}`. For example:
+> ```yaml
+> pipeline:
+>   - block: adversary
+>     name: check
+>     route:
+>       bugs_found: fix
+>       no_bugs_found: complete
+>   - block: impl
+>     name: fix
+>     params: {prompt: "prompts/bugfix/fix.md"}
+>     route:
+>       done: check
+> ```
+
 ### Step 6: Write Plan Content
 
 For each phase, write the complete plan.md content that an implementation agent will follow. Include:

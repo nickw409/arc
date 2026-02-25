@@ -2,16 +2,17 @@ name: adversary
 description: Adversary writes adversarial tests to find bugs in existing code
 params:
   max_turns: {default: "30"}
+  prompt: {default: "prompts/adversarial/adversary.md"}
 entry: adversary
-exits: [done]
+exits: [bugs_found, no_bugs_found]
 states:
   - name: adversary
     description: Write adversarial tests to find bugs
-    prompt: prompts/adversarial/adversary.md
+    prompt: ${prompt}
     agent:
       max_turns: ${max_turns}
       allowed_tools: [Read, Grep, Glob, Write, Bash]
     verdicts: [bugs_found, no_bugs_found]
     next:
-      bugs_found: $done
-      no_bugs_found: $done
+      bugs_found: $bugs_found
+      no_bugs_found: $no_bugs_found

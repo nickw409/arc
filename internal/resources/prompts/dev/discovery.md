@@ -71,7 +71,7 @@ You MUST output valid JSON in a ```json code fence matching this schema:
   ],
   "requirements": ["Requirement 1", "Requirement 2"],
   "approach": "High-level approach description",
-  "workflow_type": "feature|bugfix|investigation|refactor|performance|direct",
+  "workflow_type": "feature|bugfix|investigation|refactor|performance|audit|direct",
   "suggested_phases": [
     {"name": "phase-name", "description": "What this phase does"}
   ],

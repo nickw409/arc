@@ -183,7 +183,7 @@ func ResolveParams(b *Block, params map[string]string) (*Block, error) {
 		rs := BlockState{
 			Name:        s.Name,
 			Description: substituteParams(s.Description, merged),
-			Prompt:      s.Prompt,
+			Prompt:      substituteParams(s.Prompt, merged),
 			Verdicts:    s.Verdicts,
 		}
 

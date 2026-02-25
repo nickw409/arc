@@ -155,7 +155,7 @@ External dependency additions with exact versions.
 
 ## Workflow Types
 
-Arc provides five workflow types. Each defines a state machine that controls how a phase progresses.
+Arc provides six workflow types. Each defines a state machine that controls how a phase progresses.
 
 ### feature
 
@@ -248,12 +248,61 @@ baseline → analyze → optimize → benchmark → complete
 
 **When to use:** Making code faster, reducing memory usage, improving throughput.
 
+### audit
+
+Adversarial loop: adversary finds bugs, impl fixes, repeat until clean.
+
+```
+audit (adversary) → bugs_found → fix (impl) → done → audit
+                  → no_bugs_found → complete
+```
+
+| State | Purpose |
+|-------|---------|
+| `audit` | Write adversarial tests to find bugs in existing code |
+| `fix` | Fix the bugs found by the adversary |
+
+**When to use:** Hardening existing code against edge cases and bugs without a known defect to fix.
+
 ### Terminal States
 
 All workflows share two terminal states:
 
 - **`complete`** — Phase finished successfully.
 - **`blocked`** — Phase cannot proceed without human intervention.
+
+### Custom Pipeline Workflows
+
+Block-composed workflows use a `pipeline:` key instead of `states:`. Each pipeline step references a block by type. Steps can be named and can route individual block exits to specific downstream steps.
+
+```yaml
+name: my-workflow
+version: 1
+pipeline:
+  - block: impl
+    name: write-code          # optional; defaults to block name; used as routing target
+    params: {max_turns: "45", prompt: "prompts/feature/impl.md"}
+  - block: adversary
+    name: check
+    params: {max_turns: "30"}
+    route:
+      bugs_found: write-code  # route exit to named step (loops back)
+      no_bugs_found: complete  # route exit to terminal state
+terminal_states: [complete, blocked]
+```
+
+**`name`** — gives the step an addressable identity used as the namespace prefix for its states (`write-code.impl`) and as a target in `route` maps.
+
+**`route`** — maps individual block exit names to downstream steps or terminal states. Exits not listed in `route` fall through to the next sequential step.
+
+**`params`** — override block defaults. All blocks support a `prompt` param to swap the agent prompt:
+
+```yaml
+- block: impl
+  params:
+    prompt: "prompts/bugfix/fix.md"
+    max_turns: "30"
+```
 
 <!-- /section: workflows -->
 

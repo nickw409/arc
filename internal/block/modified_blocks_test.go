@@ -20,13 +20,13 @@ func TestAdversaryBlockLinearized(t *testing.T) {
 		t.Fatalf("expected 1 state, got %d", len(b.States))
 	}
 
-	// Both verdicts should exit to $done (no self-loop)
+	// Each verdict maps to its own named exit (enables per-verdict pipeline routing)
 	state := b.States[0]
-	if next, ok := state.Next["bugs_found"]; !ok || next != "$done" {
-		t.Errorf("bugs_found should map to $done, got %q (ok=%v)", next, ok)
+	if next, ok := state.Next["bugs_found"]; !ok || next != "$bugs_found" {
+		t.Errorf("bugs_found should map to $bugs_found, got %q (ok=%v)", next, ok)
 	}
-	if next, ok := state.Next["no_bugs_found"]; !ok || next != "$done" {
-		t.Errorf("no_bugs_found should map to $done, got %q (ok=%v)", next, ok)
+	if next, ok := state.Next["no_bugs_found"]; !ok || next != "$no_bugs_found" {
+		t.Errorf("no_bugs_found should map to $no_bugs_found, got %q (ok=%v)", next, ok)
 	}
 
 	// No constraints block
@@ -39,9 +39,13 @@ func TestAdversaryBlockLinearized(t *testing.T) {
 		t.Error("max_rounds param should be removed from adversary block")
 	}
 
-	// exits must be [done]
-	if len(b.Exits) != 1 || b.Exits[0] != "done" {
-		t.Errorf("expected exits [done], got %v", b.Exits)
+	// exits must be [bugs_found, no_bugs_found]
+	exitSet := make(map[string]bool, len(b.Exits))
+	for _, e := range b.Exits {
+		exitSet[e] = true
+	}
+	if !exitSet["bugs_found"] || !exitSet["no_bugs_found"] || len(b.Exits) != 2 {
+		t.Errorf("expected exits [bugs_found, no_bugs_found], got %v", b.Exits)
 	}
 
 	// entry must be adversary
