@@ -13,7 +13,6 @@ import (
 
 func newChatCmd() *cobra.Command {
 	var model string
-	var noRegister bool
 
 	cmd := &cobra.Command{
 		Use:   "chat",
@@ -36,14 +35,12 @@ func newChatCmd() *cobra.Command {
 				return fmt.Errorf("claude CLI not found in PATH: %w", err)
 			}
 
-			// Register MCP server if not already present (unless --no-register)
-			if !noRegister {
-				if err := exec.Command(claudeBinary, "mcp", "get", "arc").Run(); err != nil {
-					register := exec.Command(claudeBinary, "mcp", "add", "--scope", "local", "arc", "--", arcBinary, "serve")
-					register.Stderr = os.Stderr
-					if err := register.Run(); err != nil {
-						return fmt.Errorf("registering MCP server: %w", err)
-					}
+			// Register MCP server if not already present
+			if err := exec.Command(claudeBinary, "mcp", "get", "arc").Run(); err != nil {
+				register := exec.Command(claudeBinary, "mcp", "add", "--scope", "local", "arc", "--", arcBinary, "serve")
+				register.Stderr = os.Stderr
+				if err := register.Run(); err != nil {
+					return fmt.Errorf("registering MCP server: %w", err)
 				}
 			}
 
@@ -65,6 +62,5 @@ func newChatCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&model, "model", "", "Model to use for the Claude session")
-	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip MCP server registration (if already registered)")
 	return cmd
 }
