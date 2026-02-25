@@ -23,6 +23,8 @@ The orchestration system is a general-purpose workflow executor that handles any
 | Investigation | Produce findings | No code changes, output is documentation |
 | Refactor | Change structure | Characterization tests pass before AND after |
 | Performance | Make faster | Benchmarks, not unit tests |
+| Adversarial | Robust implementation | Implement freely, adversary writes failing tests, fix until convergence |
+| Direct | Simple tasks | Single-phase execution, no review loop |
 
 ## System Components
 
@@ -32,6 +34,7 @@ $ARC_HOME/
 +-- prompts/            # Prompt templates (Markdown)
 +-- templates/          # Plan templates per work type
 +-- adversaries/        # Adversarial review definitions
++-- blocks/             # Reusable workflow blocks (YAML)
 +-- scripts/            # Execution scripts (Bash)
 +-- docs/               # This documentation
 ```
@@ -180,13 +183,54 @@ Multiple specialized adversaries attack plans:
 - Consistency adversary
 - Executability adversary
 
-### 3. Context Injection
+### 3. Composable Workflow Blocks
+
+Workflows can be composed from reusable, parameterized blocks rather than written as monolithic YAML. A block defines a self-contained group of states with entry/exit points and substitutable parameters:
+
+```yaml
+# blocks/adversary-loop.yaml
+name: adversary-loop
+params:
+  max_rounds: {default: 3}
+entry: adversary
+exits: [converged]
+states:
+  - name: adversary
+    next: {bugs_found: impl_fix, no_bugs_found: $converged}
+  - name: impl_fix
+    next: adversary
+```
+
+Workflows compose blocks into pipelines. The loader resolves blocks into a flat state machine (namespacing states as `block.state`) so the runtime doesn't change.
+
+Built-in blocks: `impl`, `qa-loop`, `review`, `adversary-loop`.
+
+### 4. Git Worktree Isolation
+
+Agents run in isolated git worktrees (`internal/worktree/`) so developers keep their working directory clean. Each phase gets a branch like `arc/plan/phase` in a temp directory. On completion, branches merge back via `--no-ff`. On failure, branches are preserved for inspection.
+
+### 5. Automated Plan Generation (`arc dev`)
+
+The `arc dev` command (`internal/dev/`) automates the full lifecycle:
+
+1. **Discovery** — Read-only agent analyzes codebase and task description
+2. **Sizing** — Heuristic validates complexity classification (simple/medium/complex)
+3. **Architecture** — For complex tasks, 3 parallel architect agents propose designs; best is selected
+4. **Plan generation** — Creates plan directory, phases, `plan.md` files, and workflow YAML
+5. **Review** — Optional adversarial review with auto-remediation
+6. **Orchestration** — Launches the orchestrator to execute the plan
+
+### 6. Plan Summaries
+
+On completion, the orchestrator generates `SUMMARY.md` (`internal/plan/summary.go`) with phase details, test results, files changed (from git history), and cost tracking.
+
+### 7. Context Injection
 Orchestrator can inject context to sub-agents via:
 - Template variables in prompts
 - orchestrator_notes.md file
 - Escalation context from state
 
-### 4. Intervention System
+### 8. Intervention System
 When orchestrator can't proceed:
 1. Proposes workflow changes (human approves)
 2. Requests human intervention

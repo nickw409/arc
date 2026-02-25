@@ -12,8 +12,8 @@
 
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System overview, design goals, components |
-| [WORKFLOW_SCHEMA.md](./WORKFLOW_SCHEMA.md) | Complete workflow YAML specification |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System overview, design goals, components, composable blocks, worktrees, arc dev pipeline |
+| [WORKFLOW_SCHEMA.md](./WORKFLOW_SCHEMA.md) | Complete workflow YAML specification, block composition, per-state agent config |
 | [STATE_SCHEMA.md](./STATE_SCHEMA.md) | Phase state.json specification |
 | [PROMPT_TEMPLATES.md](./PROMPT_TEMPLATES.md) | Template variable system |
 
@@ -22,7 +22,7 @@
 | Document | Description |
 |----------|-------------|
 | [PLANNING_PROCESS.md](./PLANNING_PROCESS.md) | How plans are created and validated |
-| [ADVERSARY_SYSTEM.md](./ADVERSARY_SYSTEM.md) | Adversarial plan review |
+| [ADVERSARY_SYSTEM.md](./ADVERSARY_SYSTEM.md) | Adversarial plan review with confidence scoring |
 | [INTERVENTION_SYSTEM.md](./INTERVENTION_SYSTEM.md) | Escape hatches and overrides |
 
 ### Implementation
@@ -35,13 +35,15 @@
 
 ### Work Types
 
-The system supports 5 work types, each with its own workflow and plan template:
+The system supports 7 work types, each with its own workflow and plan template:
 
 - **Feature** - New capability (TDD flow)
 - **Bug Fix** - Correct existing behavior
 - **Investigation** - Research, produce findings
 - **Refactor** - Change structure, preserve behavior
 - **Performance** - Optimize speed/memory
+- **Adversarial** - Implement freely, adversary writes failing tests, fix until convergence
+- **Direct** - Single-phase execution for simple tasks
 
 ### Decision Tiers
 
@@ -67,14 +69,16 @@ The system supports 5 work types, each with its own workflow and plan template:
 $ARC_HOME/
 +-- docs/               # This documentation
 +-- workflows/          # Base workflow definitions
++-- blocks/             # Reusable workflow blocks
 +-- prompts/            # Prompt templates
 |   +-- feature/
 |   +-- bugfix/
 |   +-- investigation/
 |   +-- refactor/
 |   +-- performance/
+|   +-- adversarial/    # Adversarial workflow prompts
 |   +-- common/
-|   +-- adversaries/
+|   +-- adversaries/    # Adversarial review prompts
 +-- templates/          # Plan templates per work type
 +-- adversaries/        # Adversary definitions
 +-- scripts/            # Execution scripts

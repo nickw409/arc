@@ -1084,3 +1084,121 @@ terminal_states:
   - complete
   - blocked
 ```
+
+## Per-State Agent Config
+
+Each state can configure the agent that executes it:
+
+```yaml
+states:
+  - name: impl
+    prompt: prompts/feature/impl.md
+    agent:
+      max_turns: 45       # Agent turn budget
+      allowed_tools:       # Tool whitelist
+        - View
+        - Write
+        - Bash
+      timeout: 900         # Agent timeout in seconds
+      model: sonnet        # Model override
+    next: impl_review
+```
+
+When `agent` is nil/omitted, the system uses defaults. This is backward compatible with all existing workflows.
+
+## Composable Blocks
+
+Workflows can be composed from reusable blocks instead of (or in addition to) writing monolithic state machines. Blocks are self-contained state groups with parameterized entry/exit points.
+
+### Block Format
+
+```yaml
+name: adversary-loop
+description: Adversary tries to break code, impl fixes, loop until convergence
+params:
+  max_rounds: {default: 3}
+  max_turns: {default: 30}
+  focus: {default: ""}
+entry: adversary
+exits: [converged]
+states:
+  - name: adversary
+    prompt: prompts/adversarial/adversary.md
+    agent:
+      max_turns: ${max_turns}
+      allowed_tools: [View, Write, Bash]
+    verdicts: [bugs_found, no_bugs_found]
+    next:
+      bugs_found: impl_fix
+      no_bugs_found: $converged
+  - name: impl_fix
+    prompt: prompts/adversarial/impl-fix.md
+    agent:
+      max_turns: ${max_turns}
+    constraints:
+      max_iterations: ${max_rounds}
+    next: adversary
+```
+
+### Parameter Substitution
+
+`${param}` placeholders are resolved before the workflow is compiled:
+- Parameters with defaults can be overridden at the pipeline level
+- Missing required parameters (no default) cause a load error
+
+### Pipeline Composition
+
+Workflows with a `pipeline:` key are composed from blocks:
+
+```yaml
+name: adversarial
+version: 1
+description: Adversarial testing workflow
+pipeline:
+  - block: impl
+    params: {max_turns: 45}
+  - block: adversary-loop
+    params: {max_rounds: 3, max_turns: 30}
+terminal_states: [complete, blocked]
+```
+
+### Resolution Rules
+
+**Sequential**: States get block-prefixed names. Exit points wire to the next block's entry:
+```
+impl.impl → adversary-loop.adversary → adversary-loop.impl_fix → ... → complete
+```
+
+**Parallel** (pipeline step with `parallel:`):
+```yaml
+pipeline:
+  - block: impl
+  - parallel:
+      strategy: all      # "all" or "any"
+      blocks:
+        - name: security
+          block: adversary-loop
+          params: {focus: security}
+        - name: correctness
+          block: adversary-loop
+          params: {focus: correctness}
+```
+
+Parallel groups generate synthetic `_fork_N` and `_join_N` states. The orchestrator forks into concurrent `RunPhase` calls per block instance and joins based on strategy.
+
+### Built-in Blocks
+
+| Block | States | Params | Purpose |
+|-------|--------|--------|---------|
+| `impl` | `impl` | max_turns, timeout, model | Free-form implementation |
+| `qa-loop` | `qa`, `qa_review` | max_turns | QA writes tests → review loop |
+| `review` | `impl_review` | max_turns | Implementation review |
+| `adversary-loop` | `adversary`, `impl_fix` | max_rounds, max_turns, focus | Adversarial testing cycle |
+
+### Composition Validation
+
+The composition system validates:
+1. All block exit points are wired to a next block's entry or to `complete`
+2. No dangling exits (referenced but not mapped)
+3. Every non-terminal state can reach at least one terminal state (reverse-reachability)
+4. No cycles without exit conditions

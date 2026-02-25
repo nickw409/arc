@@ -126,9 +126,10 @@ arc review <plan-name>
 │    └─ executability: FAIL (1 suggestion)                │
 │                                                         │
 │    Parse suggestions from failures                      │
+│    Filter by confidence (drop < 80)                     │
 │    Merge by priority (executability > coverage > ...)   │
 │    Drop conflicts (lower priority loses)                │
-│    Apply 4 suggestions to plan.md                       │
+│    Apply remaining suggestions to plan.md               │
 │                                                         │
 │  Iteration 2:                                           │
 │    plan.md changed → cache invalidated → re-run all     │
@@ -169,17 +170,31 @@ When an adversary fails, it emits structured find-and-replace blocks:
 
 <<<ORIGINAL
 exact text from plan.md to find
->>>
 <<<SUGGESTED
 replacement text with the issue fixed
 >>>
 ```
+
+### Confidence Annotations
+
+Adversaries can annotate suggestions with a confidence score (0-100):
+
+```markdown
+<<<ORIGINAL (confidence: 85)
+exact text from plan.md to find
+<<<SUGGESTED
+replacement text with the issue fixed
+>>>
+```
+
+Suggestions below the confidence threshold (default: 80) are filtered out before merging. This reduces oscillation from speculative changes. If no confidence is specified, it defaults to 100 (always applied).
 
 Rules enforced by the adversary prompts:
 - ORIGINAL must be an exact substring of `plan.md` (character-for-character)
 - Suggestions are minimal — only change what's needed
 - Multiple suggestion blocks are allowed per adversary
 - Passing adversaries omit the Suggestions section
+- Both `>>>` and `<<<END` are accepted as block closers
 
 ### Conflict Resolution
 
@@ -199,14 +214,21 @@ This is deterministic — same inputs always produce same merge result.
 // internal/review/suggestion.go
 
 type Suggestion struct {
-    Adversary string
-    Priority  int
-    Original  string
-    Suggested string
+    Adversary  string
+    Priority   int
+    Original   string
+    Suggested  string
+    Confidence int    // 0-100, default 100
 }
 
-// ParseSuggestions extracts <<<ORIGINAL/<<<SUGGESTED blocks from output
+const DefaultConfidenceThreshold = 80
+
+// ParseSuggestions extracts <<<ORIGINAL/<<<SUGGESTED blocks from output.
+// Parses optional (confidence: N) annotations on <<<ORIGINAL lines.
 func ParseSuggestions(adversaryName string, output string) []Suggestion
+
+// FilterByConfidence removes suggestions below the threshold.
+func FilterByConfidence(suggestions []Suggestion, threshold int) []Suggestion
 
 // MergeSuggestions sorts by priority and drops conflicts
 func MergeSuggestions(suggestions []Suggestion) []Suggestion

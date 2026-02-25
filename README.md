@@ -37,7 +37,23 @@ This detects your language and test runner, then creates:
 - Git hooks for commit and file boundary enforcement
 - Claude Code hooks for orchestrator/review agent restrictions
 
-### Create and Run a Plan
+### Quick Start with `arc dev`
+
+For the fastest path from idea to code, use `arc dev`:
+
+```bash
+arc dev "Add user authentication with JWT tokens"
+```
+
+This runs the full pipeline automatically: discovers relevant code, classifies task complexity, generates a plan with phases, runs adversarial review, and launches the orchestrator. Options:
+
+```bash
+arc dev --skip-review "Fix the login bug"          # Skip adversarial review
+arc dev --timeout 7200 "Refactor the auth module"  # Custom timeout (seconds)
+arc dev --interactive "Add caching layer"           # Prompt before review/launch
+```
+
+### Create and Run a Plan Manually
 
 ```bash
 arc plan my-feature phase1 phase2 integration   # Create a plan with phases
@@ -145,8 +161,10 @@ Five workflow types, each with its own state machine and prompt set:
 | **investigation** | `research` | Research only, no code changes, outputs documentation |
 | **refactor** | `characterize` | Characterization tests must pass before and after changes |
 | **performance** | `baseline` | Benchmarks drive optimization, not unit tests |
+| **adversarial** | `impl` | Implement freely, then adversary writes failing tests, fix until convergence |
+| **direct** | `impl` | Single-phase execution for simple tasks (used by `arc dev`) |
 
-Workflows are defined as YAML state machines in `workflows/`.
+Workflows are defined as YAML state machines in `workflows/`. The **adversarial** and **direct** workflows are composed from reusable blocks (see Composable Blocks below).
 
 ## Workflow YAML
 
@@ -205,6 +223,89 @@ Key capabilities by schema version:
 
 All versions are backwards compatible — V1 workflows run on the V5 engine.
 
+## Composable Blocks
+
+Workflows can be composed from reusable, parameterized blocks instead of writing monolithic YAML state machines. A block is a self-contained group of states with entry/exit points:
+
+```yaml
+# blocks/adversary-loop.yaml
+name: adversary-loop
+params:
+  max_rounds: {default: 3}
+  max_turns: {default: 30}
+entry: adversary
+exits: [converged]
+states:
+  - name: adversary
+    verdicts: [bugs_found, no_bugs_found]
+    next:
+      bugs_found: impl_fix
+      no_bugs_found: $converged
+  - name: impl_fix
+    constraints:
+      max_iterations: ${max_rounds}
+    next: adversary
+```
+
+Workflows compose blocks into pipelines:
+
+```yaml
+# workflows/adversarial.yaml
+name: adversarial
+pipeline:
+  - block: impl
+    params: {max_turns: 45}
+  - block: adversary-loop
+    params: {max_rounds: 3}
+```
+
+The loader resolves blocks into a flat state machine at load time — the runtime always operates on a flat state machine. States are namespaced by block (e.g., `adversary-loop.adversary`). Exit points wire to the next block's entry.
+
+Built-in blocks: `impl`, `qa-loop`, `review`, `adversary-loop`.
+
+## Git Worktree Isolation
+
+Agents can run in isolated git worktrees so developers can keep working in the main tree:
+
+```bash
+arc run my-plan --worktree    # Each phase gets its own worktree branch
+```
+
+Each phase gets a branch like `arc/my-plan/phase-name` in a temp directory. On completion, the worktree branch is merged back into the main branch. On failure, the branch is preserved for inspection but the worktree directory is cleaned up.
+
+## `arc dev` Pipeline
+
+`arc dev` automates the full lifecycle from task description to running code:
+
+```
+Task description
+    │
+    ▼
+Discovery agent (read-only) ──► Analyzes codebase, classifies complexity
+    │
+    ▼
+Complexity routing:
+    ├── Simple: Single "direct" phase, no review
+    ├── Medium: Multi-phase with built-in workflow, adversarial review
+    └── Complex: 3 architect agents propose designs, best selected,
+                 custom workflow generated, adversarial review
+    │
+    ▼
+Orchestrator launch ──► Executes plan phases
+    │
+    ▼
+SUMMARY.md ──► Generated on completion with stats, cost, files changed
+```
+
+## Plan Summaries
+
+When a plan completes, a `SUMMARY.md` is generated in the plan directory containing:
+
+- Objective (from first phase's `plan.md`)
+- Phase completion status and per-phase details (iterations, tests, commits, cost)
+- Files changed across all phases (collected from git history)
+- Total cost and next steps for blocked/deferred phases
+
 ## Test Runners
 
 Arc uses a plugin system for test runners. Each runner lives in `runners/` and provides a uniform interface:
@@ -262,13 +363,24 @@ Before running a plan, each phase goes through adversarial review with auto-reme
 | **ambiguity** | Nothing a sub-agent could misinterpret | 4 | Yes |
 | **scope** | Phase isn't too large to execute reliably | 5 (lowest) | No (warning only) |
 
-When adversaries find issues, they emit structured suggestions (find-and-replace blocks targeting `plan.md`). The review loop:
+When adversaries find issues, they emit structured suggestions (find-and-replace blocks targeting `plan.md`). Suggestions can include confidence scores:
+
+```
+<<<ORIGINAL (confidence: 85)
+exact text from plan.md
+<<<SUGGESTED
+replacement text
+>>>
+```
+
+The review loop:
 
 1. Runs all 5 adversaries in parallel
 2. Parses suggestions from any that failed
-3. Merges suggestions by priority (higher-priority adversary wins conflicts)
-4. Applies fixes to `plan.md` mechanically
-5. Re-reviews until all pass or iteration limit (5) is hit
+3. Filters by confidence threshold (default: 80) — low-confidence suggestions are dropped
+4. Merges suggestions by priority (higher-priority adversary wins conflicts)
+5. Applies fixes to `plan.md` mechanically
+6. Re-reviews until all pass or iteration limit (5) is hit
 
 Smart caching skips re-reviewing when `plan.md` hasn't changed (SHA256 hash match). Use `arc manage reset-review <plan> <phase>` to clear the cache and iteration counter.
 
@@ -311,11 +423,14 @@ arc/
 │   ├── state/        Phase state (state.json) management
 │   ├── config/       .arc.yaml parsing
 │   ├── prompt/       Prompt rendering & extraction
-│   ├── plan/         Plan creation & status
+│   ├── plan/         Plan creation, status & summary generation
 │   ├── project/      Project detection & init
 │   ├── gitops/       Git commit operations
 │   ├── monitor/      Live TUI (bubbletea)
-│   ├── resources/    Embedded templates & prompts
+│   ├── resources/    Embedded templates, prompts & blocks
+│   ├── block/        Composable workflow block loading & composition
+│   ├── worktree/     Git worktree isolation for parallel execution
+│   ├── dev/          Arc dev pipeline (discovery → architecture → plan generation)
 │   ├── logging/      Structured logger
 │   ├── migrate/      State migration
 │   ├── guide/        Agent-facing reference guide

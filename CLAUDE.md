@@ -30,26 +30,30 @@ internal/         All Go packages:
   config/         .arc.yaml parsing
   workflow/       Workflow YAML loading & validation
   state/          Phase state (state.json) management
-  plan/           Plan creation & status
+  plan/           Plan creation, status & summary generation
   project/        Project detection & init
   prompt/         Prompt rendering & extraction
   runner/         Subprocess runner (claude CLI)
   agent/          Agent spawning
   pipeline/       Phase iteration, escalation, hooks, constraints
   orchestrator/   Top-level orchestrator loop
-  review/         Adversarial plan review
+  review/         Adversarial plan review (with confidence scoring)
   gitops/         Git commit operations
   monitor/        Live TUI (bubbletea)
-  resources/      Embedded resources (prompts, workflows, templates)
+  resources/      Embedded resources (prompts, workflows, templates, blocks)
     prompts/      Agent prompt templates (.md)
     workflows/    Workflow state machine definitions (.yaml)
     templates/    Plan scaffolding templates (.md)
+    blocks/       Reusable workflow blocks (.yaml)
   logging/        Structured logger
   selfupdate/     Self-update mechanism
   migrate/        State migration
   guide/          Agent-facing reference guide
   validate/       AI-powered test quality audit
   arc/            Core types (verdict, result, errors, state)
+  block/          Composable workflow block loading & composition
+  worktree/       Git worktree isolation for parallel execution
+  dev/            Arc dev pipeline (discovery, architecture, plan generation)
 testdata/         Test fixtures
 ```
 
@@ -80,6 +84,7 @@ arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
 arc validate [paths...]                     # Audit test quality using AI agent
+arc dev <task description...>               # Auto-generate plan from description and run it
 
 # Phase management
 arc manage <plan> <phase> complete          # Mark phase complete
@@ -102,6 +107,8 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 - **investigation** — Research: `research → draft → review → complete`
 - **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`
 - **performance** — Benchmark-driven: `baseline → analyze → optimize → benchmark → complete`
+- **adversarial** — Composed from blocks: `impl → adversary-loop(adversary ↔ impl_fix) → complete`
+- **direct** — Single-phase: `impl → complete` (used by `arc dev` for simple tasks)
 
 ## Releases
 
