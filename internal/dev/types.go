@@ -56,14 +56,17 @@ type PhaseSpec struct {
 
 // DiscoveryResult holds the structured output from a discovery agent.
 type DiscoveryResult struct {
-	TaskSummary     string         `json:"task_summary"`
-	Complexity      TaskComplexity `json:"complexity"`
-	Reasoning       string         `json:"reasoning"`
-	RelevantFiles   []FileRef      `json:"relevant_files"`
-	Requirements    []string       `json:"requirements"`
-	Approach        string         `json:"approach"`
-	WorkflowType    string         `json:"workflow_type"`
-	SuggestedPhases []PhaseSpec    `json:"suggested_phases"`
+	TaskSummary     string              `json:"task_summary"`
+	Complexity      TaskComplexity      `json:"complexity"`
+	Reasoning       string              `json:"reasoning"`
+	RelevantFiles   []FileRef           `json:"relevant_files"`
+	Requirements    []string            `json:"requirements"`
+	Approach        string              `json:"approach"`
+	WorkflowType    string              `json:"workflow_type"`
+	SuggestedPhases []PhaseSpec         `json:"suggested_phases"`
+	Dependencies    map[string][]string `json:"dependencies,omitempty"`
+	Conventions     []string            `json:"conventions,omitempty"`
+	Risks           []string            `json:"risks,omitempty"`
 }
 
 // MarshalJSON ensures nil slices are marshaled as [] instead of null.
@@ -76,6 +79,12 @@ func (dr DiscoveryResult) MarshalJSON() ([]byte, error) {
 	}
 	if dr.SuggestedPhases == nil {
 		dr.SuggestedPhases = []PhaseSpec{}
+	}
+	if dr.Conventions == nil {
+		dr.Conventions = []string{}
+	}
+	if dr.Risks == nil {
+		dr.Risks = []string{}
 	}
 	type Alias DiscoveryResult
 	return json.Marshal(Alias(dr))
@@ -100,6 +109,12 @@ func (dr *DiscoveryResult) UnmarshalJSON(data []byte) error {
 	}
 	if dr.SuggestedPhases == nil {
 		dr.SuggestedPhases = []PhaseSpec{}
+	}
+	if dr.Conventions == nil {
+		dr.Conventions = []string{}
+	}
+	if dr.Risks == nil {
+		dr.Risks = []string{}
 	}
 	return nil
 }

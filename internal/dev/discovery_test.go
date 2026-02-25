@@ -682,6 +682,108 @@ func TestRunDiscovery_DefaultCommandName(t *testing.T) {
 	}
 }
 
+func TestRunDiscovery_UsesTemplateWhenNoPrompt(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", validAgentOutput())
+	t.Setenv("MOCK_JSON_WRAP", "1")
+	t.Setenv("MOCK_ECHO_ARGS", "1")
+
+	output, err := RunDiscovery(context.Background(), DiscoveryOptions{
+		TaskDescription: "add user auth",
+		Prompt:          "", // empty — should use template
+		CommandName:     mockBin,
+	})
+	if err != nil {
+		// The mock echoes args, which won't contain valid JSON.
+		// We just need to verify the template was loaded — check that the
+		// error is about parsing, not about loading the template.
+		if strings.Contains(err.Error(), "loading discovery template") {
+			t.Fatalf("template loading failed: %v", err)
+		}
+		if strings.Contains(err.Error(), "rendering discovery template") {
+			t.Fatalf("template rendering failed: %v", err)
+		}
+		// Parse error from mock output is expected — the template was rendered.
+		return
+	}
+	if output == nil {
+		t.Fatal("expected non-nil DiscoveryOutput")
+	}
+}
+
+func TestRunDiscovery_ExplicitPromptOverridesTemplate(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", validAgentOutput())
+	t.Setenv("MOCK_JSON_WRAP", "1")
+
+	output, err := RunDiscovery(context.Background(), DiscoveryOptions{
+		TaskDescription: "fix typo",
+		Prompt:          "Custom prompt override.",
+		CommandName:     mockBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output == nil {
+		t.Fatal("expected non-nil DiscoveryOutput")
+	}
+	if output.Result.TaskSummary != "fix typo" {
+		t.Errorf("Result.TaskSummary = %q, want %q", output.Result.TaskSummary, "fix typo")
+	}
+}
+
+func TestParseDiscoveryOutput_OptionalFields(t *testing.T) {
+	input := "```json\n" +
+		`{
+  "task_summary": "Add auth",
+  "complexity": "medium",
+  "reasoning": "Multiple files",
+  "workflow_type": "feature",
+  "relevant_files": [{"path": "auth.go", "description": "auth handler"}],
+  "requirements": ["OAuth support"],
+  "approach": "Add middleware",
+  "suggested_phases": [{"name": "impl", "description": "implement"}],
+  "dependencies": {"auth.go": ["net/http", "context"]},
+  "conventions": ["errors wrapped with fmt.Errorf"],
+  "risks": ["breaking change to auth middleware"]
+}` + "\n```"
+
+	result, err := ParseDiscoveryOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Dependencies) != 1 {
+		t.Errorf("len(Dependencies) = %d, want 1", len(result.Dependencies))
+	}
+	if deps, ok := result.Dependencies["auth.go"]; !ok || len(deps) != 2 {
+		t.Errorf("Dependencies[\"auth.go\"] = %v, want [net/http context]", deps)
+	}
+	if len(result.Conventions) != 1 {
+		t.Errorf("len(Conventions) = %d, want 1", len(result.Conventions))
+	}
+	if len(result.Risks) != 1 {
+		t.Errorf("len(Risks) = %d, want 1", len(result.Risks))
+	}
+}
+
+func TestParseDiscoveryOutput_OptionalFieldsAbsent(t *testing.T) {
+	input := "```json\n" +
+		`{"task_summary": "fix bug", "complexity": "simple", "reasoning": "small", "workflow_type": "direct"}` +
+		"\n```"
+
+	result, err := ParseDiscoveryOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Dependencies != nil {
+		t.Errorf("Dependencies = %v, want nil", result.Dependencies)
+	}
+	if result.Conventions == nil {
+		t.Error("Conventions is nil, want empty slice")
+	}
+	if result.Risks == nil {
+		t.Error("Risks is nil, want empty slice")
+	}
+}
+
 func TestRunDiscovery_ModelOverride(t *testing.T) {
 	t.Setenv("MOCK_OUTPUT", validAgentOutput())
 	t.Setenv("MOCK_JSON_WRAP", "1")

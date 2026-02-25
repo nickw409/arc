@@ -9,6 +9,8 @@ import (
 
 	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/resources"
 )
 
 // DiscoveryOptions configures the discovery agent.
@@ -31,17 +33,29 @@ type DiscoveryOutput struct {
 // The agent is spawned with Read-only tools (Glob, Grep, Read, LS) and
 // a 180-second timeout. Its output is parsed from a ```json code fence.
 func RunDiscovery(ctx context.Context, opts DiscoveryOptions) (*DiscoveryOutput, error) {
-	prompt := opts.Prompt
-	if opts.TaskDescription != "" {
-		if prompt != "" {
-			prompt += "\n\n" + opts.TaskDescription
-		} else {
-			prompt = opts.TaskDescription
+	agentPrompt := opts.Prompt
+	if agentPrompt != "" {
+		// Explicit prompt override — append task description if provided.
+		if opts.TaskDescription != "" {
+			agentPrompt += "\n\n" + opts.TaskDescription
 		}
+	} else {
+		// Load and render the embedded discovery template.
+		tmplBytes, err := resources.PromptBytes("dev/discovery.md")
+		if err != nil {
+			return nil, fmt.Errorf("loading discovery template: %w", err)
+		}
+		rendered, err := prompt.RenderString(string(tmplBytes), prompt.TemplateContext{
+			PlanMD: opts.TaskDescription,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("rendering discovery template: %w", err)
+		}
+		agentPrompt = rendered
 	}
 
 	spawnResult, err := agent.Spawn(ctx, agent.SpawnOptions{
-		Prompt:       prompt,
+		Prompt:       agentPrompt,
 		AllowedTools: []string{"Read", "Glob", "Grep", "LS"},
 		Timeout:      180 * time.Second,
 		Model:        opts.Model,
@@ -100,14 +114,17 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 
 	// Use a raw struct to control validation order (task_summary before complexity).
 	var raw struct {
-		TaskSummary     string    `json:"task_summary"`
-		Complexity      string    `json:"complexity"`
-		Reasoning       string    `json:"reasoning"`
-		RelevantFiles   []FileRef `json:"relevant_files"`
-		Requirements    []string  `json:"requirements"`
-		Approach        string    `json:"approach"`
-		WorkflowType    string    `json:"workflow_type"`
-		SuggestedPhases []PhaseSpec `json:"suggested_phases"`
+		TaskSummary     string              `json:"task_summary"`
+		Complexity      string              `json:"complexity"`
+		Reasoning       string              `json:"reasoning"`
+		RelevantFiles   []FileRef           `json:"relevant_files"`
+		Requirements    []string            `json:"requirements"`
+		Approach        string              `json:"approach"`
+		WorkflowType    string              `json:"workflow_type"`
+		SuggestedPhases []PhaseSpec         `json:"suggested_phases"`
+		Dependencies    map[string][]string `json:"dependencies,omitempty"`
+		Conventions     []string            `json:"conventions,omitempty"`
+		Risks           []string            `json:"risks,omitempty"`
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
@@ -136,6 +153,9 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 		Approach:        raw.Approach,
 		WorkflowType:    raw.WorkflowType,
 		SuggestedPhases: raw.SuggestedPhases,
+		Dependencies:    raw.Dependencies,
+		Conventions:     raw.Conventions,
+		Risks:           raw.Risks,
 	}
 
 	if result.RelevantFiles == nil {
@@ -146,6 +166,12 @@ func ParseDiscoveryOutput(output string) (*DiscoveryResult, error) {
 	}
 	if result.SuggestedPhases == nil {
 		result.SuggestedPhases = []PhaseSpec{}
+	}
+	if result.Conventions == nil {
+		result.Conventions = []string{}
+	}
+	if result.Risks == nil {
+		result.Risks = []string{}
 	}
 
 	return result, nil

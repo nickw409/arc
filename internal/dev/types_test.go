@@ -131,6 +131,8 @@ func TestDiscoveryResultJSONRoundTrip(t *testing.T) {
 		Approach:        "Add OAuth middleware using existing auth package",
 		WorkflowType:    "feature",
 		SuggestedPhases: []PhaseSpec{{Name: "auth-types", Description: "Define OAuth types"}},
+		Conventions:     []string{"errors wrapped with fmt.Errorf"},
+		Risks:           []string{"breaking auth middleware"},
 	}
 	data, err := json.Marshal(original)
 	if err != nil {

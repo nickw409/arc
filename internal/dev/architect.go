@@ -9,6 +9,8 @@ import (
 
 	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/resources"
 )
 
 // ArchitectOptions configures the architect agent spawning.
@@ -55,10 +57,25 @@ func RunArchitects(ctx context.Context, opts ArchitectOptions) (*ArchitectOutput
 		go func(idx int, appr string) {
 			defer wg.Done()
 
-			prompt := fmt.Sprintf("You are an architect agent designing a %s approach.\n\nDiscovery:\n%s\n\nDesign a workflow with the %s optimization target. Output your proposal as a JSON block in ```json fences.", appr, string(discoveryJSON), appr)
+			tmplBytes, err := resources.PromptBytes("dev/architect.md")
+			if err != nil {
+				results[idx] = result{err: fmt.Errorf("loading architect template: %w", err)}
+				return
+			}
+			rendered, err := prompt.RenderString(string(tmplBytes), prompt.TemplateContext{
+				PlanMD: opts.Discovery.TaskSummary,
+				Params: map[string]string{
+					"approach":       appr,
+					"discovery_json": string(discoveryJSON),
+				},
+			})
+			if err != nil {
+				results[idx] = result{err: fmt.Errorf("rendering architect template: %w", err)}
+				return
+			}
 
 			spawnOpts := agent.SpawnOptions{
-				Prompt:       prompt,
+				Prompt:       rendered,
 				AllowedTools: []string{"Read", "Glob", "Grep"},
 				MaxTurns:     10,
 				CommandName:  opts.CommandName,

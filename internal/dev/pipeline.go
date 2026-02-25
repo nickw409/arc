@@ -3,9 +3,11 @@ package dev
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -34,12 +36,13 @@ type DevOptions struct {
 
 // DevResult holds the outcome of an arc dev run.
 type DevResult struct {
-	PlanName   string
-	Complexity TaskComplexity
-	Discovery  *DiscoveryResult
-	Proposal   *ArchitectProposal
-	Reviewed   bool
-	Usage      arc.Usage
+	PlanName   string            `json:"plan_name"`
+	Complexity TaskComplexity    `json:"complexity"`
+	Discovery  *DiscoveryResult  `json:"discovery,omitempty"`
+	Proposal   *ArchitectProposal `json:"proposal,omitempty"`
+	Reviewed   bool              `json:"reviewed"`
+	CodeReview *CodeReviewOutput `json:"code_review,omitempty"`
+	Usage      arc.Usage         `json:"usage"`
 }
 
 // RunDev executes the full arc dev pipeline:
@@ -183,6 +186,9 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 		}
 	}
 
+	// Capture HEAD before orchestration for diff computation.
+	beforeCommit, _ := getHeadCommit(opts.ProjectDir)
+
 	// Launch orchestrator
 	fmt.Println("[dev] Launching orchestrator...")
 	timeout := opts.Timeout
@@ -201,6 +207,23 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	})
 	if err != nil {
 		return result, fmt.Errorf("orchestrator failed: %w", err)
+	}
+
+	// Post-orchestration code review (non-blocking).
+	if beforeCommit != "" {
+		reviewOut, reviewErr := runPostReview(ctx, opts, result, beforeCommit, planName, plansDir)
+		if reviewErr != nil {
+			opts.Logger.Warn("code review failed, continuing", "error", reviewErr)
+		} else if reviewOut != nil {
+			result.CodeReview = reviewOut
+			result.Usage = result.Usage.Add(reviewOut.Usage)
+
+			// Save review output to plan directory.
+			planDir := filepath.Join(plansDir, planName)
+			if saveErr := saveCodeReview(planDir, reviewOut); saveErr != nil {
+				opts.Logger.Warn("failed to save code review", "error", saveErr)
+			}
+		}
 	}
 
 	return result, nil
@@ -317,4 +340,119 @@ func GeneratePlanName(description string, plansDir string) string {
 	}
 
 	return name
+}
+
+// getHeadCommit returns the current HEAD commit hash, or empty string on error.
+func getHeadCommit(projectDir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// runPostReview computes the diff and runs the code review agent.
+func runPostReview(ctx context.Context, opts DevOptions, result *DevResult, beforeCommit, planName, plansDir string) (*CodeReviewOutput, error) {
+	// Compute diff from before orchestration to HEAD.
+	diff, err := gitDiff(opts.ProjectDir, beforeCommit)
+	if err != nil {
+		return nil, fmt.Errorf("computing diff: %w", err)
+	}
+	if strings.TrimSpace(diff) == "" {
+		return nil, nil // no changes to review
+	}
+
+	// Collect plan.md content from all phases.
+	planMD, err := collectPlanMD(filepath.Join(plansDir, planName))
+	if err != nil {
+		return nil, fmt.Errorf("collecting plan content: %w", err)
+	}
+
+	fmt.Println("[dev] Running code review...")
+	reviewOut, err := RunCodeReview(ctx, ReviewOptions{
+		PlanDir:     filepath.Join(plansDir, planName),
+		ProjectDir:  opts.ProjectDir,
+		Diff:        diff,
+		PlanMD:      planMD,
+		Discovery:   result.Discovery,
+		Model:       opts.Model,
+		CommandName: opts.CommandName,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Print review summary.
+	printReviewSummary(reviewOut)
+	return reviewOut, nil
+}
+
+// gitDiff returns the diff between a commit and HEAD.
+func gitDiff(projectDir, fromCommit string) (string, error) {
+	cmd := exec.Command("git", "diff", fromCommit+"..HEAD")
+	cmd.Dir = projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// collectPlanMD reads all plan.md files from a plan directory's phases.
+func collectPlanMD(planDir string) (string, error) {
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		return "", err
+	}
+
+	var parts []string
+	for _, phase := range meta.Phases {
+		planFile := filepath.Join(planDir, phase, "plan.md")
+		data, err := os.ReadFile(planFile)
+		if err != nil {
+			continue // skip phases without plan.md
+		}
+		parts = append(parts, string(data))
+	}
+
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// printReviewSummary prints the code review results to stdout.
+func printReviewSummary(review *CodeReviewOutput) {
+	if review == nil {
+		return
+	}
+
+	var critical, warnings, suggestions int
+	for _, issue := range review.Issues {
+		switch issue.Severity {
+		case "critical":
+			critical++
+		case "warning":
+			warnings++
+		case "suggestion":
+			suggestions++
+		}
+	}
+
+	if len(review.Issues) == 0 {
+		fmt.Println("[dev] Code review: no issues found")
+	} else {
+		fmt.Printf("[dev] Code review: %d critical, %d warnings, %d suggestions\n", critical, warnings, suggestions)
+	}
+	if review.Summary != "" {
+		fmt.Printf("[dev] Review summary: %s\n", review.Summary)
+	}
+}
+
+// saveCodeReview writes the code review output to a JSON file in the plan directory.
+func saveCodeReview(planDir string, review *CodeReviewOutput) error {
+	data, err := json.MarshalIndent(review, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(planDir, "code_review.json"), data, 0644)
 }

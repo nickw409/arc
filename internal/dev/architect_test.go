@@ -365,6 +365,46 @@ func TestRunArchitects_UsageAggregation(t *testing.T) {
 	_ = output.Usage
 }
 
+func TestRunArchitects_UsesTemplate(t *testing.T) {
+	// Verify that RunArchitects loads and renders the architect template.
+	// The mock agent will fail to produce valid JSON, but we verify the
+	// template loading/rendering doesn't error.
+	t.Setenv("MOCK_ECHO_ARGS", "1")
+	t.Setenv("MOCK_JSON_WRAP", "1")
+
+	ctx := context.Background()
+	discovery := &DiscoveryResult{
+		TaskSummary:  "Add auth",
+		Complexity:   ComplexityComplex,
+		Approach:     "Add OAuth middleware",
+		WorkflowType: "feature",
+		RelevantFiles: []FileRef{
+			{Path: "auth.go", Description: "auth handler"},
+		},
+		Requirements: []string{"OAuth"},
+		SuggestedPhases: []PhaseSpec{
+			{Name: "impl", Description: "implement"},
+		},
+	}
+
+	_, err := RunArchitects(ctx, ArchitectOptions{
+		Discovery:   discovery,
+		CommandName: mockBin,
+		Interactive: false,
+	})
+	// All agents will fail to produce valid proposals (mock echoes args),
+	// but the error should be about parsing, not template loading.
+	if err == nil {
+		return // unlikely but acceptable
+	}
+	if strings.Contains(err.Error(), "loading architect template") {
+		t.Fatalf("template loading failed: %v", err)
+	}
+	if strings.Contains(err.Error(), "rendering architect template") {
+		t.Fatalf("template rendering failed: %v", err)
+	}
+}
+
 func TestRunArchitects_InteractiveModeNoAutoSelect(t *testing.T) {
 	ctx := context.Background()
 	discovery := &DiscoveryResult{
