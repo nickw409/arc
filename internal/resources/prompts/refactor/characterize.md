@@ -24,13 +24,7 @@ Write characterization tests that capture the CURRENT behavior of the code being
 
 ## Test File Location
 
-Use descriptive names and register test files in state.json.
 Place test files according to your project's test conventions.
-
-After creating test files:
-```bash
-arc update-state.sh {{plan}} {{phase}} add-test-file "<path_to_test>"
-```
 
 ## Example
 

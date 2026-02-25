@@ -10,7 +10,7 @@ import (
 //go:embed workflows/*.yaml
 var workflowsFS embed.FS
 
-//go:embed prompts/**/*.md prompts/*.md
+//go:embed prompts/**/*.md
 var promptsFS embed.FS
 
 //go:embed templates/*.md

@@ -171,11 +171,7 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 			// Fall back to medium flow
 		} else {
 			result.Usage = result.Usage.Add(archOut.Usage)
-			if opts.Interactive {
-				proposal = archOut.Selected
-			} else {
-				proposal = archOut.Selected
-			}
+			proposal = archOut.Selected
 		}
 
 		result.Proposal = proposal

@@ -267,14 +267,10 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"dev/", // agent prompts loaded outside workflow states
 	}
 	exemptFiles := map[string]bool{
-		"orchestrator.md":          true,
-		"feature/fix.md":           true, // dispute resolution, loaded outside workflow
-		"feature/review.md":        true, // dispute resolution
-		"feature/loop.md":          true, // iteration escalation
-		"direct/multi-phase.md":    true, // loaded by orchestrator for direct multi-phase plans
-		"feature/qa.md":            true, // default prompt for qa block (custom TDD pipelines)
-		"feature/qa-review.md":     true, // default prompt for qa-review block (custom TDD pipelines)
-		"feature/impl-review.md":   true, // default prompt for review block (custom TDD pipelines)
+		"direct/multi-phase.md":  true, // loaded by orchestrator for direct multi-phase plans
+		"feature/qa.md":          true, // default prompt for qa block (custom TDD pipelines)
+		"feature/qa-review.md":   true, // default prompt for qa-review block (custom TDD pipelines)
+		"feature/impl-review.md": true, // default prompt for review block (custom TDD pipelines)
 	}
 
 	refs := allWorkflowPromptRefs(t)
@@ -301,11 +297,7 @@ func TestNoOrphanPrompts(t *testing.T) {
 // TestNoEmptyPromptFiles verifies every embedded prompt file has non-whitespace content.
 // Known placeholder files are exempted.
 func TestNoEmptyPromptFiles(t *testing.T) {
-	exempt := map[string]bool{
-		"common/only.md":    true, // placeholder partial
-		"feature/loop.md":   true, // placeholder for iteration escalation
-		"feature/review.md": true, // placeholder for dispute resolution
-	}
+	exempt := map[string]bool{}
 
 	paths := allPromptPaths(t)
 	for _, p := range paths {
