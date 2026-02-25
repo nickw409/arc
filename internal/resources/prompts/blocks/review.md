@@ -18,27 +18,13 @@ Tests passing: {{state.tests_passing | default: "unknown"}} / {{state.tests_tota
 
 Review the implementation for:
 1. All tests passing
-2. Code follows specification
-3. No test modifications (unless `allow_test_changes` was set)
+2. Code follows the specification
+3. No test files were modified
 4. Code quality and maintainability
 
 ## Response Format
 
-Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
-
-```
-## Verdict
-
-approved
-```
-
-OR
-
-```
-## Verdict
-
-concerns
-```
+Provide your analysis, then end with a verdict and memory section.
 
 Before the verdict, write a memory section:
 

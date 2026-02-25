@@ -17,28 +17,14 @@ Tests passing: {{state.tests_passing | default: "unknown"}} / {{state.tests_tota
 ## Instructions
 
 Review the tests for:
-1. Coverage of all specification requirements
-2. Edge case coverage
-3. Test naming conventions (`qa_{{phase}}_*`)
-4. Test quality and maintainability
+1. Coverage of all test cases in the spec's **## Test Cases** section — every one must be implemented
+2. Coverage of all edge cases in the spec's **## Edge Cases** section
+3. Tests compile and fail correctly (no implementation exists yet)
+4. Test quality: clear names, focused assertions, no testing multiple things in one test
 
 ## Response Format
 
-Provide your analysis, then you MUST end your response with a verdict section in this EXACT format:
-
-```
-## Verdict
-
-approved
-```
-
-OR
-
-```
-## Verdict
-
-gaps_found
-```
+Provide your analysis, then end with a verdict and memory section.
 
 Before the verdict, write a memory section:
 

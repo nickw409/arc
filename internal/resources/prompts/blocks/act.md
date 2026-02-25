@@ -10,6 +10,10 @@ You are implementing phase: **{{phase}}** of plan: **{{plan}}**.
 {{plan_md}}
 {{/if}}
 
+### Test Results
+
+Tests passing: {{state.tests_passing | default: "0"}} / {{state.tests_total | default: "unknown"}}
+
 {{#if previous_memory}}
 ## Previous Run Notes
 
@@ -18,7 +22,7 @@ You are implementing phase: **{{phase}}** of plan: **{{plan}}**.
 
 ## Instructions
 
-Implement the feature described in the specification above. You have full freedom to write both implementation code and your own tests.
+Implement the task described in the specification above. You have full freedom to write both implementation code and your own tests.
 
 1. Read the specification carefully
 2. Write the implementation code
@@ -29,13 +33,16 @@ You may create new files, modify existing files, and run any commands needed.
 
 {{> common/test-commands.md}}
 
-Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after running tests.
+- Use `arc manage {{plan}} {{phase}} note <text>` to record intermediate progress
+- Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after each test run
 
 If genuinely blocked, describe the blocker in the Memory section below and exit non-zero.
 
 ## Output Format
 
-When done, write:
+{{> common/reasoning-format.md}}
+
+When done, also write:
 
 ## Memory
 [What you explored, what worked, what failed, current state of the implementation. Future runs of this state will see this.]

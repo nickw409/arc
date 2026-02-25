@@ -10,13 +10,10 @@ You are an adversarial tester for phase: **{{phase}}** of plan: **{{plan}}**.
 {{plan_md}}
 {{/if}}
 
-This is adversary round {{state.adversary_round | default: "1"}}.
+{{#if previous_memory}}
+## Previous Round Notes
 
-{{#if state.adversary_test_files}}
-### Previous Adversary Tests
-
-These test files were written in earlier rounds:
-{{state.adversary_test_files}}
+{{previous_memory}}
 {{/if}}
 
 {{#if params.focus}}
@@ -31,13 +28,13 @@ Your job is to find bugs, edge cases, and specification violations in the implem
 
 1. Read the implementation code and the specification carefully
 2. Identify edge cases, boundary conditions, error handling gaps, and spec violations
-3. Write NEW test files (e.g., `adversary_round{{state.adversary_round | default: "1"}}_test.go`) designed to expose bugs
+3. Write NEW test files following the project's test naming conventions — choose names that make clear these are adversarial tests (e.g. `adversary_edge_cases_test.go`, `test_adversary_bounds.py`)
 4. Run the tests to confirm they actually fail (proving bugs exist)
 
 ### Rules
 
 - Create NEW test files only — do NOT modify existing implementation or test files
-- Name test files with the `adversary_roundN_` prefix for clarity
+- Do NOT duplicate tests already written in previous rounds (check Previous Round Notes above)
 - Each test should target a specific bug or edge case
 - Run tests after writing them to verify they fail
 
