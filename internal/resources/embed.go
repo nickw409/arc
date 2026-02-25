@@ -80,7 +80,7 @@ func GuideBytes(name string) ([]byte, error) {
 	return guidesFS.ReadFile(filepath.Join("guides", name))
 }
 
-// BlockBytes returns the raw YAML for a block definition (e.g., "adversary-loop").
+// BlockBytes returns the raw YAML for a block definition (e.g., "adversary").
 func BlockBytes(name string) ([]byte, error) {
 	return blocksFS.ReadFile(filepath.Join("blocks", name+".yaml"))
 }

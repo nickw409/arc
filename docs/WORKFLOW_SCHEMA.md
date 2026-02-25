@@ -1113,31 +1113,25 @@ Workflows can be composed from reusable blocks instead of (or in addition to) wr
 ### Block Format
 
 ```yaml
-name: adversary-loop
-description: Adversary tries to break code, impl fixes, loop until convergence
+name: adversary
+description: Adversary writes tests to find bugs in existing code
 params:
-  max_rounds: {default: 3}
+  max_rounds: {default: 5}
   max_turns: {default: 30}
-  focus: {default: ""}
 entry: adversary
-exits: [converged]
+exits: [done]
 states:
   - name: adversary
     prompt: prompts/adversarial/adversary.md
     agent:
       max_turns: ${max_turns}
-      allowed_tools: [View, Write, Bash]
+      allowed_tools: [Read, Grep, Glob, Write, Bash]
     verdicts: [bugs_found, no_bugs_found]
-    next:
-      bugs_found: impl_fix
-      no_bugs_found: $converged
-  - name: impl_fix
-    prompt: prompts/adversarial/impl-fix.md
-    agent:
-      max_turns: ${max_turns}
     constraints:
       max_iterations: ${max_rounds}
-    next: adversary
+    next:
+      bugs_found: adversary
+      no_bugs_found: $done
 ```
 
 ### Parameter Substitution
@@ -1157,7 +1151,7 @@ description: Adversarial testing workflow
 pipeline:
   - block: impl
     params: {max_turns: 45}
-  - block: adversary-loop
+  - block: adversary
     params: {max_rounds: 3, max_turns: 30}
 terminal_states: [complete, blocked]
 ```
@@ -1166,7 +1160,7 @@ terminal_states: [complete, blocked]
 
 **Sequential**: States get block-prefixed names. Exit points wire to the next block's entry:
 ```
-impl.impl → adversary-loop.adversary → adversary-loop.impl_fix → ... → complete
+impl.impl → adversary.adversary → ... → complete
 ```
 
 **Parallel** (pipeline step with `parallel:`):
@@ -1177,10 +1171,10 @@ pipeline:
       strategy: all      # "all" or "any"
       blocks:
         - name: security
-          block: adversary-loop
+          block: adversary
           params: {focus: security}
         - name: correctness
-          block: adversary-loop
+          block: adversary
           params: {focus: correctness}
 ```
 
@@ -1193,7 +1187,7 @@ Parallel groups generate synthetic `_fork_N` and `_join_N` states. The orchestra
 | `impl` | `impl` | max_turns, timeout, model | Free-form implementation |
 | `qa-loop` | `qa`, `qa_review` | max_turns | QA writes tests → review loop |
 | `review` | `impl_review` | max_turns | Implementation review |
-| `adversary-loop` | `adversary`, `impl_fix` | max_rounds, max_turns, focus | Adversarial testing cycle |
+| `adversary` | `adversary` | max_rounds, max_turns | Adversarial bug finding |
 
 ### Composition Validation
 

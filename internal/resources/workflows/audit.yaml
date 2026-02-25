@@ -1,11 +1,14 @@
 name: audit
 version: 1
-description: Adversarial audit of existing code - adversary writes tests to break it, impl fixes bugs
+description: Adversarial audit - adversary finds bugs, then impl fixes them
 
 pipeline:
-  - block: adversary-loop
+  - block: adversary
     params:
       max_rounds: "5"
       max_turns: "30"
+  - block: impl
+    params:
+      max_turns: "45"
 
 terminal_states: [complete, blocked]

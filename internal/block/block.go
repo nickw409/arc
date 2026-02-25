@@ -24,6 +24,27 @@ type ParamDef struct {
 	Default string `yaml:"default"`
 }
 
+// AgentConfigRaw holds agent config as strings for parameter substitution.
+type AgentConfigRaw struct {
+	MaxTurns     string   `yaml:"max_turns"`
+	AllowedTools []string `yaml:"allowed_tools"`
+	Timeout      string   `yaml:"timeout"`
+	Model        string   `yaml:"model"`
+}
+
+// ToAgentConfig converts raw string values to a typed AgentConfig.
+func (r *AgentConfigRaw) ToAgentConfig() *arc.AgentConfig {
+	if r == nil {
+		return nil
+	}
+	return &arc.AgentConfig{
+		MaxTurns:     parseInt(r.MaxTurns),
+		AllowedTools: r.AllowedTools,
+		Timeout:      parseInt(r.Timeout),
+		Model:        r.Model,
+	}
+}
+
 // BlockState is a state definition within a block, using string-typed fields
 // for parameter substitution before conversion to arc.StateConfig.
 type BlockState struct {
@@ -32,19 +53,19 @@ type BlockState struct {
 	Prompt      string           `yaml:"prompt"`
 	Verdicts    []string         `yaml:"verdicts"`
 	Next        map[string]string // parsed from YAML (string → linear, map → branching)
-	Agent       *arc.AgentConfig `yaml:"agent"`
+	Agent       *AgentConfigRaw  `yaml:"agent"`
 	Constraints *ConstraintRaw   `yaml:"constraints"`
 }
 
 // rawBlockState is for YAML parsing, where "next" can be a string or a map.
 type rawBlockState struct {
-	Name        string           `yaml:"name"`
-	Description string           `yaml:"description"`
-	Prompt      string           `yaml:"prompt"`
-	Verdicts    []string         `yaml:"verdicts"`
-	Next        yaml.Node        `yaml:"next"`
-	Agent       *arc.AgentConfig `yaml:"agent"`
-	Constraints *ConstraintRaw   `yaml:"constraints"`
+	Name        string          `yaml:"name"`
+	Description string          `yaml:"description"`
+	Prompt      string          `yaml:"prompt"`
+	Verdicts    []string        `yaml:"verdicts"`
+	Next        yaml.Node       `yaml:"next"`
+	Agent       *AgentConfigRaw `yaml:"agent"`
+	Constraints *ConstraintRaw  `yaml:"constraints"`
 }
 
 // rawBlock mirrors Block but uses rawBlockState for YAML parsing.
@@ -173,17 +194,11 @@ func ResolveParams(b *Block, params map[string]string) (*Block, error) {
 
 		// Resolve agent config
 		if s.Agent != nil {
-			rs.Agent = &arc.AgentConfig{
+			rs.Agent = &AgentConfigRaw{
 				AllowedTools: s.Agent.AllowedTools,
 				Model:        substituteParams(s.Agent.Model, merged),
-			}
-			if s.Agent.MaxTurns > 0 {
-				rs.Agent.MaxTurns = s.Agent.MaxTurns
-			} else {
-				rs.Agent.MaxTurns = parseInt(substituteParams(fmt.Sprintf("%d", s.Agent.MaxTurns), merged))
-			}
-			if s.Agent.Timeout > 0 {
-				rs.Agent.Timeout = s.Agent.Timeout
+				MaxTurns:     substituteParams(s.Agent.MaxTurns, merged),
+				Timeout:      substituteParams(s.Agent.Timeout, merged),
 			}
 		}
 

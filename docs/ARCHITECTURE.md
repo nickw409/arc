@@ -188,22 +188,22 @@ Multiple specialized adversaries attack plans:
 Workflows can be composed from reusable, parameterized blocks rather than written as monolithic YAML. A block defines a self-contained group of states with entry/exit points and substitutable parameters:
 
 ```yaml
-# blocks/adversary-loop.yaml
-name: adversary-loop
+# blocks/adversary.yaml
+name: adversary
 params:
-  max_rounds: {default: 3}
+  max_rounds: {default: 5}
 entry: adversary
-exits: [converged]
+exits: [done]
 states:
   - name: adversary
-    next: {bugs_found: impl_fix, no_bugs_found: $converged}
-  - name: impl_fix
-    next: adversary
+    constraints:
+      max_iterations: ${max_rounds}
+    next: {bugs_found: adversary, no_bugs_found: $done}
 ```
 
 Workflows compose blocks into pipelines. The loader resolves blocks into a flat state machine (namespacing states as `block.state`) so the runtime doesn't change.
 
-Built-in blocks: `impl`, `qa-loop`, `review`, `adversary-loop`.
+Built-in blocks: `impl`, `qa-loop`, `review`, `adversary`.
 
 ### 4. Git Worktree Isolation
 

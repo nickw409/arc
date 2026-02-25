@@ -236,11 +236,6 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent produced no output (empty)")}
 	}
 
-	// Handle non-zero exit
-	if spawnResult.ExitCode != 0 {
-		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent exited with code %d", spawnResult.ExitCode)}
-	}
-
 	// Determine next state
 	validVerdicts := machine.ValidVerdicts(phaseState.CurrentState)
 
@@ -248,15 +243,22 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	var nextState string
 
 	if len(validVerdicts) == 0 {
-		// Linear state: advance without verdict
+		// Linear state: non-zero exit is a hard failure (no verdict to salvage)
+		if spawnResult.ExitCode != 0 {
+			return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent exited with code %d", spawnResult.ExitCode)}
+		}
 		nextState, err = machine.NextState(phaseState.CurrentState, "")
 		if err != nil {
 			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("state transition failed: %w", err)}
 		}
 	} else {
-		// Branching state: extract verdict
+		// Branching state: try to extract verdict even on non-zero exit
+		// (agent may have written verdict before hitting max-turns)
 		verdict, err = prompt.ExtractVerdict(spawnResult.Output, validVerdicts)
 		if err != nil {
+			if spawnResult.ExitCode != 0 {
+				return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent exited with code %d (verdict extraction also failed: %v)", spawnResult.ExitCode, err)}
+			}
 			return &arc.IterationResult{Action: arc.ActionRetry, Err: err}
 		}
 
@@ -342,7 +344,7 @@ func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState,
 
 // MapStateToStatus maps a workflow state name to a phase_status value.
 func MapStateToStatus(stateName string) string {
-	// Strip block namespace prefix (e.g., "adversary-loop.adversary" → "adversary")
+	// Strip block namespace prefix (e.g., "adversary.adversary" → "adversary")
 	base := stateName
 	if idx := strings.LastIndex(stateName, "."); idx >= 0 {
 		base = stateName[idx+1:]

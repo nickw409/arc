@@ -240,7 +240,7 @@ description: Adversarial testing
 pipeline:
   - block: impl
     params: {max_turns: "45"}
-  - block: adversary-loop
+  - block: adversary
     params: {max_rounds: "3", max_turns: "30"}
 
 terminal_states: [complete, blocked]
@@ -258,16 +258,16 @@ terminal_states: [complete, blocked]
 		t.Fatalf("expected entry 'impl.impl', got %q", w.EntryState)
 	}
 
-	// Should have: impl.impl, adversary-loop.adversary, adversary-loop.impl_fix, complete, blocked
-	if len(w.States) != 5 {
-		t.Fatalf("expected 5 states, got %d", len(w.States))
+	// Should have: impl.impl, adversary.adversary, complete, blocked
+	if len(w.States) != 4 {
+		t.Fatalf("expected 4 states, got %d", len(w.States))
 	}
 
 	stateNames := make(map[string]bool)
 	for _, s := range w.States {
 		stateNames[s.Name] = true
 	}
-	for _, name := range []string{"impl.impl", "adversary-loop.adversary", "adversary-loop.impl_fix", "complete", "blocked"} {
+	for _, name := range []string{"impl.impl", "adversary.adversary", "complete", "blocked"} {
 		if !stateNames[name] {
 			t.Fatalf("missing state %q", name)
 		}
@@ -279,40 +279,31 @@ terminal_states: [complete, blocked]
 		t.Fatalf("machine entry != 'impl.impl'")
 	}
 
-	// impl.impl → adversary-loop.adversary (linear)
+	// impl.impl → adversary.adversary (linear)
 	next, err := m.NextState("impl.impl", "")
 	if err != nil {
 		t.Fatalf("NextState from impl.impl: %v", err)
 	}
-	if next != "adversary-loop.adversary" {
-		t.Fatalf("expected adversary-loop.adversary, got %q", next)
+	if next != "adversary.adversary" {
+		t.Fatalf("expected adversary.adversary, got %q", next)
 	}
 
-	// adversary-loop.adversary → bugs_found → adversary-loop.impl_fix
-	next, err = m.NextState("adversary-loop.adversary", "bugs_found")
+	// adversary.adversary → bugs_found → adversary.adversary (self-loop)
+	next, err = m.NextState("adversary.adversary", "bugs_found")
 	if err != nil {
 		t.Fatalf("NextState from adversary bugs_found: %v", err)
 	}
-	if next != "adversary-loop.impl_fix" {
-		t.Fatalf("expected adversary-loop.impl_fix, got %q", next)
+	if next != "adversary.adversary" {
+		t.Fatalf("expected adversary.adversary (self-loop), got %q", next)
 	}
 
-	// adversary-loop.adversary → no_bugs_found → complete
-	next, err = m.NextState("adversary-loop.adversary", "no_bugs_found")
+	// adversary.adversary → no_bugs_found → complete
+	next, err = m.NextState("adversary.adversary", "no_bugs_found")
 	if err != nil {
 		t.Fatalf("NextState from adversary no_bugs_found: %v", err)
 	}
 	if next != "complete" {
 		t.Fatalf("expected complete, got %q", next)
-	}
-
-	// adversary-loop.impl_fix → adversary-loop.adversary (linear)
-	next, err = m.NextState("adversary-loop.impl_fix", "")
-	if err != nil {
-		t.Fatalf("NextState from impl_fix: %v", err)
-	}
-	if next != "adversary-loop.adversary" {
-		t.Fatalf("expected adversary-loop.adversary, got %q", next)
 	}
 }
 

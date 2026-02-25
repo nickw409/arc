@@ -37,7 +37,7 @@ type ParallelGroup struct {
 
 // ComposeSequential takes a list of resolved blocks and produces a flat
 // workflow. State names are namespaced with the block name (e.g.,
-// "adversary-loop.adversary"). Exit points wire to the next block's entry.
+// "adversary.adversary"). Exit points wire to the next block's entry.
 func ComposeSequential(blocks []ResolvedBlock) (*arc.Workflow, error) {
 	if len(blocks) == 0 {
 		return nil, fmt.Errorf("no blocks to compose")
@@ -267,7 +267,7 @@ func blockStateToConfig(bs BlockState, prefix string) arc.StateConfig {
 		Description: bs.Description,
 		Prompt:      bs.Prompt,
 		Verdicts:    bs.Verdicts,
-		Agent:       bs.Agent,
+		Agent:       bs.Agent.ToAgentConfig(),
 	}
 
 	if bs.Constraints != nil {

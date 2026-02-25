@@ -19,25 +19,20 @@ func makeImplBlock() *Block {
 	}
 }
 
-func makeAdversaryLoopBlock() *Block {
+func makeAdversaryBlock() *Block {
 	return &Block{
-		Name:  "adversary-loop",
+		Name:  "adversary",
 		Entry: "adversary",
-		Exits: []string{"converged"},
+		Exits: []string{"done"},
 		States: []BlockState{
 			{
 				Name:     "adversary",
 				Prompt:   "prompts/adversarial/adversary.md",
 				Verdicts: []string{"bugs_found", "no_bugs_found"},
 				Next: map[string]string{
-					"bugs_found":    "impl_fix",
-					"no_bugs_found": "$converged",
+					"bugs_found":    "adversary",
+					"no_bugs_found": "$done",
 				},
-			},
-			{
-				Name:   "impl_fix",
-				Prompt: "prompts/adversarial/impl-fix.md",
-				Next:   map[string]string{"": "adversary"},
 			},
 		},
 	}
@@ -46,7 +41,7 @@ func makeAdversaryLoopBlock() *Block {
 func TestComposeSequential(t *testing.T) {
 	blocks := []ResolvedBlock{
 		{Name: "impl", Block: makeImplBlock()},
-		{Name: "adversary-loop", Block: makeAdversaryLoopBlock()},
+		{Name: "adversary", Block: makeAdversaryBlock()},
 	}
 
 	wf, err := ComposeSequential(blocks)
@@ -59,9 +54,9 @@ func TestComposeSequential(t *testing.T) {
 		t.Fatalf("expected entry 'impl.impl', got %q", wf.EntryState)
 	}
 
-	// Should have: impl.impl, adversary-loop.adversary, adversary-loop.impl_fix, complete, blocked
-	if len(wf.States) != 5 {
-		t.Fatalf("expected 5 states, got %d", len(wf.States))
+	// Should have: impl.impl, adversary.adversary, complete, blocked
+	if len(wf.States) != 4 {
+		t.Fatalf("expected 4 states, got %d", len(wf.States))
 	}
 
 	// Verify state names
@@ -69,42 +64,32 @@ func TestComposeSequential(t *testing.T) {
 	for _, s := range wf.States {
 		names[s.Name] = true
 	}
-	for _, expected := range []string{"impl.impl", "adversary-loop.adversary", "adversary-loop.impl_fix", "complete", "blocked"} {
+	for _, expected := range []string{"impl.impl", "adversary.adversary", "complete", "blocked"} {
 		if !names[expected] {
 			t.Fatalf("missing state %q", expected)
 		}
 	}
 
-	// Verify impl.impl exits to adversary-loop.adversary
+	// Verify impl.impl exits to adversary.adversary
 	for _, s := range wf.States {
 		if s.Name == "impl.impl" {
 			next := s.Transition.Branches[""]
-			if next != "adversary-loop.adversary" {
-				t.Fatalf("impl.impl should transition to adversary-loop.adversary, got %q", next)
+			if next != "adversary.adversary" {
+				t.Fatalf("impl.impl should transition to adversary.adversary, got %q", next)
 			}
 		}
 	}
 
-	// Verify adversary-loop.adversary no_bugs_found exits to complete
+	// Verify adversary.adversary no_bugs_found exits to complete, bugs_found self-loops
 	for _, s := range wf.States {
-		if s.Name == "adversary-loop.adversary" {
+		if s.Name == "adversary.adversary" {
 			next := s.Transition.Branches["no_bugs_found"]
 			if next != "complete" {
 				t.Fatalf("adversary no_bugs_found should go to complete, got %q", next)
 			}
 			bugNext := s.Transition.Branches["bugs_found"]
-			if bugNext != "adversary-loop.impl_fix" {
-				t.Fatalf("adversary bugs_found should go to adversary-loop.impl_fix, got %q", bugNext)
-			}
-		}
-	}
-
-	// Verify adversary-loop.impl_fix loops back to adversary-loop.adversary
-	for _, s := range wf.States {
-		if s.Name == "adversary-loop.impl_fix" {
-			next := s.Transition.Branches[""]
-			if next != "adversary-loop.adversary" {
-				t.Fatalf("impl_fix should loop to adversary-loop.adversary, got %q", next)
+			if bugNext != "adversary.adversary" {
+				t.Fatalf("adversary bugs_found should self-loop to adversary.adversary, got %q", bugNext)
 			}
 		}
 	}
@@ -124,13 +109,13 @@ func TestComposeSequentialEmpty(t *testing.T) {
 
 func TestComposePipelineSequential(t *testing.T) {
 	blockDefs := map[string]*Block{
-		"impl":           makeImplBlock(),
-		"adversary-loop": makeAdversaryLoopBlock(),
+		"impl":      makeImplBlock(),
+		"adversary": makeAdversaryBlock(),
 	}
 
 	steps := []PipelineStep{
 		{Block: "impl"},
-		{Block: "adversary-loop"},
+		{Block: "adversary"},
 	}
 
 	wf, groups, err := ComposePipeline(steps, blockDefs)
@@ -149,8 +134,8 @@ func TestComposePipelineSequential(t *testing.T) {
 
 func TestComposePipelineParallel(t *testing.T) {
 	blockDefs := map[string]*Block{
-		"impl":           makeImplBlock(),
-		"adversary-loop": makeAdversaryLoopBlock(),
+		"impl":      makeImplBlock(),
+		"adversary": makeAdversaryBlock(),
 	}
 
 	steps := []PipelineStep{
@@ -159,8 +144,8 @@ func TestComposePipelineParallel(t *testing.T) {
 			Parallel: &ParallelStep{
 				Strategy: "all",
 				Blocks: []ParallelBlockRef{
-					{Name: "security", Block: "adversary-loop", Params: map[string]string{"focus": "security"}},
-					{Name: "correctness", Block: "adversary-loop", Params: map[string]string{"focus": "correctness"}},
+					{Name: "security", Block: "adversary", Params: map[string]string{"focus": "security"}},
+					{Name: "correctness", Block: "adversary", Params: map[string]string{"focus": "correctness"}},
 				},
 			},
 		},
@@ -212,7 +197,7 @@ func TestComposePipelineMissingBlock(t *testing.T) {
 func TestValidateComposition(t *testing.T) {
 	blocks := []ResolvedBlock{
 		{Name: "impl", Block: makeImplBlock()},
-		{Name: "adversary-loop", Block: makeAdversaryLoopBlock()},
+		{Name: "adversary", Block: makeAdversaryBlock()},
 	}
 
 	wf, err := ComposeSequential(blocks)

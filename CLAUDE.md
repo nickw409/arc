@@ -114,8 +114,8 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 - **investigation** — Research: `research → draft → review → complete`
 - **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`
 - **performance** — Benchmark-driven: `baseline → analyze → optimize → benchmark → complete`
-- **adversarial** — Composed from blocks: `impl → adversary-loop(adversary ↔ impl_fix) → complete`
-- **audit** — Adversarial-only: `adversary-loop(adversary ↔ impl_fix) → complete`
+- **adversarial** — Composed from blocks: `impl → adversary → complete`
+- **audit** — Adversarial + fix: `adversary → impl → complete`
 - **direct** — Single-phase: `impl → complete` (used by `arc dev` for simple tasks)
 
 ## Releases

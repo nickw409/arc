@@ -103,8 +103,8 @@ Report results to the user. Suggest `arc_archive` to clean up.
 | **refactor** | characterize → char_review → refactor → verify | Restructuring without changing behavior |
 | **investigation** | research → draft → review | Research, answering questions (no code changes) |
 | **performance** | baseline → analyze → optimize → benchmark | Making code faster, reducing memory |
-| **adversarial** | impl → adversary-loop | Implementation with adversarial testing |
-| **audit** | adversary-loop | Adversarial-only testing of existing code |
+| **adversarial** | impl → adversary | Implementation with adversarial testing |
+| **audit** | adversary | Adversarial-only testing of existing code |
 | **direct** | execute | Single-step, simple tasks |
 
 ### Custom Workflows
@@ -118,7 +118,7 @@ When a task doesn't fit a preset, compose a custom workflow from blocks. This is
 | **impl** | Free-form implementation (code + tests) | impl → done |
 | **qa-loop** | Write tests, review finds gaps, loop until approved | qa → qa_review → approved |
 | **review** | Review implementation, loop on concerns | impl_review → approved |
-| **adversary-loop** | Adversary writes failing tests, impl fixes, loop until convergence | adversary → impl_fix → converged |
+| **adversary** | Adversary writes tests to find bugs, self-loops until no bugs found | adversary → done |
 
 **Composing a custom workflow:**
 
@@ -130,11 +130,11 @@ pipeline:
   - block: investigate
   - block: impl
     params: {max_turns: "45"}
-  - block: adversary-loop
+  - block: adversary
     params: {max_rounds: "3"}
 ```
 
-Blocks accept parameters to tune behavior (max turns, max rounds, model). States within blocks are namespaced (e.g., `adversary-loop.adversary`).
+Blocks accept parameters to tune behavior (max turns, max rounds, model). States within blocks are namespaced (e.g., `adversary.adversary`).
 
 **When to use custom workflows:**
 - Task combines concerns that span multiple presets (research + implementation + benchmarking)

@@ -1,11 +1,11 @@
 name: adversarial
 version: 1
-description: Adversarial testing - implement freely, adversary breaks it, fix until convergence
+description: Adversarial testing - implement freely, then adversary tries to break it
 
 pipeline:
   - block: impl
     params: {max_turns: "45"}
-  - block: adversary-loop
+  - block: adversary
     params: {max_rounds: "3", max_turns: "30"}
 
 terminal_states: [complete, blocked]

@@ -172,7 +172,7 @@ Five workflow types, each with its own state machine and prompt set:
 | **investigation** | `research` | Research only, no code changes, outputs documentation |
 | **refactor** | `characterize` | Characterization tests must pass before and after changes |
 | **performance** | `baseline` | Benchmarks drive optimization, not unit tests |
-| **adversarial** | `impl` | Implement freely, then adversary writes failing tests, fix until convergence |
+| **adversarial** | `impl` | Implement freely, then adversary writes tests to find bugs |
 | **direct** | `impl` | Single-phase execution for simple tasks (used by `arc dev`) |
 
 Workflows are defined as YAML state machines in `workflows/`. The **adversarial** and **direct** workflows are composed from reusable blocks (see Composable Blocks below).
@@ -239,23 +239,21 @@ All versions are backwards compatible — V1 workflows run on the V5 engine.
 Workflows can be composed from reusable, parameterized blocks instead of writing monolithic YAML state machines. A block is a self-contained group of states with entry/exit points:
 
 ```yaml
-# blocks/adversary-loop.yaml
-name: adversary-loop
+# blocks/adversary.yaml
+name: adversary
 params:
-  max_rounds: {default: 3}
+  max_rounds: {default: 5}
   max_turns: {default: 30}
 entry: adversary
-exits: [converged]
+exits: [done]
 states:
   - name: adversary
     verdicts: [bugs_found, no_bugs_found]
-    next:
-      bugs_found: impl_fix
-      no_bugs_found: $converged
-  - name: impl_fix
     constraints:
       max_iterations: ${max_rounds}
-    next: adversary
+    next:
+      bugs_found: adversary
+      no_bugs_found: $done
 ```
 
 Workflows compose blocks into pipelines:
@@ -266,13 +264,13 @@ name: adversarial
 pipeline:
   - block: impl
     params: {max_turns: 45}
-  - block: adversary-loop
+  - block: adversary
     params: {max_rounds: 3}
 ```
 
-The loader resolves blocks into a flat state machine at load time — the runtime always operates on a flat state machine. States are namespaced by block (e.g., `adversary-loop.adversary`). Exit points wire to the next block's entry.
+The loader resolves blocks into a flat state machine at load time — the runtime always operates on a flat state machine. States are namespaced by block (e.g., `adversary.adversary`). Exit points wire to the next block's entry.
 
-Built-in blocks: `impl`, `qa-loop`, `review`, `adversary-loop`.
+Built-in blocks: `impl`, `qa-loop`, `review`, `adversary`.
 
 ## Git Worktree Isolation
 
