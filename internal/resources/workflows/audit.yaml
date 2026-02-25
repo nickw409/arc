@@ -1,0 +1,11 @@
+name: audit
+version: 1
+description: Adversarial audit of existing code - adversary writes tests to break it, impl fixes bugs
+
+pipeline:
+  - block: adversary-loop
+    params:
+      max_rounds: "5"
+      max_turns: "30"
+
+terminal_states: [complete, blocked]

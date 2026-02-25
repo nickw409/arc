@@ -39,6 +39,6 @@ func newPlanCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&workflowType, "type", "feature", "Workflow type (feature, bugfix, investigation, refactor, performance)")
+	cmd.Flags().StringVar(&workflowType, "type", "feature", "Workflow type (feature, bugfix, investigation, refactor, performance, audit)")
 	return cmd
 }

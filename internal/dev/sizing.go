@@ -36,7 +36,7 @@ func ValidateComplexity(result *DiscoveryResult) TaskComplexity {
 // Returns the workflow type, or "feature" as default if the type is unrecognized.
 func ValidateWorkflowType(workflowType string) string {
 	switch workflowType {
-	case "feature", "bugfix", "investigation", "refactor", "performance", "direct":
+	case "feature", "bugfix", "investigation", "refactor", "performance", "direct", "audit":
 		return workflowType
 	default:
 		return "feature"
