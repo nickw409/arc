@@ -767,6 +767,11 @@ func (h *handlerContext) handleDiscover(ctx context.Context, req mcp.CallToolReq
 		Model:           model,
 	})
 	if err != nil {
+		// If the agent ran but output didn't parse as structured JSON,
+		// return the raw output — it's still useful analysis.
+		if out != nil && out.Raw != "" {
+			return mcp.NewToolResultText(out.Raw), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("discovery failed: %v", err)), nil
 	}
 

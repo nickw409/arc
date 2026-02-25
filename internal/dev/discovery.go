@@ -67,7 +67,12 @@ func RunDiscovery(ctx context.Context, opts DiscoveryOptions) (*DiscoveryOutput,
 
 	parsed, err := ParseDiscoveryOutput(spawnResult.Output)
 	if err != nil {
-		return nil, err
+		// Return partial output with Raw populated so callers can
+		// still use the unstructured agent output.
+		return &DiscoveryOutput{
+			Usage: spawnResult.Usage,
+			Raw:   spawnResult.Output,
+		}, err
 	}
 
 	return &DiscoveryOutput{
