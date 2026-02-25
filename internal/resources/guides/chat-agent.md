@@ -8,70 +8,137 @@ You have Arc orchestration tools available via MCP. Arc is an AI-powered workflo
 - Running tests, checking status
 - Anything completable in a few edits
 
-**Use `arc_dev`** for:
-- Medium tasks where you'd benefit from automated planning and execution
-- Tasks you could describe in a sentence or two
-- When you're unsure about complexity — `arc_dev` analyzes the task and picks the right approach
+**Use Arc** for anything that would take more than a few edits, involves multiple files or packages, or benefits from structured test-driven development. You have the same capabilities as `arc_dev` — discovery, planning, review, execution — but with more control because you can steer each step.
 
-**Use `arc_plan` → `arc_review` → `arc_run`** for:
-- Large multi-phase work (new features, major refactors)
-- Tasks where you want fine control over the plan and phases
-- When you need to customize workflow type or phase structure
+## The Workflow
 
-## Quick Start
+### Step 1: Understand the Task
 
-1. **Simplest path**: `arc_dev` with a task description — it handles everything.
-2. **Manual path**: `arc_plan` → fill in plan.md → `arc_review` → `arc_run`.
-3. **Check on things**: `arc_status` or `arc_list_plans` at any time.
+Talk to the user. Clarify ambiguities about what they want. You don't need to explore the codebase yourself — that's what discovery is for. Focus on understanding the *goal*.
+
+### Step 2: Discovery
+
+Use `arc_dev`-style discovery to analyze the codebase. This identifies relevant files, patterns, dependencies, and task complexity. Don't manually grep through the codebase to figure out what exists — let discovery do that work.
+
+### Step 3: Plan
+
+Based on discovery, decide on:
+- **Phase structure** — what units of work, in what order
+- **Workflow type** — preset or custom (see Workflow Types and Custom Workflows below)
+- **Plan content** — concrete plan.md for each phase
+
+Call `arc_plan` with the plan name, workflow type, and phase list. Then write each phase's `plan.md` using Edit. Plans must be concrete:
+- Exact file paths to create/modify
+- Complete function signatures with types
+- Test cases with real input values and expected outputs
+- A DO NOT section listing anticipated mistakes
+- Edge cases enumerated explicitly
+
+Keep phases small — aim for ~15 iterations max. If a phase touches >10 files, split it.
+
+### Step 4: Review
+
+Call `arc_review`. This runs 5 adversaries in a single auto-remediation pass — they find issues and apply fixes mechanically. No iteration loop, no manual judgment needed from you. The review is a quick sanity check, not a thorough audit. If something slips through, you'll catch it during intervention.
+
+### Step 5: Execute
+
+Call `arc_run`. It returns immediately — the orchestrator runs in the background. You are now free to do other work: plan the next task, answer user questions, explore the codebase.
+
+### Step 6: Supervise
+
+Poll `arc_run_status` to check progress. The pipeline handles mechanical retries on its own (transient errors, empty output, missing verdicts). It does not try to be smart about escalation — no model switching, no automated rollback, no stuck analysis. When retries are exhausted and a phase gets blocked, the run stops.
+
+### Step 7: Intervene on Failure
+
+When a run stops with a failure, you are the escalation system. The pipeline tried mechanical retries and couldn't fix it — now you bring judgment:
+
+1. Read the failed phase's state with `arc_manage` action `show`
+2. Inspect test output and the agent's last attempt with your normal tools
+3. Diagnose the real problem:
+   - **Ambiguous plan** — edit plan.md to be more specific
+   - **Phase too large** — split it into smaller phases
+   - **Wrong approach** — rewrite the relevant plan section
+   - **Environment issue** — fix the underlying problem
+   - **Genuinely hard** — ask the user for guidance
+4. Reset the phase with `arc_manage` action `pending` if needed
+5. Call `arc_run` to resume
+
+This loop repeats until the plan completes or you need human input.
+
+### Step 8: Completion
+
+Report results to the user. Suggest `arc_archive` to clean up.
 
 ## Available Tools
 
 | Tool | Purpose |
 |------|---------|
-| `arc_dev` | End-to-end: analyze task, generate plan, review, execute |
 | `arc_plan` | Create a plan with named phases and workflow type |
-| `arc_review` | Adversarial review with auto-remediation (required before `arc_run`) |
-| `arc_run` | Launch orchestrator asynchronously — returns immediately |
-| `arc_run_status` | Check progress of a running/completed arc_run |
-| `arc_run_cancel` | Cancel a running arc_run |
-| `arc_iterate` | Run a single phase iteration |
+| `arc_review` | Single-pass adversarial review with auto-remediation |
+| `arc_run` | Launch orchestrator async — returns immediately |
+| `arc_run_status` | Check progress of a running/completed run |
+| `arc_run_cancel` | Cancel a running orchestrator |
+| `arc_iterate` | Run a single phase iteration (manual control) |
 | `arc_status` | Show plan/phase status |
-| `arc_list_plans` | List all active plans with workflow type and review status |
+| `arc_list_plans` | List all active plans |
 | `arc_manage` | Manage phase state (see actions below) |
 | `arc_archive` | Archive a completed plan |
-| `arc_guide` | Print the full Arc reference guide (detailed) |
+| `arc_guide` | Print the full Arc reference guide |
+| `arc_dev` | Fully automated end-to-end pipeline (no supervision) |
 
 ## Workflow Types
 
-Choose the workflow type that matches the task:
+### Preset Workflows
 
 | Type | Flow | When to use |
 |------|------|-------------|
 | **feature** | qa → qa_review → impl → impl_review | New functions, types, modules, APIs |
 | **bugfix** | investigate → regression_tests → test_review → fix → fix_review | Fixing incorrect behavior |
 | **refactor** | characterize → char_review → refactor → verify | Restructuring without changing behavior |
-| **investigation** | research → draft → review | Research, audits, answering questions (no code changes) |
+| **investigation** | research → draft → review | Research, answering questions (no code changes) |
 | **performance** | baseline → analyze → optimize → benchmark | Making code faster, reducing memory |
 | **adversarial** | impl → adversary-loop | Implementation with adversarial testing |
 | **audit** | adversary-loop | Adversarial-only testing of existing code |
-| **direct** | impl | Single-phase, simple tasks |
+| **direct** | execute | Single-step, simple tasks |
 
-## Writing Good Plans
+### Custom Workflows
 
-When using `arc_plan`, the scaffolding creates empty `plan.md` templates. Each phase's `plan.md` needs:
+When a task doesn't fit a preset, compose a custom workflow from blocks. This is one of Arc's most powerful features — use it when the preset workflows are a poor fit.
 
-- **Objective** — One sentence describing what the phase accomplishes
-- **Files** — Explicit paths to create/modify (no vague references)
-- **Types and Signatures** — Complete, exact function signatures. No pseudocode
-- **Test Cases** — Concrete inputs and expected outputs with real values
-- **DO NOT** — Anticipated mistakes the agent should avoid
-- **Edge Cases** — Enumerated boundary conditions
+**Available blocks:**
 
-Key rules:
-- Be concrete, not vague. "Handle errors appropriately" → write the exact error types.
-- Keep phases small — aim for ~15 iterations max. If a phase touches >10 files, split it.
-- Test cases need real values: name, input, expected output. Not "test the edge cases."
-- Call `arc_guide` for the full plan template and detailed guidelines.
+| Block | What it does | Entry → Exit |
+|-------|-------------|--------------|
+| **impl** | Free-form implementation (code + tests) | impl → done |
+| **qa-loop** | Write tests, review finds gaps, loop until approved | qa → qa_review → approved |
+| **review** | Review implementation, loop on concerns | impl_review → approved |
+| **adversary-loop** | Adversary writes failing tests, impl fixes, loop until convergence | adversary → impl_fix → converged |
+
+**Composing a custom workflow:**
+
+A workflow pipeline chains blocks. Each block's exit wires to the next block's entry. Example — "research, then implement, then adversarial test":
+
+```yaml
+name: research-and-harden
+pipeline:
+  - block: investigate
+  - block: impl
+    params: {max_turns: "45"}
+  - block: adversary-loop
+    params: {max_rounds: "3"}
+```
+
+Blocks accept parameters to tune behavior (max turns, max rounds, model). States within blocks are namespaced (e.g., `adversary-loop.adversary`).
+
+**When to use custom workflows:**
+- Task combines concerns that span multiple presets (research + implementation + benchmarking)
+- You need adversarial testing on only some phases
+- The review/QA structure differs from any preset
+- The user describes a process that doesn't match the standard flows
+
+**When to stick with presets:**
+- Task clearly fits one category (pure feature, pure bugfix, etc.)
+- You're unsure — start with a preset, switch to custom if it doesn't work
 
 ## Managing Phases
 
@@ -90,25 +157,10 @@ Key rules:
 | `iteration` | `iteration` | Set iteration number |
 | `copy-from` | `source_phase` | Copy state from another phase |
 
-## Supervising Runs
+## Key Principles
 
-`arc_run` is async — it launches the orchestrator in the background and returns immediately. This lets you do other work (plan the next task, answer questions, read code) while phases execute. Use this workflow to supervise:
-
-1. **Start the run**: `arc_run` with the plan name. You get back a confirmation immediately.
-2. **Poll for progress**: Call `arc_run_status` periodically (every 30-60 seconds for long runs, or when the user asks). It shows elapsed time and current phase states.
-3. **On success**: `arc_run_status` returns the final result with status "complete" and a phase summary. Report this to the user and suggest `arc_archive` to clean up.
-4. **On failure**: The run stops automatically when a phase fails. `arc_run_status` returns status "failed" with the failed phase name and reason. Now you can intervene:
-   - Read the failed phase's state: `arc_manage` with action "show"
-   - Inspect the code and test output using your normal tools (Read, Bash)
-   - Fix the issue directly with Edit, or reset the phase with `arc_manage` action "pending"
-   - Re-run with `arc_run`
-5. **To cancel**: `arc_run_cancel` stops a running orchestrator. Use this if the user wants to abort or if you need to change the plan mid-run.
-
-**Key point**: You are not blocked while a run is in progress. You can plan ahead, investigate other parts of the codebase, or work on unrelated tasks. Check back on the run when you're ready or when the user asks.
-
-## Important Notes
-
-- **Review before run**: `arc_run` requires review status "approved" or "conditional". Always run `arc_review` first.
-- **`arc_dev` is self-contained**: It handles planning, review, and execution automatically. Use `arc_dev` when you don't need manual control.
-- **`arc_iterate` for single steps**: If you want to advance one phase by one iteration (useful for debugging or manual control).
-- **Archive when done**: Use `arc_archive` to move completed plans out of the active directory.
+- **You are the supervisor, not the executor.** Sub-agents write code. The pipeline manages retries. You make judgment calls — what to build, how to structure it, what to do when something fails.
+- **Don't explore manually when arc can discover.** Use discovery for codebase analysis. Use your normal tools only for quick lookups or when you already know exactly what you need.
+- **Don't over-review.** One auto-remediation pass catches the obvious problems. You catch the rest during intervention with real signal from actual failures.
+- **Stay unblocked.** While a run is in progress, do other work. Plan ahead, answer questions, explore. Don't sit idle polling.
+- **Fail fast, fix smart.** When the pipeline can't make progress, it stops and tells you why. Diagnose the real problem instead of blindly retrying.
