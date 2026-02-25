@@ -67,6 +67,18 @@ arc plan --type bugfix <plan-name> <phase1> [phase2] ...
 
 This scaffolds a plan directory with a `plan.md` file for each phase. You then fill in each `plan.md` with the detailed specification.
 
+**Plan file paths:** After `arc plan`, each phase's spec lives at:
+
+```
+.plans/active/<plan-name>/<phase-name>/plan.md
+```
+
+For example, a plan named `fix-auth` with phases `investigate` and `fix`:
+- `.plans/active/fix-auth/investigate/plan.md`
+- `.plans/active/fix-auth/fix/plan.md`
+
+Write the phase specification to this path using the Edit or Write tool before running `arc review`.
+
 ### Plan Structure
 
 Every phase's `plan.md` must contain these sections:
@@ -180,15 +192,17 @@ impl.act → check.adversary → no_bugs_found → complete
 | `complete` | Phase done |
 | `blocked` | Requires human intervention |
 
+**Actual `current_state` values:** `impl.act` → `check.adversary` → `complete`
+
 **When to use:** Adding new functions, types, modules, commands, APIs, or any net-new capability.
 
-**TDD variant (example pipeline):** If you want tests written before implementation, compose a custom workflow using the `qa` and `act` blocks with your own prompts:
+**TDD variant (example pipeline):** If you want tests written before implementation, compose a custom workflow using the `tests` and `act` blocks with your own prompts:
 
 ```yaml
 name: feature-tdd
 version: 1
 pipeline:
-  - block: qa
+  - block: tests
     name: tests
     params:
       max_turns: "100"
@@ -224,6 +238,8 @@ investigate → regression_tests → test_review → fix → fix_review → comp
 | `fix` | Implement the fix |
 | `fix_review` | Review fix implementation |
 
+**Actual `current_state` values:** `investigate.act` → `regression_tests.tests` → `test_review.qa_review` → `fix.act` → `fix_review.impl_review` → `complete`
+
 **When to use:** Fixing a bug where the current behavior differs from the expected behavior.
 
 ### investigation
@@ -239,6 +255,8 @@ research → draft → review → complete
 | `research` | Examine codebase and gather information |
 | `draft` | Write findings document |
 | `review` | Review findings for completeness |
+
+**Actual `current_state` values:** `research.act` → `draft.act` → `review.judge` → `complete`
 
 **When to use:** Understanding how something works, evaluating options, auditing code, answering technical questions.
 
@@ -257,6 +275,8 @@ characterize → char_review → refactor → verify → complete
 | `refactor` | Perform structural changes |
 | `verify` | Verify all characterization tests still pass |
 
+**Actual `current_state` values:** `characterize.tests` → `char_review.qa_review` → `refactor.act` → `verify.impl_review` → `complete`
+
 **When to use:** Restructuring modules, renaming, extracting abstractions, consolidating duplicated code.
 
 ### performance
@@ -274,6 +294,8 @@ baseline → analyze → optimize → benchmark → complete
 | `optimize` | Implement optimizations |
 | `benchmark` | Verify improvement and correctness |
 
+**Actual `current_state` values:** `baseline.act` → `analyze.act` → `optimize.act` → `benchmark.act` → `complete`
+
 **When to use:** Making code faster, reducing memory usage, improving throughput.
 
 ### audit
@@ -290,7 +312,25 @@ audit (adversary) → bugs_found → fix (impl) → done → audit
 | `audit` | Write adversarial tests to find bugs in existing code |
 | `fix` | Fix the bugs found by the adversary |
 
+**Actual `current_state` values:** `audit.adversary` → `fix.act` → `complete`
+
 **When to use:** Hardening existing code against edge cases and bugs without a known defect to fix.
+
+### direct
+
+Single-pass execution. No review loop, no adversary — just runs and exits.
+
+```
+execute → complete
+```
+
+| State | Purpose |
+|-------|---------|
+| `execute` | Execute the task directly |
+
+**Actual `current_state` values:** `execute.act` → `complete`
+
+**When to use:** Simple, well-scoped tasks where one agent pass is enough. Used by `arc dev` for straightforward automation.
 
 ### Terminal States
 
@@ -392,8 +432,8 @@ All blocks support a `prompt` param to swap the agent prompt and a `max_turns` p
 |-------|-------|--------|---------|
 | `act` | `done` | `prompt`, `max_turns` (45), `timeout` (900), `model` | Generic linear work — does something and exits unconditionally |
 | `adversary` | `bugs_found`, `no_bugs_found` | `prompt`, `max_turns` (30) | Writes adversarial failing tests to expose bugs in existing code |
-| `qa` | `done` | `prompt`, `max_turns` (100), `timeout` (1800) | Writes tests capturing intended behavior |
-| `qa-review` | `approved`, `gaps_found` | `prompt`, `max_turns` (15), `max_state_iterations`, `on_max_iterations` | Reviews test coverage and quality |
+| `tests` | `done` | `prompt`, `max_turns` (100), `timeout` (1800) | Writes tests capturing intended behavior |
+| `test-review` | `approved`, `gaps_found` | `prompt`, `max_turns` (15), `max_state_iterations`, `on_max_iterations` | Reviews test coverage and quality |
 | `review` | `approved`, `concerns` | `prompt`, `max_turns` (50), `timeout` (900) | Reviews implementation quality |
 | `judge` | configurable | `prompt`, `max_turns` (15), `verdict_a` (approved), `verdict_b` (rejected), `max_state_iterations`, `on_max_iterations` | Generic two-verdict branching block; override `verdict_a`/`verdict_b` to name your own exits |
 
@@ -504,6 +544,50 @@ Use `arc manage <plan> <phase> show` to print a phase's current `state.json`.
 | `arc_archive` | `arc archive` | Archive a completed plan |
 
 `arc_run` is **asynchronous** — it returns immediately and the orchestrator runs in the background. Poll `arc_run_status` to check progress. While a run is in progress, you can do other work: plan the next task, answer questions, explore the codebase.
+
+### `arc_manage` Actions
+
+`arc_manage` (CLI: `arc manage <plan> <phase> <action> [args...]`) controls phase state:
+
+| Action | Args | Purpose |
+|--------|------|---------|
+| `show` | — | Print the phase's full `state.json` |
+| `complete` | — | Mark phase complete |
+| `pending` | — | Reset phase to pending (re-queue it for the orchestrator) |
+| `defer` | `reason` | Defer phase with an explanation |
+| `block` | `reason` | Block phase — requires human intervention to unblock |
+| `tests` | `passing total` | Update passing/total test counts |
+| `packages` | `pkg1,pkg2,...` | Set the packages list |
+| `note` | `text` | Set freeform notes on the phase |
+| `iteration` | `n` | Set the iteration counter |
+| `copy-from` | `source-phase` | Copy state from another phase |
+| `reset-review` | — | Clear review cache and iteration counter |
+
+### Worktree Behavior
+
+By default, `arc_run` creates a **shared git worktree** for the plan — a separate branch where all phases execute. Changes are merged back to the original branch when the plan completes. This keeps in-progress work isolated from your working tree.
+
+Options:
+
+| Flag | Behavior |
+|------|---------|
+| `worktree: true` (default) | One worktree for the entire plan; all phases share it; merged at the end |
+| `per_phase_worktree: true` | Each phase gets its own worktree; merged and cleaned up per-phase |
+| `worktree: false` | No isolation — all phases run in-tree on the current branch |
+
+### Failure Intervention
+
+When a run stops with a blocked phase, the pipeline has already exhausted its mechanical retries. You must diagnose and fix it:
+
+1. **Inspect the failed phase** — `arc_manage <plan> <phase> show` to read `state.json` and understand the last verdict, iteration count, and notes.
+2. **Read the agent's last output** — look in the phase worktree directory for the transcript or any output files left by the agent.
+3. **Diagnose the real problem:**
+   - **Ambiguous plan** — edit `plan.md` to be more specific and concrete.
+   - **Phase too large** — split into smaller phases; update `plan.json` and create new phase directories.
+   - **Wrong approach** — rewrite the relevant section of `plan.md`.
+   - **Environment issue** — fix the underlying tool/dependency problem.
+   - **Genuinely hard** — ask the user for guidance.
+4. **Reset and resume** — `arc_manage <plan> <phase> pending` to re-queue the phase, then `arc_run <plan>` to resume.
 
 <!-- /section: execution -->
 
