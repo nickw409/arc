@@ -302,9 +302,9 @@ Block-composed workflows use a `pipeline:` key instead of `states:`. Each pipeli
 name: my-workflow
 version: 1
 pipeline:
-  - block: impl
+  - block: act
     name: write-code          # optional; defaults to block name; used as routing target
-    params: {max_turns: "45", prompt: "prompts/feature/impl.md"}
+    params: {max_turns: "45", prompt: "prompts/my-project/impl.md"}
   - block: adversary
     name: check
     params: {max_turns: "30"}
@@ -314,18 +314,42 @@ pipeline:
 terminal_states: [complete, blocked]
 ```
 
-**`name`** — gives the step an addressable identity used as the namespace prefix for its states (`write-code.impl`) and as a target in `route` maps.
+**`name`** — gives the step an addressable identity used as the namespace prefix for its states (`write-code.act`) and as a target in `route` maps.
 
 **`route`** — maps individual block exit names to downstream steps or terminal states. Exits not listed in `route` fall through to the next sequential step.
 
 **`params`** — override block defaults. All blocks support a `prompt` param to swap the agent prompt:
 
 ```yaml
-- block: impl
+- block: act
   params:
-    prompt: "prompts/bugfix/fix.md"
+    prompt: "prompts/my-project/impl.md"
     max_turns: "30"
 ```
+
+### Writing Custom Prompts
+
+When writing a prompt for a custom pipeline, use params for any branching logic — never rely on `{{state.last_verdict}}` or other implicit workflow state:
+
+```markdown
+{{#if params.fix_mode}}
+Fix the implementation to make the failing tests pass. Do not modify test files.
+{{else}}
+Write the implementation and tests from scratch.
+{{/if}}
+```
+
+The calling pipeline step sets the param explicitly:
+
+```yaml
+- block: act
+  name: fix
+  params:
+    prompt: "prompts/my-project/impl.md"
+    fix_mode: "true"
+```
+
+**Premade workflow prompts** (under `prompts/feature/`, `prompts/bugfix/`, etc.) are owned by their workflow and rely on workflow-internal state. Do not reference them from custom pipelines — write your own prompt instead.
 
 <!-- /section: workflows -->
 
