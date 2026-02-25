@@ -122,7 +122,8 @@ func renderColumnHeader(width int) string {
 		return fmt.Sprintf("  %s %-*s  %s", "   ", nameW, "PHASE", "STATE")
 	}
 
-	header := fmt.Sprintf("  %s %-*s  %-12s %-7s %-9s", "   ", nameW, "PHASE", "STATE", "ITER", "TESTS")
+	stateW := stateColWidth(width)
+	header := fmt.Sprintf("  %s %-*s  %-*s %-7s %-9s", "   ", nameW, "PHASE", stateW, "STATE", "ITER", "TESTS")
 	if width >= 90 {
 		header += fmt.Sprintf(" %-9s", "TOKENS")
 	}
@@ -130,6 +131,16 @@ func renderColumnHeader(width int) string {
 		header += fmt.Sprintf(" %s", "VERDICT")
 	}
 	return header
+}
+
+func stateColWidth(width int) int {
+	if width < 100 {
+		return 16
+	}
+	if width < 120 {
+		return 20
+	}
+	return 28
 }
 
 func phaseNameWidth(width int) int {
@@ -224,7 +235,11 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		tests = "—"
 	}
 
-	row := fmt.Sprintf("%s%s %-*s  %-12s %-7s %-9s", cursor, icon, nameW, name, state, iter, tests)
+	stateW := stateColWidth(width)
+	if len(state) > stateW {
+		state = state[:stateW-1] + "~"
+	}
+	row := fmt.Sprintf("%s%s %-*s  %-*s %-7s %-9s", cursor, icon, nameW, name, stateW, state, iter, tests)
 
 	// Tokens column (wide terminal)
 	if width >= 90 {
@@ -279,7 +294,7 @@ func (m Model) renderDetailPanel() string {
 	lines = append(lines, statusLine)
 
 	// State/iter row
-	stateLine := fmt.Sprintf("  State:  %-14s Iter: %-14s", pv.CurrentState, formatIter(pv))
+	stateLine := fmt.Sprintf("  State:  %-28s Iter: %-14s", pv.CurrentState, formatIter(pv))
 	if pv.GlobalIterations > 0 {
 		stateLine += fmt.Sprintf(" Global iters: %d", pv.GlobalIterations)
 	}
