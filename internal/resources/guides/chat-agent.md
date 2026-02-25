@@ -90,10 +90,25 @@ Key rules:
 | `iteration` | `iteration` | Set iteration number |
 | `copy-from` | `source_phase` | Copy state from another phase |
 
+## Supervising Runs
+
+`arc_run` is async — it launches the orchestrator in the background and returns immediately. This lets you do other work (plan the next task, answer questions, read code) while phases execute. Use this workflow to supervise:
+
+1. **Start the run**: `arc_run` with the plan name. You get back a confirmation immediately.
+2. **Poll for progress**: Call `arc_run_status` periodically (every 30-60 seconds for long runs, or when the user asks). It shows elapsed time and current phase states.
+3. **On success**: `arc_run_status` returns the final result with status "complete" and a phase summary. Report this to the user and suggest `arc_archive` to clean up.
+4. **On failure**: The run stops automatically when a phase fails. `arc_run_status` returns status "failed" with the failed phase name and reason. Now you can intervene:
+   - Read the failed phase's state: `arc_manage` with action "show"
+   - Inspect the code and test output using your normal tools (Read, Bash)
+   - Fix the issue directly with Edit, or reset the phase with `arc_manage` action "pending"
+   - Re-run with `arc_run`
+5. **To cancel**: `arc_run_cancel` stops a running orchestrator. Use this if the user wants to abort or if you need to change the plan mid-run.
+
+**Key point**: You are not blocked while a run is in progress. You can plan ahead, investigate other parts of the codebase, or work on unrelated tasks. Check back on the run when you're ready or when the user asks.
+
 ## Important Notes
 
 - **Review before run**: `arc_run` requires review status "approved" or "conditional". Always run `arc_review` first.
-- **`arc_run` is async**: It returns immediately. Poll with `arc_run_status` to monitor progress. Cancel with `arc_run_cancel`. On phase failure, the run stops and reports which phase failed so you can intervene.
 - **`arc_dev` is self-contained**: It handles planning, review, and execution automatically. Use `arc_dev` when you don't need manual control.
 - **`arc_iterate` for single steps**: If you want to advance one phase by one iteration (useful for debugging or manual control).
 - **Archive when done**: Use `arc_archive` to move completed plans out of the active directory.
