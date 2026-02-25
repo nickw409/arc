@@ -16,7 +16,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
-	"github.com/nwiley/arc/internal/dev"
 	"github.com/nwiley/arc/internal/guide"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/pipeline"
@@ -102,13 +101,6 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("source_phase", mcp.Description("Source phase name (for copy-from action)")),
 	), h.handleManage)
 
-	s.AddTool(mcp.NewTool("arc_dev",
-		mcp.WithDescription("Auto-generate a plan from a task description and run it. Analyzes the task, generates a plan, reviews it, and executes the orchestrator."),
-		mcp.WithString("task", mcp.Required(), mcp.Description("Description of the development task")),
-		mcp.WithNumber("timeout", mcp.Description("Wall-clock timeout in seconds (default: 14400)")),
-		mcp.WithBoolean("skip_review", mcp.Description("Skip adversarial review (default: false)")),
-	), h.handleDev)
-
 	s.AddTool(mcp.NewTool("arc_guide",
 		mcp.WithDescription("Print the Arc reference guide for AI agents. Covers setup, plans, workflows, execution, and common mistakes."),
 		mcp.WithString("section", mcp.Description("Specific section: setup, plans, workflows, execution, mistakes. Omit for full guide.")),
@@ -134,11 +126,6 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to cancel")),
 	), h.handleRunCancel)
 
-	s.AddTool(mcp.NewTool("arc_discover",
-		mcp.WithDescription("Analyze the codebase for a task. Spawns a read-only discovery agent that explores the project and returns structured analysis: relevant files, complexity, suggested workflow type, phase breakdown, conventions, and risks."),
-		mcp.WithString("task_description", mcp.Required(), mcp.Description("Description of the task to analyze")),
-		mcp.WithString("model", mcp.Description("Model override for the discovery agent")),
-	), h.handleDiscover)
 }
 
 // drainJobs cancels all running jobs and waits for them to finish cleanup.
@@ -583,53 +570,6 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 	}
 }
 
-func (h *handlerContext) handleDev(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := req.GetArguments()
-	task, _ := args["task"].(string)
-
-	if task == "" {
-		return mcp.NewToolResultError("task is required"), nil
-	}
-
-	cfg, _ := config.Load(h.projectDir)
-
-	// Ensure .plans/active exists
-	if err := os.MkdirAll(h.plansDir(), 0755); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("creating plans directory: %v", err)), nil
-	}
-
-	timeout := 14400
-	if t, ok := args["timeout"].(float64); ok && t > 0 {
-		timeout = int(t)
-	}
-	skipReview := false
-	if s, ok := args["skip_review"].(bool); ok {
-		skipReview = s
-	}
-
-	result, err := dev.RunDev(ctx, dev.DevOptions{
-		TaskDescription: task,
-		ProjectDir:      h.projectDir,
-		ArcHome:         h.arcHome,
-		Config:          cfg,
-		Logger:          h.logger,
-		Interactive:     false,
-		Timeout:         timeout,
-		SkipReview:      skipReview,
-		AutoYes:         true,
-	})
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	var out bytes.Buffer
-	fmt.Fprintf(&out, "Plan: %s\nComplexity: %s\n", result.PlanName, result.Complexity)
-	if result.Usage.CostUSD > 0 {
-		fmt.Fprintf(&out, "Cost: $%.4f\n", result.Usage.CostUSD)
-	}
-	return mcp.NewToolResultText(out.String()), nil
-}
-
 func (h *handlerContext) handleGuide(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	section, _ := args["section"].(string)
@@ -792,30 +732,6 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 		}
 		return mcp.NewToolResultText(out.String()), nil
 	}
-}
-
-func (h *handlerContext) handleDiscover(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := req.GetArguments()
-	taskDescription, _ := args["task_description"].(string)
-	model, _ := args["model"].(string)
-
-	if taskDescription == "" {
-		return mcp.NewToolResultError("task_description is required"), nil
-	}
-
-	out, err := dev.RunDiscovery(ctx, dev.DiscoveryOptions{
-		TaskDescription: taskDescription,
-		Model:           model,
-	})
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("discovery failed: %v", err)), nil
-	}
-
-	data, err := json.MarshalIndent(out.Result, "", "  ")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("marshaling result: %v", err)), nil
-	}
-	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (h *handlerContext) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

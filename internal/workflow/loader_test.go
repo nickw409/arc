@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/resources"
 	"gopkg.in/yaml.v3"
 )
 
@@ -241,7 +242,7 @@ pipeline:
   - block: impl
     params: {max_turns: "45"}
   - block: adversary
-    params: {max_rounds: "3", max_turns: "30"}
+    params: {max_turns: "30"}
 
 terminal_states: [complete, blocked]
 `)
@@ -288,13 +289,13 @@ terminal_states: [complete, blocked]
 		t.Fatalf("expected adversary.adversary, got %q", next)
 	}
 
-	// adversary.adversary → bugs_found → adversary.adversary (self-loop)
+	// adversary.adversary → bugs_found → complete (both exits wire to next step)
 	next, err = m.NextState("adversary.adversary", "bugs_found")
 	if err != nil {
 		t.Fatalf("NextState from adversary bugs_found: %v", err)
 	}
-	if next != "adversary.adversary" {
-		t.Fatalf("expected adversary.adversary (self-loop), got %q", next)
+	if next != "complete" {
+		t.Fatalf("expected complete (both exits wire to next step), got %q", next)
 	}
 
 	// adversary.adversary → no_bugs_found → complete
@@ -304,6 +305,56 @@ terminal_states: [complete, blocked]
 	}
 	if next != "complete" {
 		t.Fatalf("expected complete, got %q", next)
+	}
+}
+
+func TestConstraintsLoading(t *testing.T) {
+	tests := []struct {
+		workflow string
+		state    string
+		wantMax  int
+		wantOn   string
+	}{
+		{"feature", "qa_review", 3, "approved"},
+		{"feature", "impl_review", 3, "approved"},
+		{"bugfix", "test_review", 3, "approved"},
+		{"bugfix", "fix_review", 3, "approved"},
+		{"refactor", "char_review", 3, "approved"},
+		{"refactor", "verify", 3, "approved"},
+		{"investigation", "review", 3, "approved"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.workflow+"_"+tt.state, func(t *testing.T) {
+			data, err := resources.WorkflowBytes(tt.workflow)
+			if err != nil {
+				t.Fatalf("failed to load %s: %v", tt.workflow, err)
+			}
+			wf, err := LoadBytes(data)
+			if err != nil {
+				t.Fatalf("failed to parse %s: %v", tt.workflow, err)
+			}
+
+			var found *arc.StateConfig
+			for i := range wf.States {
+				if wf.States[i].Name == tt.state {
+					found = &wf.States[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("state %q not found in workflow %q", tt.state, tt.workflow)
+			}
+			if found.Constraints == nil {
+				t.Fatalf("state %q in %q has no constraints", tt.state, tt.workflow)
+			}
+			if found.Constraints.MaxStateIterations != tt.wantMax {
+				t.Errorf("MaxStateIterations = %d, want %d", found.Constraints.MaxStateIterations, tt.wantMax)
+			}
+			if found.Constraints.OnMaxIterations != tt.wantOn {
+				t.Errorf("OnMaxIterations = %q, want %q", found.Constraints.OnMaxIterations, tt.wantOn)
+			}
+		})
 	}
 }
 

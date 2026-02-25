@@ -80,7 +80,9 @@ type rawBlock struct {
 
 // ConstraintRaw holds constraint values as strings so they can contain ${param} references.
 type ConstraintRaw struct {
-	MaxIterations string `yaml:"max_iterations"`
+	MaxIterations      string `yaml:"max_iterations"`
+	MaxStateIterations string `yaml:"max_state_iterations"`
+	OnMaxIterations    string `yaml:"on_max_iterations"`
 }
 
 // ResolvedBlock is a block with parameters applied and a namespace prefix.
@@ -204,8 +206,11 @@ func ResolveParams(b *Block, params map[string]string) (*Block, error) {
 
 		// Resolve constraints
 		if s.Constraints != nil {
-			maxIter := substituteParams(s.Constraints.MaxIterations, merged)
-			rs.Constraints = &ConstraintRaw{MaxIterations: maxIter}
+			rs.Constraints = &ConstraintRaw{
+				MaxIterations:      substituteParams(s.Constraints.MaxIterations, merged),
+				MaxStateIterations: substituteParams(s.Constraints.MaxStateIterations, merged),
+				OnMaxIterations:    substituteParams(s.Constraints.OnMaxIterations, merged),
+			}
 		}
 
 		resolved.States[i] = rs

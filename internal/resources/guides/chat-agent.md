@@ -8,7 +8,7 @@ You have Arc orchestration tools available via MCP. Arc is an AI-powered workflo
 - Running tests, checking status
 - Anything completable in a few edits
 
-**Use Arc** for anything that would take more than a few edits, involves multiple files or packages, or benefits from structured test-driven development. You have the same capabilities as `arc_dev` — discovery, planning, review, execution — but with more control because you can steer each step.
+**Use Arc** for anything that would take more than a few edits, involves multiple files or packages, or benefits from structured test-driven development. You have the same capabilities — planning, review, execution — but with more control because you can steer each step.
 
 ## The Workflow
 
@@ -18,12 +18,7 @@ Talk to the user. Clarify ambiguities about what they want. Focus on understandi
 
 ### Step 2: Explore & Discover
 
-Two tools for understanding the codebase — use the right one:
-
-- **`arc_discover`** — Use when you're about to plan an Arc task. Pass the task description and get back structured JSON: relevant files, complexity, workflow type suggestion, phase breakdown, conventions, and risks. Feed this directly into your planning step.
-- **Your normal tools** (Read, Grep, Glob, Bash) — Use for freeform exploration: answering user questions, investigating failures, auditing code, or anything where you need unstructured analysis.
-
-Rule of thumb: if the next step is `arc_plan`, use `arc_discover`. Otherwise, explore yourself.
+Use your normal tools (Read, Grep, Glob, Bash) to explore the codebase. Understand the relevant files, existing patterns, and test conventions before planning.
 
 ### Step 3: Plan
 
@@ -78,7 +73,6 @@ Report results to the user. Suggest `arc_archive` to clean up.
 
 | Tool | Purpose |
 |------|---------|
-| `arc_discover` | Structured codebase analysis — returns JSON with files, complexity, workflow suggestion, phases |
 | `arc_plan` | Create a plan with named phases and workflow type |
 | `arc_review` | Single-pass adversarial review with auto-remediation |
 | `arc_run` | Launch orchestrator async — returns immediately |
@@ -90,7 +84,6 @@ Report results to the user. Suggest `arc_archive` to clean up.
 | `arc_manage` | Manage phase state (see actions below) |
 | `arc_archive` | Archive a completed plan |
 | `arc_guide` | Print the full Arc reference guide |
-| `arc_dev` | Fully automated end-to-end pipeline (no supervision) |
 
 ## Workflow Types
 
@@ -166,7 +159,7 @@ Blocks accept parameters to tune behavior (max turns, max rounds, model). States
 ## Key Principles
 
 - **You are the supervisor, not the executor.** Sub-agents write code. The pipeline manages retries. You make judgment calls — what to build, how to structure it, what to do when something fails.
-- **Use the right exploration tool.** `arc_discover` for structured analysis before planning. Your own tools for freeform exploration, debugging, and answering questions.
+- **Explore before planning.** Use your normal tools (Read, Grep, Glob, Bash) to understand the codebase before creating a plan.
 - **Don't over-review.** One auto-remediation pass catches the obvious problems. You catch the rest during intervention with real signal from actual failures.
 - **Stay unblocked.** While a run is in progress, do other work. Plan ahead, answer questions, explore. Don't sit idle polling.
 - **Fail fast, fix smart.** When the pipeline can't make progress, it stops and tells you why. Diagnose the real problem instead of blindly retrying.

@@ -1,0 +1,16 @@
+name: qa-review
+description: Review test coverage, emit approved or gaps_found
+params:
+  max_turns: {default: "15"}
+entry: qa_review
+exits: [approved, gaps_found]
+states:
+  - name: qa_review
+    description: Review test coverage
+    prompt: prompts/feature/qa-review.md
+    agent:
+      max_turns: ${max_turns}
+    verdicts: [approved, gaps_found]
+    next:
+      approved: $approved
+      gaps_found: $gaps_found

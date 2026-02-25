@@ -531,6 +531,318 @@ func TestIterateModeInstructionsAppended(t *testing.T) {
 	}
 }
 
+// testWorkflowWithCaps returns a minimal flat workflow YAML with a qa_review state
+// that has max_state_iterations and on_max_iterations set.
+func testWorkflowWithCaps(maxStateIter int, onMax string) []byte {
+	onMaxLine := ""
+	if onMax != "" {
+		onMaxLine = fmt.Sprintf("\n      on_max_iterations: %s", onMax)
+	}
+	constraintsBlock := ""
+	if maxStateIter != 0 {
+		constraintsBlock = fmt.Sprintf(`    constraints:
+      max_state_iterations: %d%s
+`, maxStateIter, onMaxLine)
+	}
+	return []byte(fmt.Sprintf(`name: test-caps
+version: 1
+entry_state: qa_review
+terminal_states: [complete, blocked]
+states:
+  - name: qa_review
+    description: Review test coverage
+    prompt: prompts/feature/qa-review.md
+    verdicts: [approved, gaps_found]
+%s    next:
+      approved: complete
+      gaps_found: qa_review
+  - name: complete
+    description: Phase completed successfully
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Phase blocked
+    prompt: prompts/common/blocked.md
+`, constraintsBlock))
+}
+
+// withTestWorkflow installs a custom workflow loader for the duration of the test.
+func withTestWorkflow(t *testing.T, wfType string, data []byte) {
+	t.Helper()
+	orig := workflowBytesFunc
+	workflowBytesFunc = func(name string) ([]byte, error) {
+		if name == wfType {
+			return data, nil
+		}
+		return orig(name)
+	}
+	t.Cleanup(func() { workflowBytesFunc = orig })
+}
+
+// setupTestPlanWithWorkflow sets up a test plan using a custom workflow type.
+func setupTestPlanWithWorkflow(t *testing.T, phaseState *arc.PhaseState, wfType string, wfData []byte) string {
+	t.Helper()
+	withTestWorkflow(t, wfType, wfData)
+	return setupTestPlan(t, phaseState)
+}
+
+func TestRunIterationMaxStateIterationsForced(t *testing.T) {
+	// qa_review has been visited 4 times; cap is 3. Should force exit with "approved".
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"qa_review": 4}
+
+	wfData := testWorkflowWithCaps(3, "approved")
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	// Set mock to produce gaps_found — if agent ran it would give wrong verdict.
+	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\ngaps_found\n")
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+	if result.Verdict != "approved" {
+		t.Fatalf("got Verdict=%q, want %q", result.Verdict, "approved")
+	}
+	if result.NextState != "complete" {
+		t.Fatalf("got NextState=%q, want %q", result.NextState, "complete")
+	}
+
+	// Verify state was updated correctly.
+	stateFile := filepath.Join(plansDir, "test-plan", "phases", "test-phase", "state.json")
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("reading state file: %v", err)
+	}
+	var updated arc.PhaseState
+	if err := json.Unmarshal(data, &updated); err != nil {
+		t.Fatalf("parsing state: %v", err)
+	}
+	if updated.CurrentState != "complete" {
+		t.Errorf("CurrentState = %q, want %q", updated.CurrentState, "complete")
+	}
+	if updated.LastVerdict != "approved" {
+		t.Errorf("LastVerdict = %q, want %q", updated.LastVerdict, "approved")
+	}
+	if updated.Iteration.Current != st.Iteration.Current+1 {
+		t.Errorf("Iteration.Current = %d, want %d", updated.Iteration.Current, st.Iteration.Current+1)
+	}
+	if len(updated.VerdictsHistory) == 0 {
+		t.Fatal("expected a VerdictsHistory entry")
+	}
+	last := updated.VerdictsHistory[len(updated.VerdictsHistory)-1]
+	if last.State != "qa_review" || last.Verdict != "approved" {
+		t.Errorf("last verdict history: state=%q verdict=%q, want qa_review/approved", last.State, last.Verdict)
+	}
+}
+
+func TestRunIterationMaxStateIterationsBoundary(t *testing.T) {
+	// count == max (3 == 3) should NOT trigger cap; iteration runs normally.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"qa_review": 3}
+
+	wfData := testWorkflowWithCaps(3, "approved")
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue (boundary should not trigger); err=%v", result.Action, result.Err)
+	}
+	if result.Verdict != "approved" {
+		t.Fatalf("got Verdict=%q, want approved", result.Verdict)
+	}
+}
+
+func TestRunIterationMaxStateIterationsNoConstraint(t *testing.T) {
+	// No constraints set; iteration runs normally regardless of StateIterations.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"qa_review": 100}
+
+	wfData := testWorkflowWithCaps(0, "") // no constraints
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+}
+
+func TestRunIterationMaxStateIterationsNilMap(t *testing.T) {
+	// StateIterations map is nil; count defaults to 0, cap not triggered.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = nil
+
+	wfData := testWorkflowWithCaps(3, "approved")
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+}
+
+func TestRunIterationMaxStateIterationsMapMissingKey(t *testing.T) {
+	// StateIterations exists but does not contain current state; count = 0, cap not triggered.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"other_state": 5}
+
+	wfData := testWorkflowWithCaps(3, "approved")
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	t.Setenv("MOCK_OUTPUT", "Analysis\n\n## Verdict\n\napproved\n")
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+}
+
+func TestRunIterationMaxStateIterationsNoOnMax(t *testing.T) {
+	// Cap exceeded but on_max_iterations is empty; should abort.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"qa_review": 4}
+
+	wfData := testWorkflowWithCaps(3, "") // no on_max_iterations
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionAbort {
+		t.Fatalf("got Action=%v, want ActionAbort; err=%v", result.Action, result.Err)
+	}
+	if result.Err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(result.Err.Error(), "no on_max_iterations set") {
+		t.Fatalf("expected error containing 'no on_max_iterations set', got: %v", result.Err)
+	}
+}
+
+func TestRunIterationMaxStateIterationsInvalidTransition(t *testing.T) {
+	// on_max_iterations set to a verdict that is not valid from qa_review.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.StateIterations = map[string]int{"qa_review": 4}
+
+	wfData := testWorkflowWithCaps(3, "invalid_verdict")
+	plansDir := setupTestPlanWithWorkflow(t, st, "test-caps", wfData)
+
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionAbort {
+		t.Fatalf("got Action=%v, want ActionAbort; err=%v", result.Action, result.Err)
+	}
+	if result.Err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(result.Err.Error(), "transition failed") {
+		t.Fatalf("expected error containing 'transition failed', got: %v", result.Err)
+	}
+}
+
+func TestRunIterationBothMaxIterationsConstraints(t *testing.T) {
+	// Both max_iterations (global) and max_state_iterations (per-state) are exceeded.
+	// Per-state check runs first, so we expect ActionContinue with forced verdict
+	// rather than ActionAbort from the global check.
+	st := arc.NewPhaseState("test-plan", "test-phase", "test-caps")
+	st.CurrentState = "qa_review"
+	st.PhaseStatus = "qa_review"
+	st.Iteration.Current = 6           // exceeds global max_iterations: 5
+	st.StateIterations = map[string]int{"qa_review": 4} // exceeds max_state_iterations: 3
+
+	// Workflow has both constraints set.
+	wfData := []byte(`name: test-both-caps
+version: 1
+entry_state: qa_review
+terminal_states: [complete, blocked]
+states:
+  - name: qa_review
+    description: Review test coverage
+    prompt: prompts/feature/qa-review.md
+    verdicts: [approved, gaps_found]
+    constraints:
+      max_iterations: 5
+      max_state_iterations: 3
+      on_max_iterations: approved
+    next:
+      approved: complete
+      gaps_found: qa_review
+  - name: complete
+    description: Phase completed successfully
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Phase blocked
+    prompt: prompts/common/blocked.md
+`)
+	withTestWorkflow(t, "test-caps", wfData)
+	plansDir := setupTestPlan(t, st)
+
+	// Per-state cap fires first; forced verdict is approved → complete.
+	result := RunIteration(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue (per-state check precedes global); err=%v", result.Action, result.Err)
+	}
+	if result.Verdict != "approved" {
+		t.Fatalf("got Verdict=%q, want approved", result.Verdict)
+	}
+}
+
 // Ensure the pipeline _ imports are valid by referencing the types.
 var _ = IterateOptions{}
 var _ = (*arc.IterationResult)(nil)

@@ -26,6 +26,10 @@ func SetAgentCommandNameForTest(name string) {
 	agentCommandName = name
 }
 
+// workflowBytesFunc loads raw workflow YAML for a given workflow type.
+// Tests override this to inject custom workflows.
+var workflowBytesFunc = resources.WorkflowBytes
+
 // IterateOptions configures a single iteration.
 type IterateOptions struct {
 	PlanName     string
@@ -51,7 +55,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	phaseState := *statePtr
 
 	// Load workflow
-	wfBytes, err := resources.WorkflowBytes(phaseState.WorkflowType)
+	wfBytes, err := workflowBytesFunc(phaseState.WorkflowType)
 	if err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("loading workflow %q: %w", phaseState.WorkflowType, err)}
 	}
@@ -76,6 +80,57 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		afterHooks = stateConfig.After
 	}
 	interventionTriggers := wf.InterventionTriggers
+
+	// Check per-state iteration cap before running agent.
+	if constraints != nil && constraints.MaxStateIterations > 0 {
+		count := 0
+		if phaseState.StateIterations != nil {
+			count = phaseState.StateIterations[phaseState.CurrentState]
+		}
+		if count > constraints.MaxStateIterations {
+			if constraints.OnMaxIterations == "" {
+				return &arc.IterationResult{
+					Action: arc.ActionAbort,
+					Err:    fmt.Errorf("max state iterations (%d) reached for %q with no on_max_iterations set", constraints.MaxStateIterations, phaseState.CurrentState),
+				}
+			}
+			forcedVerdict := arc.Verdict(constraints.OnMaxIterations)
+			nextState, err := machine.NextState(phaseState.CurrentState, forcedVerdict)
+			if err != nil {
+				return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("on_max_iterations transition failed: %w", err)}
+			}
+			curState := phaseState.CurrentState
+			if updateErr := sf.Update(func(s *arc.PhaseState) error {
+				s.CurrentState = nextState
+				s.PhaseStatus = MapStateToStatus(nextState)
+				s.Iteration.Current++
+				s.LastVerdict = string(forcedVerdict)
+				s.GlobalIterations++
+				s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
+					Iteration: s.Iteration.Current,
+					State:     curState,
+					Verdict:   string(forcedVerdict),
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+				return nil
+			}); updateErr != nil {
+				return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state after forced exit: %w", updateErr)}
+			}
+			logger.Info("max state iterations reached, forced exit",
+				"phase", phaseState.Phase,
+				"state", curState,
+				"count", count,
+				"max", constraints.MaxStateIterations,
+				"forced_verdict", string(forcedVerdict),
+				"next_state", nextState,
+			)
+			return &arc.IterationResult{
+				NextState: nextState,
+				Verdict:   forcedVerdict,
+				Action:    arc.ActionContinue,
+			}
+		}
+	}
 
 	// Check pre-constraints
 	if err := CheckPreConstraints(&phaseState, constraints, phaseDir); err != nil {

@@ -1,7 +1,6 @@
 name: adversary
-description: Adversary writes tests to find bugs in existing code
+description: Adversary writes adversarial tests to find bugs in existing code
 params:
-  max_rounds: {default: "5"}
   max_turns: {default: "30"}
 entry: adversary
 exits: [done]
@@ -13,8 +12,6 @@ states:
       max_turns: ${max_turns}
       allowed_tools: [Read, Grep, Glob, Write, Bash]
     verdicts: [bugs_found, no_bugs_found]
-    constraints:
-      max_iterations: "${max_rounds}"
     next:
-      bugs_found: adversary
+      bugs_found: $done
       no_bugs_found: $done

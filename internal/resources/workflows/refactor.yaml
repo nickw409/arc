@@ -13,6 +13,9 @@ states:
     verdicts:
       - approved
       - gaps_found
+    constraints:
+      max_state_iterations: 3
+      on_max_iterations: approved
     next:
       approved: refactor
       gaps_found: characterize
@@ -26,6 +29,9 @@ states:
     verdicts:
       - approved
       - concerns
+    constraints:
+      max_state_iterations: 3
+      on_max_iterations: approved
     next:
       approved: complete
       concerns: refactor

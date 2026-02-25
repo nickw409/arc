@@ -272,8 +272,13 @@ func blockStateToConfig(bs BlockState, prefix string) arc.StateConfig {
 
 	if bs.Constraints != nil {
 		maxIter := parseInt(bs.Constraints.MaxIterations)
-		if maxIter > 0 {
-			sc.Constraints = &arc.ConstraintConfig{MaxIterations: maxIter}
+		maxStateIter := parseInt(bs.Constraints.MaxStateIterations)
+		if maxIter > 0 || maxStateIter > 0 || bs.Constraints.OnMaxIterations != "" {
+			sc.Constraints = &arc.ConstraintConfig{
+				MaxIterations:      maxIter,
+				MaxStateIterations: maxStateIter,
+				OnMaxIterations:    bs.Constraints.OnMaxIterations,
+			}
 		}
 	}
 

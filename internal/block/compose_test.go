@@ -184,6 +184,111 @@ func TestComposePipelineParallel(t *testing.T) {
 	}
 }
 
+func TestBlockStateToConfig_MaxStateIterations(t *testing.T) {
+	tests := []struct {
+		name            string
+		constraint      *ConstraintRaw
+		wantNil         bool
+		wantMax         int
+		wantMaxState    int
+		wantOnMax       string
+	}{
+		{
+			name: "valid max_state_iterations with on_max_iterations",
+			constraint: &ConstraintRaw{
+				MaxStateIterations: "3",
+				OnMaxIterations:    "approved",
+			},
+			wantNil:      false,
+			wantMaxState: 3,
+			wantOnMax:    "approved",
+		},
+		{
+			name: "zero max_state_iterations not set",
+			constraint: &ConstraintRaw{
+				MaxStateIterations: "0",
+				OnMaxIterations:    "approved",
+			},
+			wantNil:   false, // OnMaxIterations is set so constraint is created
+			wantOnMax: "approved",
+		},
+		{
+			name:       "nil constraint",
+			constraint: nil,
+			wantNil:    true,
+		},
+		{
+			name:       "empty constraint fields",
+			constraint: &ConstraintRaw{},
+			wantNil:    true,
+		},
+		{
+			name: "negative max_state_iterations not set",
+			constraint: &ConstraintRaw{
+				MaxStateIterations: "-1",
+			},
+			wantNil: true,
+		},
+		{
+			name: "on_max_iterations copied correctly",
+			constraint: &ConstraintRaw{
+				MaxStateIterations: "5",
+				OnMaxIterations:    "no_bugs_found",
+			},
+			wantNil:      false,
+			wantMaxState: 5,
+			wantOnMax:    "no_bugs_found",
+		},
+		{
+			name: "both max_iterations and max_state_iterations",
+			constraint: &ConstraintRaw{
+				MaxIterations:      "10",
+				MaxStateIterations: "3",
+				OnMaxIterations:    "approved",
+			},
+			wantNil:      false,
+			wantMax:      10,
+			wantMaxState: 3,
+			wantOnMax:    "approved",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bs := BlockState{
+				Name:        "qa_review",
+				Prompt:      "prompts/feature/qa-review.md",
+				Verdicts:    []string{"approved", "gaps_found"},
+				Constraints: tt.constraint,
+				Next:        map[string]string{"approved": "$approved", "gaps_found": "$gaps_found"},
+			}
+
+			sc := blockStateToConfig(bs, "test")
+
+			if tt.wantNil {
+				if sc.Constraints != nil {
+					t.Fatalf("expected nil constraints, got %+v", sc.Constraints)
+				}
+				return
+			}
+
+			if sc.Constraints == nil {
+				t.Fatal("expected non-nil constraints, got nil")
+			}
+
+			if sc.Constraints.MaxIterations != tt.wantMax {
+				t.Errorf("MaxIterations = %d, want %d", sc.Constraints.MaxIterations, tt.wantMax)
+			}
+			if sc.Constraints.MaxStateIterations != tt.wantMaxState {
+				t.Errorf("MaxStateIterations = %d, want %d", sc.Constraints.MaxStateIterations, tt.wantMaxState)
+			}
+			if sc.Constraints.OnMaxIterations != tt.wantOnMax {
+				t.Errorf("OnMaxIterations = %q, want %q", sc.Constraints.OnMaxIterations, tt.wantOnMax)
+			}
+		})
+	}
+}
+
 func TestComposePipelineMissingBlock(t *testing.T) {
 	steps := []PipelineStep{
 		{Block: "nonexistent"},

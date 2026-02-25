@@ -55,6 +55,8 @@ type Transition struct {
 
 type ConstraintConfig struct {
 	MaxIterations       int      `yaml:"max_iterations"`
+	MaxStateIterations  int      `yaml:"max_state_iterations"`
+	OnMaxIterations     string   `yaml:"on_max_iterations"`
 	RequireArtifactsIn  []string `yaml:"require_artifacts_in"`
 	RequireArtifactsOut []string `yaml:"require_artifacts_out"`
 }

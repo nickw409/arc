@@ -1,0 +1,13 @@
+name: qa
+description: Write tests based on specification
+params:
+  max_turns: {default: "15"}
+entry: qa
+exits: [done]
+states:
+  - name: qa
+    description: Write tests based on specification
+    prompt: prompts/feature/qa.md
+    agent:
+      max_turns: ${max_turns}
+    next: $done

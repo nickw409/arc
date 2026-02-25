@@ -14,6 +14,9 @@ states:
     verdicts:
       - approved
       - gaps_found
+    constraints:
+      max_state_iterations: 3
+      on_max_iterations: approved
     next:
       approved: impl
       gaps_found: qa
@@ -29,6 +32,9 @@ states:
     verdicts:
       - approved
       - concerns
+    constraints:
+      max_state_iterations: 3
+      on_max_iterations: approved
     next:
       approved: complete
       concerns: impl

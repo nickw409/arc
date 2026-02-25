@@ -1,16 +1,16 @@
 name: review
-description: Implementation review with approve/concerns loop
+description: Review implementation quality, emit approved or concerns
 params:
   max_turns: {default: "15"}
 entry: impl_review
-exits: [approved]
+exits: [approved, concerns]
 states:
   - name: impl_review
     description: Review implementation quality
     prompt: prompts/feature/impl-review.md
     agent:
-      max_turns: 15
+      max_turns: ${max_turns}
     verdicts: [approved, concerns]
     next:
       approved: $approved
-      concerns: impl_review
+      concerns: $concerns
