@@ -10,8 +10,10 @@ import (
 // PipelineStep represents a single step in a workflow pipeline.
 type PipelineStep struct {
 	Block    string            `yaml:"block"`
+	Name     string            `yaml:"name"`   // optional; defaults to block name; used as namespace prefix and routing target
 	Params   map[string]string `yaml:"params"`
 	Parallel *ParallelStep     `yaml:"parallel"`
+	Route    map[string]string `yaml:"route"`  // exit name → step name or terminal state (e.g. "bugs_found: fix-step")
 }
 
 // ParallelStep represents parallel block execution within a pipeline.
@@ -98,30 +100,35 @@ func ComposeSequential(blocks []ResolvedBlock) (*arc.Workflow, error) {
 	return wf, nil
 }
 
+// resolvedPipelineStep holds a fully resolved pipeline step with routing info.
+type resolvedPipelineStep struct {
+	block     *ResolvedBlock // non-nil for sequential block steps
+	parallel  *ParallelGroup // non-nil for parallel steps
+	forkState string
+	joinState string
+	name      string            // effective step name (used as namespace prefix and routing target)
+	route     map[string]string // exit name → step name or terminal state
+}
+
 // ComposePipeline handles both sequential and parallel steps.
 // Returns the flat workflow for sequential states, plus any parallel groups
 // that need runtime handling by the orchestrator.
+//
+// Steps may specify a Name field to give the step an addressable identity. If
+// omitted, the block name is used. Steps may also specify a Route map that
+// wires individual block exits to specific downstream steps by name (or to
+// terminal states like "complete"). Exits not listed in Route fall through to
+// the next sequential step, preserving backward-compatible behaviour.
 func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Workflow, []ParallelGroup, error) {
 	if len(steps) == 0 {
 		return nil, nil, fmt.Errorf("empty pipeline")
 	}
 
-	var allStates []arc.StateConfig
-	var parallelGroups []ParallelGroup
-	var firstEntry string
+	// ── Pass 1: resolve all blocks and build name→entryState map ──────────────
+
+	var resolved []resolvedPipelineStep
 	parallelIdx := 0
 
-	// Pre-resolve all sequential blocks and parallel fork/join points
-	type resolvedStep struct {
-		// For sequential blocks
-		block *ResolvedBlock
-		// For parallel groups
-		parallel  *ParallelGroup
-		forkState string
-		joinState string
-	}
-
-	var resolved []resolvedStep
 	for _, step := range steps {
 		if step.Parallel != nil {
 			forkName := fmt.Sprintf("_fork_%d", parallelIdx)
@@ -144,15 +151,13 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 				})
 			}
 
-			pg := ParallelGroup{
-				ForkState: forkName,
-				JoinState: joinName,
-				Strategy:  step.Parallel.Strategy,
-				Blocks:    rblocks,
-			}
-
-			resolved = append(resolved, resolvedStep{
-				parallel:  &pg,
+			resolved = append(resolved, resolvedPipelineStep{
+				parallel: &ParallelGroup{
+					ForkState: forkName,
+					JoinState: joinName,
+					Strategy:  step.Parallel.Strategy,
+					Blocks:    rblocks,
+				},
 				forkState: forkName,
 				joinState: joinName,
 			})
@@ -166,34 +171,51 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 			if err != nil {
 				return nil, nil, fmt.Errorf("resolving block %q: %w", step.Block, err)
 			}
-			name := step.Block
-			resolved = append(resolved, resolvedStep{
+			name := step.Name
+			if name == "" {
+				name = step.Block
+			}
+			resolved = append(resolved, resolvedPipelineStep{
 				block: &ResolvedBlock{
 					Name:   name,
 					Block:  resolvedBlock,
 					Params: step.Params,
 				},
+				name:  name,
+				route: step.Route,
 			})
 		}
 	}
 
-	// Wire everything together
+	// Build step-name → entry-state map for route target resolution.
+	stepEntry := make(map[string]string, len(resolved))
+	for _, rs := range resolved {
+		if rs.block != nil {
+			stepEntry[rs.name] = rs.block.Name + "." + rs.block.Block.Entry
+		}
+	}
+
+	// ── Pass 2: wire exits ────────────────────────────────────────────────────
+
+	var allStates []arc.StateConfig
+	var parallelGroups []ParallelGroup
+	var firstEntry string
+
 	for i, rs := range resolved {
-		// Determine next entry point
-		var nextEntry string
+		// Default next entry for exits that have no explicit route.
+		var defaultNext string
 		if i < len(resolved)-1 {
 			next := resolved[i+1]
 			if next.block != nil {
-				nextEntry = next.block.Name + "." + next.block.Block.Entry
+				defaultNext = next.block.Name + "." + next.block.Block.Entry
 			} else {
-				nextEntry = next.forkState
+				defaultNext = next.forkState
 			}
 		} else {
-			nextEntry = "complete"
+			defaultNext = "complete"
 		}
 
 		if rs.block != nil {
-			// Sequential block
 			rb := rs.block
 			prefix := rb.Name
 
@@ -202,8 +224,20 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 				if sc.Transition.Branches != nil {
 					for verdict, target := range sc.Transition.Branches {
 						if isExitRef(target) {
-							sc.Transition.Branches[verdict] = nextEntry
+							exitName := target[1:] // strip leading "$"
+							if routeTarget, ok := rs.route[exitName]; ok {
+								// Prefer a named step's entry state; fall back to a
+								// literal terminal state name (e.g. "complete").
+								if entry, ok := stepEntry[routeTarget]; ok {
+									sc.Transition.Branches[verdict] = entry
+								} else {
+									sc.Transition.Branches[verdict] = routeTarget
+								}
+							} else {
+								sc.Transition.Branches[verdict] = defaultNext
+							}
 						} else {
+							// Internal reference: namespace it.
 							sc.Transition.Branches[verdict] = prefix + "." + target
 						}
 					}
@@ -215,27 +249,20 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 				firstEntry = prefix + "." + rb.Block.Entry
 			}
 		} else {
-			// Parallel group — add synthetic fork/join states
+			// Parallel group — add synthetic fork/join states.
 			pg := rs.parallel
-			pg.ForkState = rs.forkState
-			pg.JoinState = rs.joinState
-
-			// Fork state: the orchestrator recognizes this and starts parallel execution
 			allStates = append(allStates, arc.StateConfig{
 				Name:        rs.forkState,
 				Description: "Fork into parallel blocks",
-				Prompt:      "prompts/common/complete.md", // placeholder, never rendered
+				Prompt:      "prompts/common/complete.md",
 				Transition:  arc.Transition{Branches: map[arc.Verdict]string{"": rs.joinState}},
 			})
-
-			// Join state: transitions to next entry
 			allStates = append(allStates, arc.StateConfig{
 				Name:        rs.joinState,
 				Description: "Join parallel blocks",
 				Prompt:      "prompts/common/complete.md",
-				Transition:  arc.Transition{Branches: map[arc.Verdict]string{"": nextEntry}},
+				Transition:  arc.Transition{Branches: map[arc.Verdict]string{"": defaultNext}},
 			})
-
 			parallelGroups = append(parallelGroups, *pg)
 
 			if firstEntry == "" {
@@ -244,7 +271,7 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 		}
 	}
 
-	// Add terminal states
+	// Add terminal states.
 	allStates = append(allStates,
 		arc.StateConfig{Name: "complete", Description: "Phase completed successfully", Prompt: "prompts/common/complete.md"},
 		arc.StateConfig{Name: "blocked", Description: "Phase blocked", Prompt: "prompts/common/blocked.md"},

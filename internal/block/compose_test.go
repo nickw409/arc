@@ -2,6 +2,8 @@ package block
 
 import (
 	"testing"
+
+	"github.com/nwiley/arc/internal/arc"
 )
 
 func makeImplBlock() *Block {
@@ -286,6 +288,196 @@ func TestBlockStateToConfig_MaxStateIterations(t *testing.T) {
 				t.Errorf("OnMaxIterations = %q, want %q", sc.Constraints.OnMaxIterations, tt.wantOnMax)
 			}
 		})
+	}
+}
+
+// makeJudgeBlock makes a branching block with exits: [pass, fail].
+func makeJudgeBlock() *Block {
+	return &Block{
+		Name:  "judge",
+		Entry: "judge",
+		Exits: []string{"pass", "fail"},
+		States: []BlockState{
+			{
+				Name:     "judge",
+				Prompt:   "prompts/adversarial/adversary.md",
+				Verdicts: []string{"pass", "fail"},
+				Next: map[string]string{
+					"pass": "$pass",
+					"fail": "$fail",
+				},
+			},
+		},
+	}
+}
+
+func TestComposePipelineConditionalRouting(t *testing.T) {
+	// pipeline: impl → judge (pass→complete, fail→fix) → fix
+	blockDefs := map[string]*Block{
+		"impl":  makeImplBlock(),
+		"judge": makeJudgeBlock(),
+		"fix":   makeImplBlock(), // reuse impl structure, different name
+	}
+	// Override fix block name so namespacing is distinct.
+	fixBlock := *makeImplBlock()
+	fixBlock.Name = "fix"
+	blockDefs["fix"] = &fixBlock
+
+	steps := []PipelineStep{
+		{Block: "impl", Name: "impl"},
+		{
+			Block: "judge",
+			Name:  "judge",
+			Route: map[string]string{
+				"pass": "complete", // exit early
+				"fail": "fix",      // go to fix step
+			},
+		},
+		{Block: "fix", Name: "fix"},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	// Find judge.judge state and verify its transitions.
+	var judgeState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Name == "judge.judge" {
+			judgeState = &wf.States[i]
+			break
+		}
+	}
+	if judgeState == nil {
+		t.Fatal("judge.judge state not found")
+	}
+
+	// pass → complete (terminal, from route)
+	if next := judgeState.Transition.Branches["pass"]; next != "complete" {
+		t.Errorf("pass should route to complete, got %q", next)
+	}
+	// fail → fix.impl (fix step's entry, from route)
+	if next := judgeState.Transition.Branches["fail"]; next != "fix.impl" {
+		t.Errorf("fail should route to fix.impl, got %q", next)
+	}
+}
+
+func TestComposePipelineRoutingFallsThrough(t *testing.T) {
+	// Exits not in the route map fall through to the next sequential step.
+	blockDefs := map[string]*Block{
+		"judge": makeJudgeBlock(),
+		"fix":   makeImplBlock(),
+	}
+	fixBlock := *makeImplBlock()
+	fixBlock.Name = "fix"
+	blockDefs["fix"] = &fixBlock
+
+	steps := []PipelineStep{
+		{
+			Block: "judge",
+			Name:  "judge",
+			Route: map[string]string{
+				"pass": "complete", // only route pass; fail falls through
+			},
+		},
+		{Block: "fix", Name: "fix"},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	var judgeState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Name == "judge.judge" {
+			judgeState = &wf.States[i]
+			break
+		}
+	}
+	if judgeState == nil {
+		t.Fatal("judge.judge state not found")
+	}
+
+	// pass → complete (explicit route)
+	if next := judgeState.Transition.Branches["pass"]; next != "complete" {
+		t.Errorf("pass should route to complete, got %q", next)
+	}
+	// fail → fix.impl (default sequential fallthrough)
+	if next := judgeState.Transition.Branches["fail"]; next != "fix.impl" {
+		t.Errorf("fail should fall through to fix.impl, got %q", next)
+	}
+}
+
+func TestComposePipelineNamedSteps(t *testing.T) {
+	// Name field controls namespace prefix, not block type.
+	blockDefs := map[string]*Block{
+		"impl": makeImplBlock(),
+	}
+
+	steps := []PipelineStep{
+		{Block: "impl", Name: "write-code"},
+		{Block: "impl", Name: "fix-bugs"},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	if wf.EntryState != "write-code.impl" {
+		t.Errorf("entry = %q, want write-code.impl", wf.EntryState)
+	}
+
+	names := make(map[string]bool)
+	for _, s := range wf.States {
+		names[s.Name] = true
+	}
+	if !names["write-code.impl"] {
+		t.Error("missing state write-code.impl")
+	}
+	if !names["fix-bugs.impl"] {
+		t.Error("missing state fix-bugs.impl")
+	}
+
+	// write-code.impl should wire to fix-bugs.impl (sequential default).
+	for _, s := range wf.States {
+		if s.Name == "write-code.impl" {
+			if next := s.Transition.Branches[""]; next != "fix-bugs.impl" {
+				t.Errorf("write-code.impl → %q, want fix-bugs.impl", next)
+			}
+		}
+	}
+}
+
+func TestComposePipelineNoRouteSameAsDefault(t *testing.T) {
+	// Pipeline with no route field is identical to sequential behavior.
+	blockDefs := map[string]*Block{
+		"impl":      makeImplBlock(),
+		"adversary": makeAdversaryBlock(),
+	}
+
+	steps := []PipelineStep{
+		{Block: "impl"},
+		{Block: "adversary"},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	// adversary bugs_found should still wire to adversary.adversary (self-loop via internal ref)
+	for _, s := range wf.States {
+		if s.Name == "adversary.adversary" {
+			if next := s.Transition.Branches["bugs_found"]; next != "adversary.adversary" {
+				t.Errorf("bugs_found → %q, want adversary.adversary", next)
+			}
+			if next := s.Transition.Branches["no_bugs_found"]; next != "complete" {
+				t.Errorf("no_bugs_found → %q, want complete", next)
+			}
+		}
 	}
 }
 
