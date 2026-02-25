@@ -86,11 +86,6 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		} else {
 			sharedWorktree = wt
 			workingDir = wt.Dir
-			defer func() {
-				if sharedWorktree != nil {
-					worktree.Remove(sharedWorktree)
-				}
-			}()
 		}
 	}
 
@@ -164,10 +159,10 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 			if sharedWorktree != nil {
 				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
-					sharedWorktree = nil // prevent deferred Remove from deleting the branch
 					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
 				} else {
 					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, hash[:7])
+					worktree.Remove(sharedWorktree)
 				}
 			}
 

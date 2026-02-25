@@ -69,12 +69,13 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			defer func() {
 				if phaseState != nil && phaseState.PhaseStatus == "complete" {
 					if hash, mergeErr := worktree.MergeBack(wt); mergeErr != nil {
-						opts.Logger.Warn("worktree merge failed", "error", mergeErr)
+						opts.Logger.Warn("worktree merge failed, preserving branch for manual resolution", "branch", wt.Branch, "error", mergeErr)
 					} else {
 						fmt.Printf("[%s] Merged worktree: %s\n", opts.PhaseName, hash[:7])
+						worktree.Remove(wt)
 					}
 				}
-				worktree.Remove(wt)
+				// On failure/incomplete: preserve worktree so work isn't lost
 			}()
 		}
 	}
