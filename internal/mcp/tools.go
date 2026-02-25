@@ -80,7 +80,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 	), h.handleIterate)
 
 	s.AddTool(mcp.NewTool("arc_review",
-		mcp.WithDescription("Run adversarial review on a plan. Reviews all phases concurrently (max 3 at a time) with up to 5 iterations of auto-remediation. Updates plan.json with review status."),
+		mcp.WithDescription("Run adversarial review on a plan. Reviews all phases concurrently (max 3 at a time) with a single auto-remediation pass. Updates plan.json with review status."),
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to review")),
 		mcp.WithString("phase", mcp.Description("Review a single phase instead of all phases")),
 		mcp.WithString("model", mcp.Description("Model override for review agents")),
@@ -131,6 +131,12 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("Cancel a running arc_run for a plan."),
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to cancel")),
 	), h.handleRunCancel)
+
+	s.AddTool(mcp.NewTool("arc_discover",
+		mcp.WithDescription("Analyze the codebase for a task. Spawns a read-only discovery agent that explores the project and returns structured analysis: relevant files, complexity, suggested workflow type, phase breakdown, conventions, and risks."),
+		mcp.WithString("task_description", mcp.Required(), mcp.Description("Description of the task to analyze")),
+		mcp.WithString("model", mcp.Description("Model override for the discovery agent")),
+	), h.handleDiscover)
 }
 
 func (h *handlerContext) handleStatus(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -252,6 +258,7 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 			Timeout:       timeout,
 			UseWorktree:   useWorktree,
 			StopOnFailure: true,
+			ChatMode:      true,
 		})
 	}()
 
@@ -278,6 +285,7 @@ func (h *handlerContext) handleIterate(ctx context.Context, req mcp.CallToolRequ
 		PhaseName: phaseName,
 		PlansDir:  h.plansDir(),
 		ArcHome:   h.arcHome,
+		ChatMode:  true,
 	})
 
 	if result.Err != nil {
@@ -348,12 +356,13 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 			defer func() { <-sem }()
 
 			result, err := review.Run(ctx, review.ReviewOptions{
-				PlanName: planName,
-				PlansDir: h.plansDir(),
-				ArcHome:  h.arcHome,
-				Phase:    p,
-				Model:    model,
-				Logger:   h.logger,
+				PlanName:      planName,
+				PlansDir:      h.plansDir(),
+				ArcHome:       h.arcHome,
+				Phase:         p,
+				Model:         model,
+				Logger:        h.logger,
+				MaxIterations: 1,
 			})
 			resultsCh <- phaseResult{Phase: p, Result: result, Err: err}
 		}(phase)
@@ -742,6 +751,30 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 		}
 		return mcp.NewToolResultText(out.String()), nil
 	}
+}
+
+func (h *handlerContext) handleDiscover(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	taskDescription, _ := args["task_description"].(string)
+	model, _ := args["model"].(string)
+
+	if taskDescription == "" {
+		return mcp.NewToolResultError("task_description is required"), nil
+	}
+
+	out, err := dev.RunDiscovery(ctx, dev.DiscoveryOptions{
+		TaskDescription: taskDescription,
+		Model:           model,
+	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("discovery failed: %v", err)), nil
+	}
+
+	data, err := json.MarshalIndent(out.Result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("marshaling result: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (h *handlerContext) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

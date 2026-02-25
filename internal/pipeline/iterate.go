@@ -35,6 +35,7 @@ type IterateOptions struct {
 	PlansDir     string
 	ArcHome      string
 	WorkingDir   string // if set, agent runs in this directory (e.g. worktree)
+	ChatMode     bool   // if true, skip workflow-defined escalation rules
 }
 
 // RunIteration executes a single iteration of the phase state machine.
@@ -86,9 +87,11 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionIntervene, Err: fmt.Errorf("intervention required: %s", msg)}
 	}
 
-	// Check escalation
-	if esc := CheckEscalation(&phaseState, escalationRules); esc != nil {
-		return &arc.IterationResult{Action: arc.ActionEscalate, Err: fmt.Errorf("escalation triggered: %s", esc.Action)}
+	// Check escalation (skipped in chat mode — the chat agent handles intervention)
+	if !opts.ChatMode {
+		if esc := CheckEscalation(&phaseState, escalationRules); esc != nil {
+			return &arc.IterationResult{Action: arc.ActionEscalate, Err: fmt.Errorf("escalation triggered: %s", esc.Action)}
+		}
 	}
 
 	// Check context after state load

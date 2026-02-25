@@ -18,12 +18,12 @@ func TestRegisterTools(t *testing.T) {
 	hctx.registerTools(s)
 
 	tools := s.ListTools()
-	if len(tools) != 12 {
+	if len(tools) != 13 {
 		names := make([]string, 0, len(tools))
 		for name := range tools {
 			names = append(names, name)
 		}
-		t.Fatalf("expected 12 tools, got %d: %v", len(tools), names)
+		t.Fatalf("expected 13 tools, got %d: %v", len(tools), names)
 	}
 
 	expected := []string{
@@ -39,6 +39,7 @@ func TestRegisterTools(t *testing.T) {
 		"arc_archive",
 		"arc_run_status",
 		"arc_run_cancel",
+		"arc_discover",
 	}
 
 	for _, name := range expected {

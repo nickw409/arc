@@ -848,3 +848,15 @@ func TestHandleRunStartsAsync(t *testing.T) {
 		t.Fatal("expected job to be registered")
 	}
 }
+
+func TestHandleDiscoverMissingTask(t *testing.T) {
+	h, _ := newTestHandler(t)
+	result, err := callTool(context.Background(), h, h.handleDiscover, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "task_description is required") {
+		t.Fatalf("expected validation error, got: %s", text)
+	}
+}

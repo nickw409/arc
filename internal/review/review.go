@@ -19,12 +19,13 @@ const MaxReviewIterations = 5
 
 // ReviewOptions configures the adversarial review loop.
 type ReviewOptions struct {
-	PlanName string
-	PlansDir string
-	ArcHome  string
-	Phase    string
-	Model    string
-	Logger   *slog.Logger
+	PlanName      string
+	PlansDir      string
+	ArcHome       string
+	Phase         string
+	Model         string
+	Logger        *slog.Logger
+	MaxIterations int // if > 0, overrides MaxReviewIterations (default 5)
 }
 
 // ReviewResult holds the outcome of a review.
@@ -94,7 +95,11 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 
 		// Check iteration limit
 		history := LoadHistory(histPath)
-		if history.Iterations[opts.Phase] >= MaxReviewIterations {
+		maxIter := MaxReviewIterations
+		if opts.MaxIterations > 0 {
+			maxIter = opts.MaxIterations
+		}
+		if history.Iterations[opts.Phase] >= maxIter {
 			opts.Logger.Info("max review iterations reached, proceeding as conditional",
 				"phase", opts.Phase,
 				"iterations", history.Iterations[opts.Phase],

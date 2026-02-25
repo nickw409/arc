@@ -31,6 +31,7 @@ type LaunchOptions struct {
 	Timeout       int  // wall-clock timeout in seconds (0 = no timeout)
 	UseWorktree   bool // if true, run agents in isolated git worktrees
 	StopOnFailure bool // if true, cancel in-progress phases and return on first failure
+	ChatMode      bool // if true, skip escalation ladder and block immediately for chat-agent intervention
 }
 
 // LaunchResult describes the outcome of an orchestrator run.
@@ -205,6 +206,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 					Config:      opts.Config,
 					Logger:      opts.Logger,
 					UseWorktree: opts.UseWorktree,
+					ChatMode:    opts.ChatMode,
 				})
 				results <- phaseResult{phase: phaseName, err: err}
 			}(phase)
@@ -224,7 +226,15 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 			if r.err != nil {
 				ps := loadPhaseState(planDir, r.phase)
 				if ps != nil && (ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred") {
-					fmt.Printf("[%s] Phase %s, continuing...\n", r.phase, ps.PhaseStatus)
+					if opts.StopOnFailure {
+						if fatalErr == nil {
+							fatalErr = fmt.Errorf("phase %s %s: %w", r.phase, ps.PhaseStatus, r.err)
+							failedPhase = r.phase
+							batchCancel()
+						}
+					} else {
+						fmt.Printf("[%s] Phase %s, continuing...\n", r.phase, ps.PhaseStatus)
+					}
 					continue
 				}
 				if ctx.Err() != nil {

@@ -30,6 +30,7 @@ type RunPhaseOptions struct {
 	Logger       *slog.Logger
 	UseWorktree  bool   // if true, run agents in an isolated git worktree
 	WorkingDir   string // override working directory for agents (set by worktree)
+	ChatMode     bool   // if true, skip escalation ladder and block immediately
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
@@ -133,7 +134,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Check for stuck iterations and generate instructions
 		instructions := ""
-		if phaseState.StuckIterations >= 3 && mode == "impl" {
+		if !opts.ChatMode && phaseState.StuckIterations >= 3 && mode == "impl" {
 			instructions, err = generateStuckInstructions(ctx, opts, phaseState)
 			if err != nil {
 				opts.Logger.Warn("failed to generate stuck instructions", "error", err)
@@ -169,6 +170,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			PlansDir:     opts.PlansDir,
 			ArcHome:      opts.ArcHome,
 			WorkingDir:   opts.WorkingDir,
+			ChatMode:     opts.ChatMode,
 		})
 
 		// Accumulate usage from this iteration into phase state
@@ -435,6 +437,7 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 			Mode:      "fix",
 			PlansDir:  opts.PlansDir,
 			ArcHome:   opts.ArcHome,
+			ChatMode:  opts.ChatMode,
 		})
 		if result.Err != nil {
 			opts.Logger.Warn("fix iteration failed", "error", result.Err)
@@ -454,6 +457,19 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 
 // handleEscalation applies the escalation ladder for stuck phases.
 func handleEscalation(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState) error {
+	// In chat mode, skip the escalation ladder entirely — block immediately
+	// so the chat agent can intervene.
+	if opts.ChatMode {
+		reason := fmt.Sprintf("escalation in state %s (stuck_iterations=%d)",
+			phaseState.CurrentState, phaseState.StuckIterations)
+		sf.Update(func(s *arc.PhaseState) error {
+			s.PhaseStatus = "blocked"
+			s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+			return nil
+		})
+		return fmt.Errorf("phase blocked: %s", reason)
+	}
+
 	stuck := phaseState.StuckIterations
 
 	switch {

@@ -1041,6 +1041,92 @@ func TestE2EStopOnFailure(t *testing.T) {
 	}
 }
 
+// TestE2EChatModeBlocksOnEscalation verifies that in chat mode, handleEscalation
+// blocks immediately instead of applying the escalation ladder (rollback, stuck instructions).
+func TestE2EChatModeBlocksOnEscalation(t *testing.T) {
+	plansDir, scriptDir, _ := setupE2E(t, "e2e-chatesc", []string{"core"}, "feature")
+
+	phaseDir := filepath.Join(plansDir, "e2e-chatesc", "phases", "core")
+	ps := arc.NewPhaseState("e2e-chatesc", "core", "feature")
+	ps.CurrentState = "impl"
+	ps.PhaseStatus = "implementing"
+	ps.StuckIterations = 3
+	ps.RollbackCount = 0
+	writeState(t, phaseDir, ps)
+
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+	writeScript(t, scriptDir, 0, "unused")
+
+	err := handleEscalation(context.Background(), RunPhaseOptions{
+		PlanName:  "e2e-chatesc",
+		PhaseName: "core",
+		PlansDir:  plansDir,
+		ArcHome:   t.TempDir(),
+		Logger:    e2eLogger(),
+		ChatMode:  true,
+	}, sf, ps)
+	if err == nil {
+		t.Fatal("expected error from chat-mode escalation")
+	}
+	if !strings.Contains(err.Error(), "phase blocked") {
+		t.Fatalf("expected 'phase blocked' error, got: %v", err)
+	}
+
+	ps = readState(t, plansDir, "e2e-chatesc", "core")
+	if ps.PhaseStatus != "blocked" {
+		t.Fatalf("expected phase_status=blocked, got %q", ps.PhaseStatus)
+	}
+	if !ps.Blocked.IsBlocked {
+		t.Fatal("expected blocked.is_blocked=true")
+	}
+	if ps.Blocked.Reason == nil || !strings.Contains(*ps.Blocked.Reason, "stuck_iterations=3") {
+		t.Fatalf("expected blocked reason with stuck_iterations=3, got %v", ps.Blocked.Reason)
+	}
+	// In chat mode even with rollback_count=0, no rollback should have happened
+	if ps.RollbackCount != 0 {
+		t.Fatalf("expected no rollback in chat mode, got rollback_count=%d", ps.RollbackCount)
+	}
+}
+
+// TestE2EStopOnFailureBlockedPhase verifies that when StopOnFailure is true,
+// a phase that becomes blocked during execution causes the orchestrator to
+// return a failed result (instead of continuing past it as it does by default).
+func TestE2EStopOnFailureBlockedPhase(t *testing.T) {
+	// Use "direct" workflow: impl → complete (simplest path).
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopblock", []string{"core"}, "direct")
+
+	// Write 5 empty-output scripts to trigger maxConsecutiveRetries → blocked.
+	for i := 0; i < 5; i++ {
+		writeScript(t, scriptDir, i, "")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, lErr := Launch(ctx, LaunchOptions{
+		PlanName:      "e2e-stopblock",
+		PlansDir:      plansDir,
+		ArcHome:       t.TempDir(),
+		ProjectDir:    projectDir,
+		Logger:        e2eLogger(),
+		StopOnFailure: true,
+		ChatMode:      true,
+	})
+	// With StopOnFailure, blocked phases should produce a failed result (nil error).
+	if lErr != nil {
+		t.Fatalf("expected nil error with StopOnFailure, got: %v", lErr)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected result status failed, got %q", result.Status)
+	}
+	if result.FailedPhase != "core" {
+		t.Fatalf("expected FailedPhase=core, got %q", result.FailedPhase)
+	}
+	if !strings.Contains(result.FailedReason, "blocked") {
+		t.Fatalf("expected FailedReason to mention 'blocked', got %q", result.FailedReason)
+	}
+}
+
 // writeScript writes a scripted response file using the proper integer formatting.
 func writeScript(t *testing.T, scriptDir string, callIndex int, content string) {
 	t.Helper()
