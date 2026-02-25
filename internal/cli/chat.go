@@ -36,12 +36,14 @@ func newChatCmd() *cobra.Command {
 				return fmt.Errorf("claude CLI not found in PATH: %w", err)
 			}
 
-			// Register MCP server (unless --no-register)
+			// Register MCP server if not already present (unless --no-register)
 			if !noRegister {
-				register := exec.Command(claudeBinary, "mcp", "add", "--scope", "local", "arc", "--", arcBinary, "serve")
-				register.Stderr = os.Stderr
-				if err := register.Run(); err != nil {
-					return fmt.Errorf("registering MCP server: %w", err)
+				if err := exec.Command(claudeBinary, "mcp", "get", "arc").Run(); err != nil {
+					register := exec.Command(claudeBinary, "mcp", "add", "--scope", "local", "arc", "--", arcBinary, "serve")
+					register.Stderr = os.Stderr
+					if err := register.Run(); err != nil {
+						return fmt.Errorf("registering MCP server: %w", err)
+					}
 				}
 			}
 
