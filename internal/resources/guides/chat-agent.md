@@ -91,7 +91,7 @@ Report results to the user. Suggest `arc_archive` to clean up.
 
 | Type | Flow | When to use |
 |------|------|-------------|
-| **feature** | qa → qa_review → impl → impl_review | New functions, types, modules, APIs |
+| **feature** | impl.act → check.adversary → complete (bugs_found loops back to impl.act) | New functions, types, modules, APIs |
 | **bugfix** | investigate → regression_tests → test_review → fix → fix_review | Fixing incorrect behavior |
 | **refactor** | characterize → char_review → refactor → verify | Restructuring without changing behavior |
 | **investigation** | research → draft → review | Research, answering questions (no code changes) |

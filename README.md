@@ -109,14 +109,14 @@ Plan (e.g., "fix-wasm-rng")
   └── Phase: investigate-variance
   │     └── States: research → draft → review → complete
   └── Phase: port-pcg-algorithm
-  │     └── States: qa → qa_review → impl → impl_review → complete
+  │     └── States: impl.act → check.adversary → complete
   └── Phase: verify-cross-engine
-        └── States: qa → qa_review → impl → impl_review → complete
+        └── States: impl.act → check.adversary → complete
 ```
 
 - **Plan** — The overall work request. Contains one or more phases.
 - **Phase** — A self-contained unit of work with its own state machine, test suite, and `state.json`.
-- **State** — The current position in a workflow's state machine (e.g., `qa`, `impl_review`).
+- **State** — The current position in a workflow's state machine (e.g., `impl.act`, `check.adversary`).
 
 ### Execution Flow
 
@@ -167,7 +167,7 @@ Five workflow types, each with its own state machine and prompt set:
 
 | Type | Entry State | Description |
 |------|-------------|-------------|
-| **feature** | `qa` | TDD — write tests first, then implement |
+| **feature** | `impl.act` | Implement with tests, then harden with one-shot adversarial review |
 | **bugfix** | `investigate` | Reproduce the bug, write regression tests, fix |
 | **investigation** | `research` | Research only, no code changes, outputs documentation |
 | **refactor** | `characterize` | Characterization tests must pass before and after changes |
@@ -185,40 +185,21 @@ Workflows are data, not code. A simplified example:
 name: feature
 version: 4
 
-states:
-  - name: qa
-    prompt: prompts/feature/qa.md
-    next: qa_review
+pipeline:
+  - block: act
+    name: impl
+    params:
+      prompt: "prompts/feature/impl.md"
+      max_turns: "200"
+  - block: adversary
+    name: check
+    run_once: true      # adversary gets one pass; auto-skips on re-entry
+    skip_exit: no_bugs_found
+    params: {max_turns: "30"}
+    route:
+      bugs_found: impl          # loop back to fix
+      no_bugs_found: complete
 
-  - name: qa_review
-    prompt: prompts/feature/qa-review.md
-    verdicts: [approved, gaps_found]
-    next:
-      approved: impl
-      gaps_found: qa
-
-  - name: impl
-    prompt: prompts/feature/impl.md
-    constraints:
-      require_artifacts_in: [qa_reasoning.md]
-    after:
-      - action: run_tests
-    escalation:
-      - at_iteration: 3
-        action: analyze_stuck
-      - at_iteration: 5
-        action: switch_model
-        params: { model: opus }
-    next: impl_review
-
-  - name: impl_review
-    prompt: prompts/feature/impl-review.md
-    verdicts: [approved, concerns]
-    next:
-      approved: complete
-      concerns: impl
-
-entry_state: qa
 terminal_states: [complete, blocked]
 ```
 
@@ -231,6 +212,7 @@ Key capabilities by schema version:
 | V3 | Parameters and Handlebars-style template variables |
 | V4 | Hooks, constraints, escalation triggers, intervention |
 | V5 | Parallel state execution with join strategies |
+| V6 | Composable block pipeline with `run_once`/`skip_exit` |
 
 All versions are backwards compatible — V1 workflows run on the V5 engine.
 
@@ -401,19 +383,15 @@ The orchestrator agent cannot edit code directly. Sub-agents are restricted from
 2. **Git hooks** — Enforce file boundaries based on agent role (qa, impl, review).
 3. **Watchdog** — Background process that kills unauthorized test processes.
 
-## Review Artifacts
+## Phase Artifacts
 
-Each phase produces reasoning and review documents:
+Each phase directory (`.plans/active/<plan>/phases/<phase>/`) contains:
 
 | File | Written By | Purpose |
 |------|------------|---------|
-| `qa_reasoning.md` | QA agent | Explains what's tested and why |
-| `qa_review.md` | QA reviewer | Verifies coverage, finds gaps |
-| `impl_reasoning.md` | Impl agent | Hypothesis, evidence, alternatives |
-| `impl_review.md` | Impl reviewer | Challenges weak reasoning |
-| `last_test_output.txt` | Pipeline | Full test output for impl-review |
-
-These live in `.plans/active/<plan>/phases/<phase>/`.
+| `plan.md` | Human / arc dev | Phase specification |
+| `state.json` | Pipeline | Current state, iteration count, test results, verdicts history |
+| `*-memory.md` | Agent | Notes saved between iterations of the same state |
 
 ## Directory Structure
 

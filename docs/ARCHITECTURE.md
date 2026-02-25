@@ -18,7 +18,7 @@ The orchestration system is a general-purpose workflow executor that handles any
 
 | Type | Description | Key Difference |
 |------|-------------|----------------|
-| Feature | New capability | TDD - tests written first, fail initially |
+| Feature | New capability | Implement with tests, then one-shot adversarial review |
 | Bug Fix | Correct existing behavior | Tests define correct behavior, current code fails them |
 | Investigation | Produce findings | No code changes, output is documentation |
 | Refactor | Change structure | Characterization tests pass before AND after |
@@ -48,9 +48,9 @@ Plan: fix-wasm-rng
 +-- Phase: investigate-variance      <-- A portion of work
 |   +-- States: research -> draft -> review -> complete
 +-- Phase: port-pcg-algorithm        <-- Another portion
-|   +-- States: qa -> qa_review -> impl -> impl_review -> complete
+|   +-- States: impl.act -> check.adversary -> complete
 +-- Phase: verify-cross-engine       <-- Final portion
-    +-- States: qa -> qa_review -> impl -> impl_review -> complete
+    +-- States: impl.act -> check.adversary -> complete
 ```
 
 | Concept | What it is | Example |

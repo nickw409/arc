@@ -425,16 +425,32 @@ states:
 ```
 
 **Feature with cross-engine verification:**
-```yaml
-extends: feature
 
-states:
-  - name: cross_engine_verify
-    prompt: prompts/custom/cross-engine.md
+Pipeline-based workflows (like `feature`) cannot use `extends`/`insert_after`. Compose a custom pipeline instead:
+
+```yaml
+name: feature-cross-engine
+version: 1
+pipeline:
+  - block: act
+    name: impl
     params:
-      engines: [cpu, gpu, wasm]
-      tolerance: 0.01
-    insert_after: impl
+      prompt: "prompts/my-project/impl.md"
+      max_turns: "200"
+  - block: act
+    name: cross-verify
+    params:
+      prompt: "prompts/my-project/cross-engine-verify.md"
+      max_turns: "60"
+  - block: adversary
+    name: check
+    run_once: true
+    skip_exit: no_bugs_found
+    params: {max_turns: "30"}
+    route:
+      bugs_found: impl
+      no_bugs_found: complete
+terminal_states: [complete, blocked]
 ```
 
 ## Phase Decomposition Guidelines

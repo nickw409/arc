@@ -1149,12 +1149,30 @@ name: adversarial
 version: 1
 description: Adversarial testing workflow
 pipeline:
-  - block: impl
+  - block: act
+    name: impl
     params: {max_turns: 45}
   - block: adversary
-    params: {max_rounds: 3, max_turns: 30}
+    name: check
+    run_once: true       # block executes once; subsequent visits auto-produce skip_exit
+    skip_exit: no_bugs_found
+    params: {max_turns: 30}
+    route:
+      bugs_found: impl
+      no_bugs_found: complete
 terminal_states: [complete, blocked]
 ```
+
+**Pipeline step fields:**
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `block` | string | Block type to instantiate |
+| `name` | string | Step identity; used as state namespace prefix and routing target |
+| `params` | map | Override block param defaults |
+| `route` | map | Map block exits to step names or terminal states |
+| `run_once` | bool | If true, block runs once; subsequent visits auto-produce `skip_exit` without spawning an agent |
+| `skip_exit` | string | Exit name to auto-produce on re-entry when `run_once: true` |
 
 ### Resolution Rules
 
@@ -1182,12 +1200,14 @@ Parallel groups generate synthetic `_fork_N` and `_join_N` states. The orchestra
 
 ### Built-in Blocks
 
-| Block | States | Params | Purpose |
-|-------|--------|--------|---------|
-| `impl` | `impl` | max_turns, timeout, model | Free-form implementation |
-| `qa-loop` | `qa`, `qa_review` | max_turns | QA writes tests → review loop |
-| `review` | `impl_review` | max_turns | Implementation review |
-| `adversary` | `adversary` | max_rounds, max_turns | Adversarial bug finding |
+| Block | Entry State | Params | Purpose |
+|-------|-------------|--------|---------|
+| `act` | `act` | prompt, max_turns, timeout, model | Generic linear action — do work and exit unconditionally |
+| `adversary` | `adversary` | prompt, max_turns | Adversarial review: find bugs, write failing tests, verdict bugs_found/no_bugs_found |
+| `qa` | `qa` | prompt, max_turns | Write tests (QA loop entry) |
+| `qa-review` | `qa_review` | prompt, max_turns | Review tests, verdict approved/gaps_found |
+| `review` | `impl_review` | prompt, max_turns | Review implementation, verdict approved/concerns |
+| `judge` | `judge` | prompt, verdict_a, verdict_b, max_turns | Generic two-verdict evaluator |
 
 ### Composition Validation
 
