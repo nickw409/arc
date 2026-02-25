@@ -3,7 +3,7 @@ description: Write tests that capture intended behavior
 params:
   max_turns: {default: "100"}
   timeout: {default: "1800"}
-  prompt: {default: "prompts/feature/qa.md"}
+  prompt: {default: "prompts/blocks/qa.md"}
 entry: qa
 exits: [done]
 states:

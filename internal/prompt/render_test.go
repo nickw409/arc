@@ -205,7 +205,7 @@ func TestStateToTemplateMapNilPanics(t *testing.T) {
 
 func TestRenderFromResources(t *testing.T) {
 	// Test the file-based Render path using an embedded prompt.
-	result, err := Render("feature/qa.md", TemplateContext{
+	result, err := Render("blocks/qa.md", TemplateContext{
 		Phase:        "test-phase",
 		Plan:         "test-plan",
 		Iteration:    1,
@@ -229,7 +229,7 @@ func TestRenderFromResources(t *testing.T) {
 
 func TestRenderPartialIncludesInlined(t *testing.T) {
 	// Verify that {{> common/test-commands.md}} is actually inlined, not stripped.
-	result, err := Render("feature/qa.md", TemplateContext{
+	result, err := Render("blocks/qa.md", TemplateContext{
 		Phase:        "test-phase",
 		Plan:         "test-plan",
 		Iteration:    1,

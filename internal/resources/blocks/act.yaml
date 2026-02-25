@@ -4,7 +4,7 @@ params:
   max_turns: {default: "45"}
   timeout: {default: "900"}
   model: {default: ""}
-  prompt: {default: "prompts/adversarial/impl.md"}
+  prompt: {default: "prompts/blocks/act.md"}
 entry: act
 exits: [done]
 states:

@@ -2,7 +2,7 @@ name: adversary
 description: Adversary writes adversarial tests to find bugs in existing code
 params:
   max_turns: {default: "30"}
-  prompt: {default: "prompts/adversarial/adversary.md"}
+  prompt: {default: "prompts/blocks/adversary.md"}
 entry: adversary
 exits: [bugs_found, no_bugs_found]
 states:

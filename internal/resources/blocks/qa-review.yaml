@@ -2,7 +2,7 @@ name: qa-review
 description: Review test quality, emit approved or gaps_found
 params:
   max_turns: {default: "15"}
-  prompt: {default: "prompts/feature/qa-review.md"}
+  prompt: {default: "prompts/blocks/qa-review.md"}
 entry: qa_review
 exits: [approved, gaps_found]
 states:

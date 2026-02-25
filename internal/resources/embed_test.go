@@ -39,12 +39,12 @@ func TestEmbeddedAllWorkflowTypes(t *testing.T) {
 }
 
 func TestEmbeddedPromptAccessible(t *testing.T) {
-	data, err := PromptBytes("feature/qa.md")
+	data, err := PromptBytes("blocks/qa.md")
 	if err != nil {
-		t.Fatalf("PromptBytes(feature/qa.md) error: %v", err)
+		t.Fatalf("PromptBytes(blocks/qa.md) error: %v", err)
 	}
 	if len(data) == 0 {
-		t.Fatal("PromptBytes(feature/qa.md) returned empty byte slice")
+		t.Fatal("PromptBytes(blocks/qa.md) returned empty byte slice")
 	}
 }
 

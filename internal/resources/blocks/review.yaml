@@ -3,7 +3,7 @@ description: Review implementation quality, emit approved or concerns
 params:
   max_turns: {default: "50"}
   timeout: {default: "900"}
-  prompt: {default: "prompts/feature/impl-review.md"}
+  prompt: {default: "prompts/blocks/review.md"}
 entry: impl_review
 exits: [approved, concerns]
 states:
