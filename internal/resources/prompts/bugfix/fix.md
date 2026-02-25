@@ -51,4 +51,9 @@ Create `{{phase_dir}}/fix_reasoning.md`:
 - Do NOT modify the regression tests
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of your changes and exit.
+Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after running tests.
+
+When done, write:
+
+## Memory
+[What fix was applied, which files were changed, test results. Future runs of this state will see this.]

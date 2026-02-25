@@ -7,6 +7,9 @@ states:
     description: Execute the task directly
     prompt: prompts/direct/execute.md
     next: complete
+    agent:
+      max_turns: 200
+      timeout: 3600
 
   - name: complete
     description: Task completed

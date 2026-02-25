@@ -30,10 +30,12 @@ type RunPhaseOptions struct {
 	Logger       *slog.Logger
 	UseWorktree  bool   // if true, create a per-phase worktree (instead of shared plan-level)
 	WorkingDir   string // override working directory for agents (set by worktree)
-	ChatMode     bool   // if true, skip escalation ladder and block immediately
+	ChatMode     bool   // if true, block immediately instead of retrying on failure
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
+// Each state is run as one long agent session (via RunState). On session-level
+// crash the phase retries once before blocking.
 func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 	phaseDir := filepath.Join(opts.PlansDir, opts.PlanName, "phases", opts.PhaseName)
 
@@ -88,9 +90,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 		}
 	}
 
-	// Run iteration loop
-	const maxConsecutiveRetries = 5
-	consecutiveRetries := 0
+	// Main loop: run one agent session per state until terminal
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -129,19 +129,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			return fmt.Errorf("phase is blocked: %s", stringOrDefault(phaseState.Blocked.Reason, "unknown"))
 		}
 
-		// Derive mode from state name
-		mode := deriveMode(phaseState.CurrentState)
-
-		// Check for stuck iterations and generate instructions
-		instructions := ""
-		if !opts.ChatMode && phaseState.StuckIterations >= 3 && mode == "impl" {
-			instructions, err = generateStuckInstructions(ctx, opts, phaseState)
-			if err != nil {
-				opts.Logger.Warn("failed to generate stuck instructions", "error", err)
-			}
-		}
-
-		// Increment per-state iteration counter before running
+		// Track per-state visit count (informational; no longer enforces a cap)
 		curState := phaseState.CurrentState
 		sf.Update(func(s *arc.PhaseState) error {
 			if s.StateIterations == nil {
@@ -150,30 +138,24 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			s.StateIterations[curState]++
 			return nil
 		})
-		if phaseState.StateIterations == nil {
-			phaseState.StateIterations = make(map[string]int)
-		}
-		phaseState.StateIterations[curState]++
 
-		fmt.Printf("[%s] %s iteration %d", opts.PhaseName, mode, phaseState.StateIterations[curState])
+		fmt.Printf("[%s] running state: %s", opts.PhaseName, phaseState.CurrentState)
 		if phaseState.TestsTotal > 0 {
 			fmt.Printf(" (tests: %d/%d)", phaseState.TestsPassing, phaseState.TestsTotal)
 		}
 		fmt.Println()
 
-		// Run iteration
-		result := pipeline.RunIteration(ctx, opts.Logger, pipeline.IterateOptions{
-			PlanName:     opts.PlanName,
-			PhaseName:    opts.PhaseName,
-			Mode:         mode,
-			Instructions: instructions,
-			PlansDir:     opts.PlansDir,
-			ArcHome:      opts.ArcHome,
-			WorkingDir:   opts.WorkingDir,
-			ChatMode:     opts.ChatMode,
+		// Run the state — one long agent session
+		result := pipeline.RunState(ctx, opts.Logger, pipeline.IterateOptions{
+			PlanName:   opts.PlanName,
+			PhaseName:  opts.PhaseName,
+			PlansDir:   opts.PlansDir,
+			ArcHome:    opts.ArcHome,
+			WorkingDir: opts.WorkingDir,
+			ChatMode:   opts.ChatMode,
 		})
 
-		// Accumulate usage from this iteration into phase state
+		// Accumulate usage from this run into phase state
 		if !result.Usage.IsZero() {
 			sf.Update(func(s *arc.PhaseState) error {
 				s.Usage = s.Usage.Add(result.Usage)
@@ -182,50 +164,49 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 		}
 
 		if result.Err != nil {
-			switch result.Action {
-			case arc.ActionRetry:
-				consecutiveRetries++
-				if consecutiveRetries >= maxConsecutiveRetries {
-					fmt.Printf("[%s] Blocked: %d consecutive retries on %q\n", opts.PhaseName, consecutiveRetries, phaseState.CurrentState)
-					reason := fmt.Sprintf("max consecutive retries (%d) in state %s: %v", consecutiveRetries, phaseState.CurrentState, result.Err)
+			if result.Action == arc.ActionRetry && !opts.ChatMode {
+				// One retry for session-level crash (process crash, non-zero exit)
+				opts.Logger.Warn("state run failed, retrying once", "error", result.Err)
+				result = pipeline.RunState(ctx, opts.Logger, pipeline.IterateOptions{
+					PlanName:   opts.PlanName,
+					PhaseName:  opts.PhaseName,
+					PlansDir:   opts.PlansDir,
+					ArcHome:    opts.ArcHome,
+					WorkingDir: opts.WorkingDir,
+					ChatMode:   opts.ChatMode,
+				})
+				if !result.Usage.IsZero() {
 					sf.Update(func(s *arc.PhaseState) error {
-						s.PhaseStatus = "blocked"
-						s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+						s.Usage = s.Usage.Add(result.Usage)
 						return nil
 					})
-					return fmt.Errorf("phase blocked: %s", reason)
 				}
-				opts.Logger.Warn("iteration failed, retrying", "error", result.Err, "consecutive_retries", consecutiveRetries)
-				continue
-			case arc.ActionEscalate:
-				if err := handleEscalation(ctx, opts, sf, phaseState); err != nil {
-					return err
-				}
-				continue
-			case arc.ActionIntervene:
-				return fmt.Errorf("intervention required: %w", result.Err)
-			default:
-				return result.Err
+			}
+			if result.Err != nil {
+				reason := result.Err.Error()
+				sf.Update(func(s *arc.PhaseState) error {
+					s.PhaseStatus = "blocked"
+					s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+					return nil
+				})
+				return fmt.Errorf("phase blocked: %w", result.Err)
 			}
 		}
 
-		// Successful iteration — reset retry counter
-		consecutiveRetries = 0
-
-		// Re-read state after iteration (agent may have modified it)
+		// Re-read state after run (agent updated it via arc manage or RunState updated it)
 		phaseState, err = sf.Read()
 		if err != nil {
-			return fmt.Errorf("reading state after iteration: %w", err)
+			return fmt.Errorf("reading state after run: %w", err)
 		}
 
-		// Post-iteration actions based on what state we're now in
+		// Post-run actions based on what state we're now in
 		if err := postIterationActions(ctx, opts, sf, phaseState, machine, result); err != nil {
 			return err
 		}
 	}
 }
 
-// postIterationActions handles test running, commits, and reviews after an iteration.
+// postIterationActions handles test running, commits, and reviews after a state run.
 func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState, machine *workflow.Machine, result *arc.IterationResult) error {
 	currentState := phaseState.CurrentState
 	status := pipeline.MapStateToStatus(currentState)
@@ -240,7 +221,7 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 	case currentState == "impl" && result.Verdict == arc.VerdictApproved && isComingFromQAReview(phaseState):
 		fmt.Printf("[%s] QA Review: APPROVED\n", opts.PhaseName)
 
-	// In impl state: run tests after each iteration
+	// In impl state: run tests after each run
 	case currentState == "impl" || status == "implementing":
 		if err := runAndRecordTests(ctx, opts, sf); err != nil {
 			opts.Logger.Warn("test run failed", "error", err)
@@ -282,7 +263,7 @@ func isAdversarialState(currentState string, result *arc.IterationResult) bool {
 	return result.Verdict == arc.VerdictBugsFound || result.Verdict == arc.VerdictNoBugsFound
 }
 
-// adversarialPostActions handles post-iteration logic specific to the adversarial workflow.
+// adversarialPostActions handles post-run logic specific to the adversarial workflow.
 func adversarialPostActions(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState, result *arc.IterationResult) error {
 	switch {
 	// After adversary found bugs → record new test files, increment round
@@ -431,7 +412,7 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 			return err
 		}
 		// Run fix mode to correct the test
-		result := pipeline.RunIteration(ctx, opts.Logger, pipeline.IterateOptions{
+		result := pipeline.RunState(ctx, opts.Logger, pipeline.IterateOptions{
 			PlanName:  opts.PlanName,
 			PhaseName: opts.PhaseName,
 			Mode:      "fix",
@@ -440,7 +421,7 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 			ChatMode:  opts.ChatMode,
 		})
 		if result.Err != nil {
-			opts.Logger.Warn("fix iteration failed", "error", result.Err)
+			opts.Logger.Warn("fix run failed", "error", result.Err)
 		}
 		// Clear disputes to return to implementing
 		return sf.Update(func(s *arc.PhaseState) error {
@@ -453,56 +434,6 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 
 	fmt.Printf("[%s] Dispute REJECTED: %s\n", opts.PhaseName, resolution.Reason)
 	return state.RejectDispute(sf, resolution.Reason)
-}
-
-// handleEscalation applies the escalation ladder for stuck phases.
-func handleEscalation(ctx context.Context, opts RunPhaseOptions, sf *state.StateFile, phaseState *arc.PhaseState) error {
-	// In chat mode, skip the escalation ladder entirely — block immediately
-	// so the chat agent can intervene.
-	if opts.ChatMode {
-		reason := fmt.Sprintf("escalation in state %s (stuck_iterations=%d)",
-			phaseState.CurrentState, phaseState.StuckIterations)
-		sf.Update(func(s *arc.PhaseState) error {
-			s.PhaseStatus = "blocked"
-			s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
-			return nil
-		})
-		return fmt.Errorf("phase blocked: %s", reason)
-	}
-
-	stuck := phaseState.StuckIterations
-
-	switch {
-	case stuck >= 6:
-		// Max stuck — try rollback
-		if phaseState.RollbackCount >= 2 {
-			fmt.Printf("[%s] Permanently blocked after %d rollbacks\n", opts.PhaseName, phaseState.RollbackCount)
-			return sf.Update(func(s *arc.PhaseState) error {
-				s.PhaseStatus = "blocked"
-				reason := "max rollbacks exhausted"
-				s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
-				return nil
-			})
-		}
-		fmt.Printf("[%s] Rollback (attempt %d/2)\n", opts.PhaseName, phaseState.RollbackCount+1)
-		return sf.Update(func(s *arc.PhaseState) error {
-			s.Iteration.Current = 0
-			s.StuckIterations = 0
-			s.TestsPassing = 0
-			s.TestsTotal = 0
-			s.RollbackCount++
-			return nil
-		})
-
-	case stuck >= 3:
-		// Escalation — generate instructions for next iteration
-		fmt.Printf("[%s] Stuck for %d iterations, escalating...\n", opts.PhaseName, stuck)
-		// The stuck instructions will be generated in the main loop
-		return nil
-
-	default:
-		return nil
-	}
 }
 
 // isComingFromQAReview checks if the previous verdict was qa_review → approved.
@@ -534,30 +465,6 @@ func phaseObjective(opts RunPhaseOptions) string {
 		return strings.ToLower(line)
 	}
 	return "implement phase"
-}
-
-// deriveMode maps a workflow state name to a prompt mode string.
-func deriveMode(stateName string) string {
-	// Strip block namespace prefix for mode derivation
-	base := stateName
-	if idx := strings.LastIndex(stateName, "."); idx >= 0 {
-		base = stateName[idx+1:]
-	}
-
-	var mode string
-	switch {
-	case strings.Contains(base, "review"):
-		mode = base
-	case base == "qa":
-		mode = "qa"
-	case base == "adversary":
-		mode = "adversary"
-	case base == "impl_fix":
-		mode = "impl-fix"
-	default:
-		mode = "impl"
-	}
-	return strings.ReplaceAll(mode, "_", "-")
 }
 
 func stringOrDefault(s *string, def string) string {

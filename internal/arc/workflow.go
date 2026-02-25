@@ -46,6 +46,11 @@ type StateConfig struct {
 	After       []HookConfig      `yaml:"after"`
 	Parallel    *ParallelConfig   `yaml:"parallel"`
 	Agent       *AgentConfig      `yaml:"agent"`
+	// RunOnce, when true, causes this state to be skipped on all visits after
+	// the first. The SkipVerdict is auto-produced instead of spawning an agent,
+	// allowing the pipeline to advance past the state on re-entry.
+	RunOnce     bool   `yaml:"run_once"`
+	SkipVerdict string `yaml:"skip_verdict"`
 }
 
 // Transition is the canonical transition format.

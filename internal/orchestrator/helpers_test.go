@@ -6,56 +6,6 @@ import (
 	"github.com/nwiley/arc/internal/arc"
 )
 
-func TestDeriveModeQAReview(t *testing.T) {
-	got := deriveMode("qa_review")
-	if got != "qa-review" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "qa_review", got, "qa-review")
-	}
-}
-
-func TestDeriveModeImplReview(t *testing.T) {
-	got := deriveMode("impl_review")
-	if got != "impl-review" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "impl_review", got, "impl-review")
-	}
-}
-
-func TestDeriveModeQA(t *testing.T) {
-	got := deriveMode("qa")
-	if got != "qa" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "qa", got, "qa")
-	}
-}
-
-func TestDeriveModeImpl(t *testing.T) {
-	got := deriveMode("impl")
-	if got != "impl" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "impl", got, "impl")
-	}
-}
-
-func TestDeriveModeReview(t *testing.T) {
-	got := deriveMode("review")
-	if got != "review" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "review", got, "review")
-	}
-}
-
-func TestDeriveModeFix(t *testing.T) {
-	// "fix" doesn't contain "review" and isn't "qa", so falls through to "impl"
-	got := deriveMode("fix")
-	if got != "impl" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "fix", got, "impl")
-	}
-}
-
-func TestDeriveModeUnknownState(t *testing.T) {
-	got := deriveMode("something_else")
-	if got != "impl" {
-		t.Fatalf("deriveMode(%q) = %q, want %q", "something_else", got, "impl")
-	}
-}
-
 func TestStringOrDefaultWithValue(t *testing.T) {
 	s := "hello"
 	got := stringOrDefault(&s, "default")

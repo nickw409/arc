@@ -58,4 +58,7 @@ Create `{{phase_dir}}/baseline.md`:
 - Ensure measurements are reproducible
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the baseline results and exit.
+When done, write:
+
+## Memory
+[Key findings, metrics, decisions made. Future runs of this state will see this.]

@@ -61,4 +61,7 @@ Create `{{phase_dir}}/analysis.md`:
 - Document expected impact for each recommendation
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of your findings and exit.
+When done, write:
+
+## Memory
+[Key findings, metrics, decisions made. Future runs of this state will see this.]

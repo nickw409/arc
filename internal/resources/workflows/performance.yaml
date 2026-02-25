@@ -7,18 +7,30 @@ states:
     description: Establish performance baseline
     prompt: prompts/performance/baseline.md
     next: analyze
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: analyze
     description: Profile and identify bottlenecks
     prompt: prompts/performance/analyze.md
     next: optimize
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: optimize
     description: Implement optimization
     prompt: prompts/performance/optimize.md
     next: benchmark
+    agent:
+      max_turns: 200
+      timeout: 3600
   - name: benchmark
     description: Verify improvement and correctness
     prompt: prompts/performance/benchmark.md
     next: complete
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: complete
     description: Optimization completed
     prompt: prompts/common/complete.md

@@ -4,19 +4,15 @@ package arc
 type ResultAction int
 
 const (
-	ActionContinue  ResultAction = iota // advance to next state
-	ActionRetry                         // same state, next iteration
-	ActionEscalate                      // trigger escalation ladder
-	ActionIntervene                     // stop and wait for human
-	ActionAbort                         // unrecoverable
+	ActionContinue ResultAction = iota // advance to next state
+	ActionRetry                        // session-level failure, retry once
+	ActionAbort                        // unrecoverable
 )
 
 var resultActionNames = [...]string{
-	ActionContinue:  "continue",
-	ActionRetry:     "retry",
-	ActionEscalate:  "escalate",
-	ActionIntervene: "intervene",
-	ActionAbort:     "abort",
+	ActionContinue: "continue",
+	ActionRetry:    "retry",
+	ActionAbort:    "abort",
 }
 
 // String returns the human-readable name of the action.
@@ -27,7 +23,7 @@ func (a ResultAction) String() string {
 	return resultActionNames[a]
 }
 
-// IterationResult is the outcome of a single iteration.
+// IterationResult is the outcome of a single state run.
 type IterationResult struct {
 	NextState string       // empty if no transition
 	Verdict   Verdict      // the parsed verdict, if any

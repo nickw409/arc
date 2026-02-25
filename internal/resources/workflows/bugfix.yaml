@@ -7,10 +7,16 @@ states:
     description: Understand current behavior and root cause
     prompt: prompts/bugfix/investigate.md
     next: regression_tests
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: regression_tests
     description: Write tests defining correct behavior
     prompt: prompts/bugfix/regression-tests.md
     next: test_review
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: test_review
     description: Review regression test coverage
     prompt: prompts/bugfix/test-review.md
@@ -23,10 +29,16 @@ states:
     next:
       approved: fix
       gaps_found: regression_tests
+    agent:
+      max_turns: 50
+      timeout: 900
   - name: fix
     description: Implement the fix
     prompt: prompts/bugfix/fix.md
     next: fix_review
+    agent:
+      max_turns: 200
+      timeout: 3600
   - name: fix_review
     description: Review fix implementation
     prompt: prompts/bugfix/fix-review.md
@@ -39,6 +51,9 @@ states:
     next:
       approved: complete
       concerns: fix
+    agent:
+      max_turns: 50
+      timeout: 900
   - name: complete
     description: Phase completed
     prompt: prompts/common/complete.md

@@ -7,10 +7,16 @@ states:
     description: Examine codebase and gather information
     prompt: prompts/investigation/research.md
     next: draft
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: draft
     description: Write findings document
     prompt: prompts/investigation/draft.md
     next: review
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: review
     description: Review findings for completeness
     prompt: prompts/investigation/review.md
@@ -23,6 +29,9 @@ states:
     next:
       approved: complete
       gaps_found: draft
+    agent:
+      max_turns: 50
+      timeout: 900
   - name: complete
     description: Investigation completed
     prompt: prompts/common/complete.md

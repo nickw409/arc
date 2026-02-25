@@ -481,6 +481,60 @@ func TestComposePipelineNoRouteSameAsDefault(t *testing.T) {
 	}
 }
 
+func TestComposePipelineRunOnce(t *testing.T) {
+	// Pipeline: impl → adversary (run_once, skip_exit: no_bugs_found)
+	// Expect: adversary entry state has RunOnce=true and SkipVerdict="no_bugs_found".
+	blockDefs := map[string]*Block{
+		"impl":      makeImplBlock(),
+		"adversary": makeAdversaryBlock(),
+	}
+
+	steps := []PipelineStep{
+		{Block: "impl", Name: "impl"},
+		{
+			Block:    "adversary",
+			Name:     "check",
+			RunOnce:  true,
+			SkipExit: "no_bugs_found",
+			Route: map[string]string{
+				"bugs_found":    "impl",
+				"no_bugs_found": "complete",
+			},
+		},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	// Find the adversary entry state (check.adversary).
+	var adversaryState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Name == "check.adversary" {
+			adversaryState = &wf.States[i]
+			break
+		}
+	}
+	if adversaryState == nil {
+		t.Fatal("check.adversary state not found")
+	}
+
+	if !adversaryState.RunOnce {
+		t.Error("check.adversary should have RunOnce=true")
+	}
+	if adversaryState.SkipVerdict != "no_bugs_found" {
+		t.Errorf("check.adversary SkipVerdict = %q, want %q", adversaryState.SkipVerdict, "no_bugs_found")
+	}
+
+	// Non-run_once steps should not have RunOnce set.
+	for _, s := range wf.States {
+		if s.Name == "impl.impl" && s.RunOnce {
+			t.Error("impl.impl should not have RunOnce=true")
+		}
+	}
+}
+
 func TestComposePipelineMissingBlock(t *testing.T) {
 	steps := []PipelineStep{
 		{Block: "nonexistent"},

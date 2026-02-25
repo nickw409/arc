@@ -42,7 +42,14 @@ OR
 concerns
 ```
 
-The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+Before the verdict, write:
+
+```
+## Memory
+[What you reviewed, what checklist items passed/failed, key findings.]
+```
+
+Then the verdict (NOT inside a code block). The `## Verdict` header and verdict value MUST appear in your output. Valid verdicts:
 
 - **approved** — Fix is correct and minimal
 - **concerns** — Address before proceeding (list specific concerns above the verdict)

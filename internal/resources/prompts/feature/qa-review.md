@@ -40,6 +40,19 @@ OR
 gaps_found
 ```
 
+Before the verdict, write a memory section:
+
+```
+## Memory
+[Key observations: what tests you checked, what was covered, what gaps were found.]
+```
+
+Then end with the verdict in this EXACT format (NOT inside a code block):
+
+## Verdict
+
+approved
+
 The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
 
 - **approved** — Tests adequately cover the specification

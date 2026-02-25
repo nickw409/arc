@@ -10,7 +10,11 @@ You are implementing phase: **{{phase}}** of plan: **{{plan}}**.
 {{plan_md}}
 {{/if}}
 
-This is iteration {{iteration}}.
+{{#if previous_memory}}
+## Previous Run Notes
+
+{{previous_memory}}
+{{/if}}
 
 ## Instructions
 
@@ -25,6 +29,13 @@ You may create new files, modify existing files, and run any commands needed.
 
 {{> common/test-commands.md}}
 
+Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after running tests.
+
+If genuinely blocked, describe the blocker in the Memory section below and exit non-zero.
+
 ## Output Format
 
-{{> common/reasoning-format.md}}
+When done, write:
+
+## Memory
+[What you explored, what worked, what failed, current state of the implementation. Future runs of this state will see this.]

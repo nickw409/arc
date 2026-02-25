@@ -561,6 +561,38 @@ func TestRunStateMemorySaved(t *testing.T) {
 	}
 }
 
+func TestRunStateRunOnceSkip(t *testing.T) {
+	// check.adversary is run_once in the feature workflow.
+	// Pre-set StateIterations to 2 to simulate a second visit (phase.go pre-increments).
+	// The agent must NOT be spawned — the skip verdict is produced automatically.
+	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
+	st.CurrentState = "check.adversary"
+	st.PhaseStatus = "adversary"
+	st.StateIterations = map[string]int{"check.adversary": 2}
+
+	plansDir := setupTestPlan(t, st)
+
+	// If the agent is spawned, it exits with code 1 — which would cause ActionRetry,
+	// proving the skip logic did NOT fire.
+	t.Setenv("MOCK_EXIT_CODE", "1")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue (run_once skip); err=%v", result.Action, result.Err)
+	}
+	if result.Verdict != arc.VerdictNoBugsFound {
+		t.Fatalf("got Verdict=%q, want %q", result.Verdict, arc.VerdictNoBugsFound)
+	}
+	if result.NextState != "complete" {
+		t.Fatalf("got NextState=%q, want complete", result.NextState)
+	}
+}
+
 // withTestWorkflow installs a custom workflow loader for the duration of the test.
 func withTestWorkflow(t *testing.T, wfType string, data []byte) {
 	t.Helper()

@@ -265,8 +265,9 @@ func TestE2EBugsFoundLoop(t *testing.T) {
 	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "check.adversary" {
 		t.Fatalf("expected second verdict no_bugs_found@check.adversary, got %+v", ps.VerdictsHistory[1])
 	}
-	if n := readCallCount(t, scriptDir); n != 4 {
-		t.Fatalf("expected 4 mock agent calls, got %d", n)
+	// run_once: check.adversary is skipped on second visit, so only 3 actual agent calls.
+	if n := readCallCount(t, scriptDir); n != 3 {
+		t.Fatalf("expected 3 mock agent calls, got %d", n)
 	}
 }
 
@@ -312,23 +313,21 @@ func TestE2EStateIterationTracking(t *testing.T) {
 	}
 }
 
-// TestE2EBugsFoundLoopTwice exercises the adversary loop with two bugs_found iterations:
-// impl.act → check.adversary(bugs_found) → impl.act → check.adversary(bugs_found) → impl.act → check.adversary(no_bugs_found) → complete
-func TestE2EBugsFoundLoopTwice(t *testing.T) {
+// TestE2ERunOnceAdversarySkip verifies that run_once on check.adversary causes it to be
+// automatically skipped on the second visit, even if its script would return bugs_found.
+// Flow: impl.act → check.adversary(bugs_found) → impl.act → check.adversary(auto-skip→no_bugs_found) → complete
+func TestE2ERunOnceAdversarySkip(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-concerns", []string{"core"}, "feature")
 
 	// Call 0: impl.act
 	writeScript(t, scriptDir, 0, "First implementation attempt.")
-	// Call 1: check.adversary → bugs_found
+	// Call 1: check.adversary → bugs_found (first and only real adversary run)
 	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
 	// Call 2: impl.act (fix bugs)
-	writeScript(t, scriptDir, 2, "Fixed first round of bugs.")
-	// Call 3: check.adversary → bugs_found again
-	writeScript(t, scriptDir, 3, "More bugs found.\n\n## Verdict\nbugs_found")
-	// Call 4: impl.act (fix more bugs)
-	writeScript(t, scriptDir, 4, "Fixed second round of bugs.")
-	// Call 5: check.adversary → no_bugs_found
-	writeScript(t, scriptDir, 5, "All clean now.\n\n## Verdict\nno_bugs_found")
+	writeScript(t, scriptDir, 2, "Fixed the bugs.")
+	// Script 3 would be check.adversary again, but run_once skips it.
+	// Write it as bugs_found to prove it is never consulted.
+	writeScript(t, scriptDir, 3, "More bugs.\n\n## Verdict\nbugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -349,27 +348,22 @@ func TestE2EBugsFoundLoopTwice(t *testing.T) {
 	if ps.CurrentState != "complete" {
 		t.Fatalf("expected complete, got %q", ps.CurrentState)
 	}
-	if ps.PhaseStatus != "complete" {
-		t.Fatalf("expected phase_status=complete, got %q", ps.PhaseStatus)
+	if ps.Iteration.Current != 4 {
+		t.Fatalf("expected iteration.current=4, got %d", ps.Iteration.Current)
 	}
-	if ps.Iteration.Current != 6 {
-		t.Fatalf("expected iteration.current=6, got %d", ps.Iteration.Current)
-	}
-	// 3 verdicts: bugs_found, bugs_found, no_bugs_found
-	if len(ps.VerdictsHistory) != 3 {
-		t.Fatalf("expected 3 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// 2 verdicts: bugs_found (real), no_bugs_found (auto-skip)
+	if len(ps.VerdictsHistory) != 2 {
+		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
 	if ps.VerdictsHistory[0].Verdict != "bugs_found" || ps.VerdictsHistory[0].State != "check.adversary" {
 		t.Fatalf("expected first verdict bugs_found@check.adversary, got %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "bugs_found" || ps.VerdictsHistory[1].State != "check.adversary" {
-		t.Fatalf("expected second verdict bugs_found@check.adversary, got %+v", ps.VerdictsHistory[1])
+	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "check.adversary" {
+		t.Fatalf("expected second verdict no_bugs_found@check.adversary (auto-skip), got %+v", ps.VerdictsHistory[1])
 	}
-	if ps.VerdictsHistory[2].Verdict != "no_bugs_found" || ps.VerdictsHistory[2].State != "check.adversary" {
-		t.Fatalf("expected third verdict no_bugs_found@check.adversary, got %+v", ps.VerdictsHistory[2])
-	}
-	if n := readCallCount(t, scriptDir); n != 6 {
-		t.Fatalf("expected 6 mock agent calls, got %d", n)
+	// Only 3 actual agent calls — script 3 is never used.
+	if n := readCallCount(t, scriptDir); n != 3 {
+		t.Fatalf("expected 3 mock agent calls (run_once skip), got %d", n)
 	}
 }
 

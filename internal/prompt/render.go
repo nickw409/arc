@@ -15,19 +15,20 @@ import (
 
 // TemplateContext contains all variables available during prompt rendering.
 type TemplateContext struct {
-	Phase        string
-	Plan         string
-	Iteration    int
-	PlanMD       string
-	State        map[string]string
-	Params       map[string]string
-	PlanFile     string
-	PhaseDir     string
-	StateFile    string
-	ScriptsDir   string
-	Mode         string
-	DisputeCount int
-	DisputeList  string
+	Phase          string
+	Plan           string
+	Iteration      int
+	PlanMD         string
+	State          map[string]string
+	Params         map[string]string
+	PlanFile       string
+	PhaseDir       string
+	StateFile      string
+	ScriptsDir     string
+	Mode           string
+	DisputeCount   int
+	DisputeList    string
+	PreviousMemory string // notes saved by a previous run of the same state
 }
 
 // Render loads a prompt template from embedded resources and renders it.
@@ -218,22 +219,24 @@ func contextToMap(ctx TemplateContext) map[string]interface{} {
 		"StateFile":    ctx.StateFile,
 		"ScriptsDir":   ctx.ScriptsDir,
 		"Mode":         ctx.Mode,
-		"DisputeCount": ctx.DisputeCount,
-		"DisputeList":  ctx.DisputeList,
+		"DisputeCount":   ctx.DisputeCount,
+		"DisputeList":    ctx.DisputeList,
+		"PreviousMemory": ctx.PreviousMemory,
 		// Lowercase keys for Handlebars-style references
-		"phase":         ctx.Phase,
-		"plan":          ctx.Plan,
-		"iteration":     ctx.Iteration,
-		"plan_md":       ctx.PlanMD,
-		"state":         ctx.State,
-		"params":        ctx.Params,
-		"plan_file":     ctx.PlanFile,
-		"phase_dir":     ctx.PhaseDir,
-		"state_file":    ctx.StateFile,
-		"scripts_dir":   ctx.ScriptsDir,
-		"mode":          ctx.Mode,
-		"dispute_count": ctx.DisputeCount,
-		"dispute_list":  ctx.DisputeList,
+		"phase":           ctx.Phase,
+		"plan":            ctx.Plan,
+		"iteration":       ctx.Iteration,
+		"plan_md":         ctx.PlanMD,
+		"state":           ctx.State,
+		"params":          ctx.Params,
+		"plan_file":       ctx.PlanFile,
+		"phase_dir":       ctx.PhaseDir,
+		"state_file":      ctx.StateFile,
+		"scripts_dir":     ctx.ScriptsDir,
+		"mode":            ctx.Mode,
+		"dispute_count":   ctx.DisputeCount,
+		"dispute_list":    ctx.DisputeList,
+		"previous_memory": ctx.PreviousMemory,
 	}
 }
 

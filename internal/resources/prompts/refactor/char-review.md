@@ -39,7 +39,14 @@ OR
 gaps_found
 ```
 
-The `## Verdict` header and verdict value MUST appear in your output — not inside a code block. The verdict value must be on its own line immediately after the header (blank lines between are ok). Valid verdicts:
+Before the verdict, write:
+
+```
+## Memory
+[What interfaces you reviewed, coverage assessment, gaps found if any.]
+```
+
+Then the verdict (NOT inside a code block). The `## Verdict` header and verdict value MUST appear in your output. Valid verdicts:
 
 - **approved** — Characterization is complete
 - **gaps_found** — Must address gaps (list specific gaps above the verdict)

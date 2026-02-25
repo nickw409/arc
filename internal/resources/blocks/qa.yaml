@@ -1,7 +1,8 @@
 name: qa
 description: Write tests that capture intended behavior
 params:
-  max_turns: {default: "30"}
+  max_turns: {default: "100"}
+  timeout: {default: "1800"}
   prompt: {default: "prompts/feature/qa.md"}
 entry: qa
 exits: [done]
@@ -11,4 +12,5 @@ states:
     prompt: ${prompt}
     agent:
       max_turns: ${max_turns}
+      timeout: ${timeout}
     next: $done

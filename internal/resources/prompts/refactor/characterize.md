@@ -78,4 +78,7 @@ Create `{{phase_dir}}/characterization.md`:
 - Do NOT fix bugs you find - just document them
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the characterization tests you wrote and exit.
+When done, write:
+
+## Memory
+[What interfaces were characterized, test files created, edge cases covered. Future runs of this state will see this.]

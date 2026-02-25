@@ -57,4 +57,7 @@ Create `{{phase_dir}}/findings.md`:
 - Be objective - report what IS, not what should be
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of your findings and exit.
+When done, write:
+
+## Memory
+[What was drafted, key conclusions, areas that need more depth. Future runs of this state will see this.]

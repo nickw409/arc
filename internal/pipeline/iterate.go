@@ -30,7 +30,7 @@ func SetAgentCommandNameForTest(name string) {
 // Tests override this to inject custom workflows.
 var workflowBytesFunc = resources.WorkflowBytes
 
-// IterateOptions configures a single iteration.
+// IterateOptions configures a single state run.
 type IterateOptions struct {
 	PlanName     string
 	PhaseName    string
@@ -42,8 +42,9 @@ type IterateOptions struct {
 	ChatMode     bool   // if true, skip workflow-defined escalation rules
 }
 
-// RunIteration executes a single iteration of the phase state machine.
-func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions) *arc.IterationResult {
+// RunState executes the current phase state, running the agent until it produces a verdict.
+// The agent runs with high max_turns and timeout so it can complete the work in one session.
+func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *arc.IterationResult {
 	phaseDir := filepath.Join(opts.PlansDir, opts.PlanName, "phases", opts.PhaseName)
 
 	// Load state.json using atomic StateFile
@@ -70,83 +71,17 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	// Get state config (may be nil for unknown states)
 	stateConfig := machine.GetState(phaseState.CurrentState)
 
-	// Extract workflow-defined constraints, escalation rules, hooks, and triggers
+	// Extract workflow-defined constraints and after hooks
 	var constraints *arc.ConstraintConfig
-	var escalationRules []arc.EscalationRule
 	var afterHooks []arc.HookConfig
 	if stateConfig != nil {
 		constraints = stateConfig.Constraints
-		escalationRules = stateConfig.Escalation
 		afterHooks = stateConfig.After
-	}
-	interventionTriggers := wf.InterventionTriggers
-
-	// Check per-state iteration cap before running agent.
-	if constraints != nil && constraints.MaxStateIterations > 0 {
-		count := 0
-		if phaseState.StateIterations != nil {
-			count = phaseState.StateIterations[phaseState.CurrentState]
-		}
-		if count > constraints.MaxStateIterations {
-			if constraints.OnMaxIterations == "" {
-				return &arc.IterationResult{
-					Action: arc.ActionAbort,
-					Err:    fmt.Errorf("max state iterations (%d) reached for %q with no on_max_iterations set", constraints.MaxStateIterations, phaseState.CurrentState),
-				}
-			}
-			forcedVerdict := arc.Verdict(constraints.OnMaxIterations)
-			nextState, err := machine.NextState(phaseState.CurrentState, forcedVerdict)
-			if err != nil {
-				return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("on_max_iterations transition failed: %w", err)}
-			}
-			curState := phaseState.CurrentState
-			if updateErr := sf.Update(func(s *arc.PhaseState) error {
-				s.CurrentState = nextState
-				s.PhaseStatus = MapStateToStatus(nextState)
-				s.Iteration.Current++
-				s.LastVerdict = string(forcedVerdict)
-				s.GlobalIterations++
-				s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
-					Iteration: s.Iteration.Current,
-					State:     curState,
-					Verdict:   string(forcedVerdict),
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				})
-				return nil
-			}); updateErr != nil {
-				return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state after forced exit: %w", updateErr)}
-			}
-			logger.Info("max state iterations reached, forced exit",
-				"phase", phaseState.Phase,
-				"state", curState,
-				"count", count,
-				"max", constraints.MaxStateIterations,
-				"forced_verdict", string(forcedVerdict),
-				"next_state", nextState,
-			)
-			return &arc.IterationResult{
-				NextState: nextState,
-				Verdict:   forcedVerdict,
-				Action:    arc.ActionContinue,
-			}
-		}
 	}
 
 	// Check pre-constraints
 	if err := CheckPreConstraints(&phaseState, constraints, phaseDir); err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("pre-constraint check: %w", err)}
-	}
-
-	// Check intervention
-	if msg := CheckIntervention(&phaseState, interventionTriggers); msg != "" {
-		return &arc.IterationResult{Action: arc.ActionIntervene, Err: fmt.Errorf("intervention required: %s", msg)}
-	}
-
-	// Check escalation (skipped in chat mode — the chat agent handles intervention)
-	if !opts.ChatMode {
-		if esc := CheckEscalation(&phaseState, escalationRules); esc != nil {
-			return &arc.IterationResult{Action: arc.ActionEscalate, Err: fmt.Errorf("escalation triggered: %s", esc.Action)}
-		}
 	}
 
 	// Check context after state load
@@ -166,6 +101,39 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 
 	if stateConfig == nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("state %q not found in workflow", phaseState.CurrentState)}
+	}
+
+	// run_once: skip on all visits after the first.
+	// phase.go pre-increments StateIterations before calling RunState, so
+	// a count of > 1 means this state has already executed at least once.
+	if stateConfig.RunOnce && phaseState.StateIterations[phaseState.CurrentState] > 1 {
+		skipVerdict := arc.Verdict(stateConfig.SkipVerdict)
+		nextState, err := machine.NextState(phaseState.CurrentState, skipVerdict)
+		if err != nil {
+			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("run_once skip: %w", err)}
+		}
+		curState := phaseState.CurrentState
+		if err := sf.Update(func(s *arc.PhaseState) error {
+			s.CurrentState = nextState
+			s.PhaseStatus = MapStateToStatus(nextState)
+			s.Iteration.Current++
+			s.LastVerdict = string(skipVerdict)
+			s.GlobalIterations++
+			s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
+				Iteration: s.Iteration.Current,
+				State:     curState,
+				Verdict:   string(skipVerdict),
+				Timestamp: timeNow(),
+			})
+			return nil
+		}); err != nil {
+			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state after run_once skip: %w", err)}
+		}
+		return &arc.IterationResult{
+			Action:    arc.ActionContinue,
+			NextState: nextState,
+			Verdict:   skipVerdict,
+		}
 	}
 
 	// Parallel execution: if the state has parallel config, run branches concurrently
@@ -206,7 +174,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 				Iteration: s.Iteration.Current,
 				State:     curState,
 				Verdict:   verdict,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Timestamp: timeNow(),
 			})
 			return nil
 		}); updateErr != nil {
@@ -227,6 +195,9 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("reading plan.md: %w", err)}
 	}
 
+	// Read loopback memory from previous run of this state
+	previousMemory, _ := ReadMemory(phaseDir, phaseState.CurrentState)
+
 	// Load and render prompt
 	promptPath := strings.TrimPrefix(stateConfig.Prompt, "prompts/")
 	promptBytes, err := resources.PromptBytes(promptPath)
@@ -235,19 +206,20 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 
 	tmplCtx := prompt.TemplateContext{
-		Phase:        phaseState.Phase,
-		Plan:         phaseState.Plan,
-		Iteration:    phaseState.Iteration.Current,
-		PlanMD:       string(planMD),
-		State:        prompt.StateToTemplateMap(&phaseState),
-		Params:       map[string]string{},
-		PlanFile:     filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
-		PhaseDir:     phaseDir,
-		StateFile:    filepath.Join(phaseDir, "state.json"),
-		ScriptsDir:   filepath.Join(opts.ArcHome, "scripts"),
-		Mode:         opts.Mode,
-		DisputeCount: len(phaseState.Disputes),
-		DisputeList:  prompt.FormatDisputeList(phaseState.Disputes),
+		Phase:          phaseState.Phase,
+		Plan:           phaseState.Plan,
+		Iteration:      phaseState.Iteration.Current,
+		PlanMD:         string(planMD),
+		State:          prompt.StateToTemplateMap(&phaseState),
+		Params:         map[string]string{},
+		PlanFile:       filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
+		PhaseDir:       phaseDir,
+		StateFile:      filepath.Join(phaseDir, "state.json"),
+		ScriptsDir:     filepath.Join(opts.ArcHome, "scripts"),
+		Mode:           opts.Mode,
+		DisputeCount:   len(phaseState.Disputes),
+		DisputeList:    prompt.FormatDisputeList(phaseState.Disputes),
+		PreviousMemory: previousMemory,
 	}
 
 	rendered, err := prompt.RenderString(string(promptBytes), tmplCtx)
@@ -280,15 +252,11 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent spawn failed: %w", err)}
 	}
 
-	// Handle timeout
-	if spawnResult.TimedOut {
-		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent timed out")}
-	}
-
-	// Handle empty output
-	output := strings.TrimSpace(spawnResult.Output)
-	if output == "" {
-		return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent produced no output (empty)")}
+	// Extract and save memory from agent output
+	if mem := ExtractMemory(spawnResult.Output); mem != "" {
+		if writeErr := WriteMemory(phaseDir, phaseState.CurrentState, mem); writeErr != nil {
+			logger.Warn("failed to save agent memory", "state", phaseState.CurrentState, "error", writeErr)
+		}
 	}
 
 	// Determine next state
@@ -323,7 +291,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		}
 	}
 
-	// Check post-constraints after successful iteration
+	// Check post-constraints after successful run
 	if err := CheckPostConstraints(constraints, phaseDir); err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("post-constraint check: %w", err)}
 	}
@@ -346,7 +314,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 				Iteration: s.Iteration.Current,
 				State:     curState,
 				Verdict:   string(verdict),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Timestamp: timeNow(),
 			})
 		}
 		return nil
@@ -354,7 +322,7 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state.json: %w", err)}
 	}
 
-	logger.Info("iteration complete",
+	logger.Info("state run complete",
 		"phase", phaseState.Phase,
 		"next_state", nextState,
 		"verdict", string(verdict),
@@ -368,14 +336,22 @@ func RunIteration(ctx context.Context, logger *slog.Logger, opts IterateOptions)
 	}
 }
 
+// timeNow returns the current UTC time as RFC3339. Extracted for testability.
+var timeNow = func() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
 // buildSpawnOptions constructs agent.SpawnOptions from state config and defaults.
-// When stateConfig.Agent is non-nil, its fields override defaults.
+// Default MaxTurns=200 and Timeout=3600s allow long-running sessions.
+// Workflow YAML agent config overrides these defaults.
 func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState, prompt string, workingDir string) agent.SpawnOptions {
 	opts := agent.SpawnOptions{
 		Prompt:      prompt,
 		CommandName: agentCommandName,
 		Model:       phaseState.ModelOverride,
 		WorkingDir:  workingDir,
+		MaxTurns:    200,
+		Timeout:     3600 * time.Second,
 	}
 
 	if stateConfig != nil && stateConfig.Agent != nil {

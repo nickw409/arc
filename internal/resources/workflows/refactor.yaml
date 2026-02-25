@@ -7,6 +7,9 @@ states:
     description: Write tests capturing current behavior
     prompt: prompts/refactor/characterize.md
     next: char_review
+    agent:
+      max_turns: 100
+      timeout: 1800
   - name: char_review
     description: Review characterization tests
     prompt: prompts/refactor/char-review.md
@@ -19,10 +22,16 @@ states:
     next:
       approved: refactor
       gaps_found: characterize
+    agent:
+      max_turns: 50
+      timeout: 900
   - name: refactor
     description: Perform structural changes
     prompt: prompts/refactor/refactor.md
     next: verify
+    agent:
+      max_turns: 200
+      timeout: 3600
   - name: verify
     description: Verify behavior unchanged
     prompt: prompts/refactor/verify.md
@@ -35,6 +44,9 @@ states:
     next:
       approved: complete
       concerns: refactor
+    agent:
+      max_turns: 50
+      timeout: 900
   - name: complete
     description: Refactor completed
     prompt: prompts/common/complete.md

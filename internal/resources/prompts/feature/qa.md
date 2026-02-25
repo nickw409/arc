@@ -16,8 +16,11 @@ You are a QA engineer writing tests for phase: **{{phase}}** of plan: **{{plan}}
 Read the phase plan at: `{{plan_file}}`
 {{/unless}}
 
-### Iteration
-This is iteration {{iteration}}.
+{{#if previous_memory}}
+## Previous Run Notes
+
+{{previous_memory}}
+{{/if}}
 
 ## Instructions
 
@@ -48,6 +51,15 @@ Write tests based on the **## Test Cases** section of the phase specification. T
 - Do NOT invent test cases — implement exactly what the spec defines
 - Do NOT skip tests that need fixtures — create the fixture files as specified
 
+Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after running tests.
+
+If genuinely blocked, describe the blocker in the Memory section below and exit non-zero.
+
 ## Output Format
 
 {{> common/reasoning-format.md}}
+
+When done, also write:
+
+## Memory
+[What you explored, what test cases you wrote, any issues encountered. Future runs of this state will see this.]

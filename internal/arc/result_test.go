@@ -11,9 +11,7 @@ func TestIterationResultActionValues(t *testing.T) {
 	}{
 		{ActionContinue, 0},
 		{ActionRetry, 1},
-		{ActionEscalate, 2},
-		{ActionIntervene, 3},
-		{ActionAbort, 4},
+		{ActionAbort, 2},
 	}
 
 	seen := make(map[int]bool)
@@ -35,8 +33,6 @@ func TestResultActionString(t *testing.T) {
 	}{
 		{ActionContinue, "continue"},
 		{ActionRetry, "retry"},
-		{ActionEscalate, "escalate"},
-		{ActionIntervene, "intervene"},
 		{ActionAbort, "abort"},
 	}
 

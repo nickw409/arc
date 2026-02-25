@@ -64,4 +64,7 @@ CONCERNS - <what's wrong>
 - Document any trade-offs made
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the benchmark results and exit.
+When done, write:
+
+## Memory
+[Key findings, metrics, decisions made. Future runs of this state will see this.]

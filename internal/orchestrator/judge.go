@@ -84,52 +84,6 @@ REJECT_DISPUTE: <reason> — if the test is correct and the implementation shoul
 	return &DisputeResolution{Approve: false, Reason: strings.TrimSpace(reason)}, nil
 }
 
-// generateStuckInstructions spawns a focused Claude call to generate instructions
-// for the implementation agent when it's stuck.
-func generateStuckInstructions(ctx context.Context, opts RunPhaseOptions, phaseState *arc.PhaseState) (string, error) {
-	phaseDir := filepath.Join(opts.PlansDir, opts.PlanName, "phases", opts.PhaseName)
-
-	// Read last test output
-	testOutput, _ := os.ReadFile(filepath.Join(phaseDir, "last_test_output.txt"))
-	testOutputStr := string(testOutput)
-	if len(testOutputStr) > 4000 {
-		testOutputStr = testOutputStr[len(testOutputStr)-4000:]
-	}
-
-	// Read impl reasoning if available
-	reasoning, _ := os.ReadFile(filepath.Join(phaseDir, "impl_reasoning.md"))
-	reasoningStr := truncate(string(reasoning), 2000)
-
-	prompt := fmt.Sprintf(`Phase "%s" has been stuck for %d iterations. Tests: %d/%d passing.
-
-Failing test output:
-%s
-
-Implementation reasoning so far:
-%s
-
-What specific, actionable instruction should be given to the implementation agent to help it make progress? Be concrete — reference specific test names, expected values, or code patterns. One paragraph max.`,
-		opts.PhaseName,
-		phaseState.StuckIterations,
-		phaseState.TestsPassing,
-		phaseState.TestsTotal,
-		testOutputStr,
-		reasoningStr,
-	)
-
-	result, err := agent.Spawn(ctx, agent.SpawnOptions{
-		Prompt:       prompt,
-		CommandName:  judgeCommandName,
-		MaxTurns:     1,
-		Timeout:      60 * time.Second,
-		AllowedTools: []string{},
-	})
-	if err != nil {
-		return "", fmt.Errorf("instruction generation failed: %w", err)
-	}
-
-	return strings.TrimSpace(result.Output), nil
-}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

@@ -258,8 +258,10 @@ func TestRenderPartialIncludesInlined(t *testing.T) {
 }
 
 func TestRenderImplPartialIncludesInlined(t *testing.T) {
-	// Verify feature/impl.md inlines all three partials.
-	result, err := Render("feature/impl.md", TemplateContext{
+	// Verify feature/impl.md inlines partials correctly in both modes.
+
+	// First run (no last_verdict): test-commands.md and reasoning-format.md are inlined.
+	firstRun, err := Render("feature/impl.md", TemplateContext{
 		Phase:        "test-phase",
 		Plan:         "test-plan",
 		Iteration:    1,
@@ -275,19 +277,39 @@ func TestRenderImplPartialIncludesInlined(t *testing.T) {
 		DisputeList:  "(none)",
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("first run: unexpected error: %v", err)
 	}
-	// test-commands.md
-	if !strings.Contains(result, "Do NOT run test commands directly") {
-		t.Fatal("expected inlined test-commands.md content")
+	if !strings.Contains(firstRun, "Do NOT run test commands directly") {
+		t.Fatal("first run: expected inlined test-commands.md content")
 	}
-	// do-not-rules.md
-	if !strings.Contains(result, "Do NOT modify test files") {
-		t.Fatal("expected inlined do-not-rules.md content")
+	if !strings.Contains(firstRun, "Analysis") {
+		t.Fatal("first run: expected inlined reasoning-format.md content")
 	}
-	// reasoning-format.md
-	if !strings.Contains(result, "Analysis") {
-		t.Fatal("expected inlined reasoning-format.md content")
+
+	// Bug-fix re-run (last_verdict=bugs_found): do-not-rules.md is inlined.
+	fixRun, err := Render("feature/impl.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    2,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"tests_passing": "0", "tests_total": "5", "last_verdict": "bugs_found"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("fix run: unexpected error: %v", err)
+	}
+	if !strings.Contains(fixRun, "Do NOT modify test files") {
+		t.Fatal("fix run: expected inlined do-not-rules.md content")
+	}
+	if !strings.Contains(fixRun, "Analysis") {
+		t.Fatal("fix run: expected inlined reasoning-format.md content")
 	}
 }
 

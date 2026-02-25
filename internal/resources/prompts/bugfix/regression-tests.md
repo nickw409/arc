@@ -54,4 +54,7 @@ fn test_division_by_zero_returns_error() {
 - Keep tests focused on the bug
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the tests you wrote and exit.
+When done, write:
+
+## Memory
+[Tests written, test file locations, whether tests fail as expected. Future runs of this state will see this.]

@@ -1,5 +1,5 @@
 name: feature
-version: 3
+version: 4
 description: Implement a feature and harden it with adversarial review
 
 pipeline:
@@ -11,6 +11,8 @@ pipeline:
       timeout: "3600"
   - block: adversary
     name: check
+    run_once: true
+    skip_exit: no_bugs_found
     params: {max_turns: "30"}
     route:
       bugs_found: impl

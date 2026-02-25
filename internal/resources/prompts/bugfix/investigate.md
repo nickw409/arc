@@ -60,4 +60,7 @@ Create `{{phase_dir}}/investigation.md`:
 - Focus on understanding, not solving
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of your findings and exit.
+When done, write:
+
+## Memory
+[Root cause summary, files examined, key findings. Future runs of this state will see this.]

@@ -54,4 +54,7 @@ Create `{{phase_dir}}/optimization_log.md`:
 - Do NOT change behavior
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the optimizations applied and exit.
+When done, write:
+
+## Memory
+[Key findings, metrics, decisions made. Future runs of this state will see this.]

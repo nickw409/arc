@@ -10,10 +10,12 @@ import (
 // PipelineStep represents a single step in a workflow pipeline.
 type PipelineStep struct {
 	Block    string            `yaml:"block"`
-	Name     string            `yaml:"name"`   // optional; defaults to block name; used as namespace prefix and routing target
+	Name     string            `yaml:"name"`     // optional; defaults to block name; used as namespace prefix and routing target
 	Params   map[string]string `yaml:"params"`
 	Parallel *ParallelStep     `yaml:"parallel"`
-	Route    map[string]string `yaml:"route"`  // exit name → step name or terminal state (e.g. "bugs_found: fix-step")
+	Route    map[string]string `yaml:"route"`    // exit name → step name or terminal state (e.g. "bugs_found: fix-step")
+	RunOnce  bool              `yaml:"run_once"` // if true, block only executes on first visit; subsequent visits auto-produce skip_exit
+	SkipExit string            `yaml:"skip_exit"` // exit name to auto-produce on visits after the first (requires run_once: true)
 }
 
 // ParallelStep represents parallel block execution within a pipeline.
@@ -108,6 +110,8 @@ type resolvedPipelineStep struct {
 	joinState string
 	name      string            // effective step name (used as namespace prefix and routing target)
 	route     map[string]string // exit name → step name or terminal state
+	runOnce  bool
+	skipExit string
 }
 
 // ComposePipeline handles both sequential and parallel steps.
@@ -181,8 +185,10 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 					Block:  resolvedBlock,
 					Params: step.Params,
 				},
-				name:  name,
-				route: step.Route,
+				name:     name,
+				route:    step.Route,
+				runOnce:  step.RunOnce,
+				skipExit: step.SkipExit,
 			})
 		}
 	}
@@ -241,6 +247,11 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 							sc.Transition.Branches[verdict] = prefix + "." + target
 						}
 					}
+				}
+				// Propagate run_once to the block's entry state only.
+				if rs.runOnce && bs.Name == rb.Block.Entry {
+					sc.RunOnce = true
+					sc.SkipVerdict = rs.skipExit
 				}
 				allStates = append(allStates, sc)
 			}

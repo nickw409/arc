@@ -39,7 +39,7 @@ func newIterateCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			result := pipeline.RunIteration(context.Background(), logger, pipeline.IterateOptions{
+			result := pipeline.RunState(context.Background(), logger, pipeline.IterateOptions{
 				PlanName: planName,
 				PhaseName: phaseName,
 				PlansDir: plansDir,

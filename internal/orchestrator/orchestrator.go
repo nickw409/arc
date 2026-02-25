@@ -102,6 +102,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 	fmt.Println()
 
 	// Helper to build a LaunchResult from current phase states.
+
 	buildResult := func(status, failedPhase, failedReason string) *LaunchResult {
 		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
 		summary := make(map[string]string, len(meta.Phases))
@@ -122,6 +123,64 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 			PhaseSummary: summary,
 			Usage:        totalUsage,
 		}
+	}
+
+	// Direct workflow: run all phases in a single agent session.
+	if meta.WorkflowType == "direct" {
+		fmt.Println("(direct workflow — single agent session for all phases)")
+		directErr := runDirectPlanLoop(ctx, opts, planDir, meta, workingDir)
+
+		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+
+		// Find the first blocked phase for the failure result
+		var firstBlocked, failReason string
+		allComplete := true
+		for _, phase := range meta.Phases {
+			ps := phaseStates[phase]
+			if ps == nil || ps.PhaseStatus != "complete" {
+				allComplete = false
+				if firstBlocked == "" && ps != nil && ps.PhaseStatus == "blocked" {
+					firstBlocked = phase
+					if ps.Blocked.Reason != nil {
+						failReason = *ps.Blocked.Reason
+					}
+				}
+			}
+		}
+
+		if allComplete {
+			fmt.Println("\nAll phases complete.")
+			if sharedWorktree != nil {
+				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
+					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
+					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
+				} else {
+					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, hash[:7])
+					worktree.Remove(sharedWorktree)
+				}
+			}
+			if err := generateCompletionReport(planDir, opts.PlanName, meta, phaseStates); err != nil {
+				return nil, err
+			}
+			if _, err := plan.GenerateSummary(plan.SummaryOptions{
+				PlanDir:     planDir,
+				PlanName:    opts.PlanName,
+				Meta:        meta,
+				PhaseStates: phaseStates,
+				ProjectDir:  opts.ProjectDir,
+			}); err != nil {
+				opts.Logger.Warn("failed to generate summary", "error", err)
+			}
+			return buildResult("complete", "", ""), nil
+		}
+
+		if failReason == "" && directErr != nil {
+			failReason = directErr.Error()
+		}
+		if opts.StopOnFailure {
+			return buildResult("failed", firstBlocked, failReason), nil
+		}
+		return buildResult("failed", firstBlocked, failReason), directErr
 	}
 
 	// Track phases already running to avoid double-launching.

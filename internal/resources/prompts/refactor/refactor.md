@@ -60,4 +60,9 @@ Create `{{phase_dir}}/refactor_log.md`:
 - Do NOT fix bugs (unless plan explicitly includes them)
 - **Do NOT commit** - orchestrator handles commits
 
-When done, output a summary of the refactoring changes and exit.
+Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after running tests.
+
+When done, write:
+
+## Memory
+[What was refactored, changes made, test results before/after. Future runs of this state will see this.]
