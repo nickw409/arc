@@ -8,7 +8,7 @@ Arc uses a three-level hierarchy:
 
 - **Plan** — The overall work request (e.g., `fix-wasm-rng`). Contains one or more phases.
 - **Phase** — A self-contained unit of work with its own state machine, test suite, and `state.json`.
-- **State** — The current position in a workflow's state machine (e.g., `qa`, `impl_review`).
+- **State** — The current position in a workflow's state machine (e.g., `impl.act`, `check.adversary`).
 
 The execution flow is: `arc plan` → `arc review` → `arc run`.
 
@@ -159,43 +159,48 @@ Arc provides these built-in workflow types. Each defines a state machine that co
 
 ### feature
 
-Implement a feature, then harden it with adversarial review. The implementation step handles both initial development (with its own tests) and subsequent bug fixes after the adversary reports failures.
+Implement a feature, then harden it with a one-shot adversarial review. The implementation step handles both initial development (with its own tests) and subsequent bug fixes after the adversary reports failures. The adversary runs exactly once (`run_once`) — if bugs are found and fixed, it auto-produces `no_bugs_found` on re-entry rather than re-running.
 
 ```
-impl → check (adversary) → no_bugs_found → complete
-              ↓
-          bugs_found
-              ↓
-            impl
+impl.act → check.adversary → no_bugs_found → complete
+                ↓
+            bugs_found
+                ↓
+            impl.act (re-entry: fix adversary tests)
+                ↓
+      check.adversary (auto-skip → no_bugs_found)
+                ↓
+             complete
 ```
 
 | State | Purpose |
 |-------|---------|
-| `impl` | Implement the feature with tests; on re-entry, fix bugs found by the adversary |
-| `check` | Write adversarial tests to find edge cases and bugs |
+| `impl.act` | First entry: write implementation and tests. Re-entry after `bugs_found`: fix implementation to pass adversary tests (no test modifications). |
+| `check.adversary` | Adversarially review code, write failing tests to prove bugs. Runs once — auto-skips with `no_bugs_found` on re-entry. |
 | `complete` | Phase done |
 | `blocked` | Requires human intervention |
 
 **When to use:** Adding new functions, types, modules, commands, APIs, or any net-new capability.
 
-**TDD variant (example pipeline):** If you want tests written before implementation, compose a custom workflow:
+**TDD variant (example pipeline):** If you want tests written before implementation, compose a custom workflow using the `qa` and `act` blocks with your own prompts:
 
 ```yaml
 name: feature-tdd
 version: 1
 pipeline:
-  - block: act
-    name: qa
+  - block: qa
+    name: tests
     params:
-      prompt: "prompts/feature/qa.md"
       max_turns: "100"
   - block: act
     name: impl
     params:
-      prompt: "prompts/feature/impl.md"
+      prompt: "prompts/my-project/impl.md"
       max_turns: "200"
   - block: adversary
     name: check
+    run_once: true
+    skip_exit: no_bugs_found
     params: {max_turns: "30"}
     route:
       bugs_found: impl
@@ -325,6 +330,19 @@ terminal_states: [complete, blocked]
   params:
     prompt: "prompts/my-project/impl.md"
     max_turns: "30"
+```
+
+**`run_once`** / **`skip_exit`** — limits a block to a single execution. On the first visit the block runs normally. On all subsequent visits the pipeline auto-produces the `skip_exit` verdict without spawning an agent, then advances. Useful for adversarial steps that should only get one pass:
+
+```yaml
+- block: adversary
+  name: check
+  run_once: true
+  skip_exit: no_bugs_found
+  params: {max_turns: "30"}
+  route:
+    bugs_found: impl
+    no_bugs_found: complete
 ```
 
 ### Writing Custom Prompts
