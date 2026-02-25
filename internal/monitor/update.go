@@ -11,7 +11,10 @@ import (
 )
 
 type tickMsg struct{}
-type refreshMsg struct{ phases []PhaseView }
+type refreshMsg struct {
+	phases []PhaseView
+	meta   planSummary
+}
 
 // tick returns a command that sends a tickMsg after 3 seconds.
 func tick() tea.Cmd {
@@ -25,12 +28,12 @@ func (m Model) refresh() tea.Msg {
 	// Read plan.json to get phase order
 	planJSON, err := os.ReadFile(filepath.Join(m.planDir, "plan.json"))
 	if err != nil {
-		return refreshMsg{phases: m.phases}
+		return refreshMsg{phases: m.phases, meta: m.planMeta}
 	}
 
 	var meta arc.PlanMeta
 	if err := json.Unmarshal(planJSON, &meta); err != nil {
-		return refreshMsg{phases: m.phases}
+		return refreshMsg{phases: m.phases, meta: m.planMeta}
 	}
 
 	var views []PhaseView
@@ -51,5 +54,7 @@ func (m Model) refresh() tea.Msg {
 		views = append(views, PhaseViewFromState(&ps))
 	}
 
-	return refreshMsg{phases: views}
+	summary := planSummaryFromViews(views, meta.WorkflowType)
+
+	return refreshMsg{phases: views, meta: summary}
 }
