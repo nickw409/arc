@@ -271,6 +271,7 @@ arc run <plan-name>                      # Launch orchestrator for all phases
 arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase
 arc status <plan-name>                   # Show plan/phase status
 arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter (run from project root)
+arc chat                                 # Launch interactive Claude session with Arc MCP tools
 ```
 
 ### Adversarial Review

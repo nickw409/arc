@@ -37,6 +37,17 @@ This detects your language and test runner, then creates:
 - Git hooks for commit and file boundary enforcement
 - Claude Code hooks for orchestrator/review agent restrictions
 
+### Interactive Mode with `arc chat`
+
+Launch an interactive Claude session with Arc tools available as MCP tools:
+
+```bash
+arc chat                        # Start interactive session
+arc chat --model opus           # Use a specific model
+```
+
+The chat agent can plan, review, run, and monitor Arc plans conversationally. Orchestrator runs are async — `arc_run` returns immediately and you can poll with `arc_run_status` or cancel with `arc_run_cancel`.
+
 ### Quick Start with `arc dev`
 
 For the fastest path from idea to code, use `arc dev`:
@@ -415,6 +426,7 @@ arc/
 │   ├── cli/          Cobra command definitions
 │   ├── selfupdate/   GitHub Releases-based self-update
 │   ├── orchestrator/ Top-level orchestrator loop
+│   ├── mcp/          MCP server and tool handlers (arc chat backend)
 │   ├── pipeline/     Phase iteration, escalation, hooks
 │   ├── agent/        Agent spawning
 │   ├── runner/       Subprocess runner (claude CLI)

@@ -36,7 +36,8 @@ internal/         All Go packages:
   runner/         Subprocess runner (claude CLI)
   agent/          Agent spawning
   pipeline/       Phase iteration, escalation, hooks, constraints
-  orchestrator/   Top-level orchestrator loop
+  orchestrator/   Top-level orchestrator loop (LaunchResult, stop-on-failure)
+  mcp/            MCP server and tool handlers (arc chat backend)
   review/         Adversarial plan review (with confidence scoring)
   gitops/         Git commit operations
   monitor/        Live TUI (bubbletea)
@@ -85,6 +86,12 @@ arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
 arc validate [paths...]                     # Audit test quality using AI agent
 arc dev <task description...>               # Auto-generate plan from description and run it
+
+# Interactive / MCP
+arc chat                                    # Launch Claude session with Arc MCP tools
+arc chat --model opus                       # Use a specific model
+arc chat --no-register                      # Skip MCP registration (if already set up)
+arc serve                                   # Start MCP server on stdio (used internally by arc chat)
 
 # Phase management
 arc manage <plan> <phase> complete          # Mark phase complete
