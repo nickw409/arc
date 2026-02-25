@@ -25,11 +25,23 @@ import (
 	"github.com/nwiley/arc/internal/state"
 )
 
+// runJob tracks a running orchestrator invocation.
+type runJob struct {
+	PlanName  string
+	Cancel    context.CancelFunc
+	Done      chan struct{}
+	Result    *orchestrator.LaunchResult
+	Err       error
+	StartedAt time.Time
+}
+
 // handlerContext holds shared state for all tool handlers.
 type handlerContext struct {
 	projectDir string
 	arcHome    string
 	logger     *slog.Logger
+	mu         sync.Mutex
+	jobs       map[string]*runJob // keyed by plan name
 }
 
 func (h *handlerContext) plansDir() string {
@@ -109,6 +121,16 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to archive")),
 		mcp.WithBoolean("force", mcp.Description("Archive even if phases are not all terminal (default: false)")),
 	), h.handleArchive)
+
+	s.AddTool(mcp.NewTool("arc_run_status",
+		mcp.WithDescription("Check the status of a running or recently completed arc_run. Returns phase progress, elapsed time, and result details. If no plan is running, falls through to arc_status."),
+		mcp.WithString("plan_name", mcp.Description("Name of the plan to check. Omit to list all active jobs.")),
+	), h.handleRunStatus)
+
+	s.AddTool(mcp.NewTool("arc_run_cancel",
+		mcp.WithDescription("Cancel a running arc_run for a plan."),
+		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to cancel")),
+	), h.handleRunCancel)
 }
 
 func (h *handlerContext) handleStatus(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -195,21 +217,45 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 		useWorktree = w
 	}
 
-	err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
-		PlanName:    planName,
-		PlansDir:    h.plansDir(),
-		ArcHome:     h.arcHome,
-		ProjectDir:  h.projectDir,
-		Config:      cfg,
-		Logger:      h.logger,
-		Timeout:     timeout,
-		UseWorktree: useWorktree,
-	})
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+	// Check if plan is already running.
+	h.mu.Lock()
+	if job, ok := h.jobs[planName]; ok {
+		select {
+		case <-job.Done:
+			// Finished — clean up stale entry.
+			delete(h.jobs, planName)
+		default:
+			h.mu.Unlock()
+			return mcp.NewToolResultError(fmt.Sprintf("plan %q is already running (started %s). Use arc_run_status to check progress or arc_run_cancel to stop it.", planName, job.StartedAt.Format(time.RFC3339))), nil
+		}
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Orchestrator completed for plan %q", planName)), nil
+	jobCtx, jobCancel := context.WithCancel(ctx)
+	job := &runJob{
+		PlanName:  planName,
+		Cancel:    jobCancel,
+		Done:      make(chan struct{}),
+		StartedAt: time.Now(),
+	}
+	h.jobs[planName] = job
+	h.mu.Unlock()
+
+	go func() {
+		defer close(job.Done)
+		job.Result, job.Err = orchestrator.Launch(jobCtx, orchestrator.LaunchOptions{
+			PlanName:      planName,
+			PlansDir:      h.plansDir(),
+			ArcHome:       h.arcHome,
+			ProjectDir:    h.projectDir,
+			Config:        cfg,
+			Logger:        h.logger,
+			Timeout:       timeout,
+			UseWorktree:   useWorktree,
+			StopOnFailure: true,
+		})
+	}()
+
+	return mcp.NewToolResultText(fmt.Sprintf("Started run for plan %q. Use arc_run_status to monitor.", planName)), nil
 }
 
 func (h *handlerContext) handleIterate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -607,5 +653,125 @@ func (h *handlerContext) handleArchive(_ context.Context, req mcp.CallToolReques
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("Archived plan %q", planName)), nil
+}
+
+func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	planName, _ := args["plan_name"].(string)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if planName == "" {
+		// List all active jobs.
+		if len(h.jobs) == 0 {
+			return mcp.NewToolResultText("No active runs."), nil
+		}
+		var out bytes.Buffer
+		for name, job := range h.jobs {
+			select {
+			case <-job.Done:
+				status := "complete"
+				if job.Result != nil {
+					status = job.Result.Status
+				}
+				if job.Err != nil {
+					status = "error: " + job.Err.Error()
+				}
+				fmt.Fprintf(&out, "%s: finished (%s) after %s\n", name, status, time.Since(job.StartedAt).Truncate(time.Second))
+			default:
+				fmt.Fprintf(&out, "%s: running since %s (%s elapsed)\n", name, job.StartedAt.Format(time.RFC3339), time.Since(job.StartedAt).Truncate(time.Second))
+			}
+		}
+		return mcp.NewToolResultText(out.String()), nil
+	}
+
+	job, ok := h.jobs[planName]
+	if !ok {
+		// No job found — fall through to regular status.
+		h.mu.Unlock()
+		var buf bytes.Buffer
+		err := plan.Status(&buf, plan.StatusOptions{
+			PlansDir: h.plansDir(),
+			PlanName: planName,
+		})
+		h.mu.Lock()
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(buf.String()), nil
+	}
+
+	select {
+	case <-job.Done:
+		// Job completed — return result and clean up.
+		var out bytes.Buffer
+		fmt.Fprintf(&out, "Run for %q finished after %s.\n", planName, time.Since(job.StartedAt).Truncate(time.Second))
+		if job.Err != nil {
+			fmt.Fprintf(&out, "Error: %v\n", job.Err)
+		}
+		if job.Result != nil {
+			fmt.Fprintf(&out, "Status: %s\n", job.Result.Status)
+			if job.Result.FailedPhase != "" {
+				fmt.Fprintf(&out, "Failed phase: %s\n", job.Result.FailedPhase)
+				fmt.Fprintf(&out, "Reason: %s\n", job.Result.FailedReason)
+			}
+			for phase, status := range job.Result.PhaseSummary {
+				fmt.Fprintf(&out, "  %s: %s\n", phase, status)
+			}
+			if job.Result.Usage.CostUSD > 0 {
+				fmt.Fprintf(&out, "Cost: $%.4f\n", job.Result.Usage.CostUSD)
+			}
+		}
+		delete(h.jobs, planName)
+		return mcp.NewToolResultText(out.String()), nil
+	default:
+		// Still running.
+		var out bytes.Buffer
+		fmt.Fprintf(&out, "Run for %q is in progress (started %s, %s elapsed).\n", planName, job.StartedAt.Format(time.RFC3339), time.Since(job.StartedAt).Truncate(time.Second))
+		// Include current phase states.
+		h.mu.Unlock()
+		var statusBuf bytes.Buffer
+		plan.Status(&statusBuf, plan.StatusOptions{
+			PlansDir: h.plansDir(),
+			PlanName: planName,
+		})
+		h.mu.Lock()
+		if statusBuf.Len() > 0 {
+			out.Write(statusBuf.Bytes())
+		}
+		return mcp.NewToolResultText(out.String()), nil
+	}
+}
+
+func (h *handlerContext) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	planName, _ := args["plan_name"].(string)
+
+	if planName == "" {
+		return mcp.NewToolResultError("plan_name is required"), nil
+	}
+
+	h.mu.Lock()
+	job, ok := h.jobs[planName]
+	h.mu.Unlock()
+
+	if !ok {
+		return mcp.NewToolResultError(fmt.Sprintf("no running job for plan %q", planName)), nil
+	}
+
+	select {
+	case <-job.Done:
+		return mcp.NewToolResultText(fmt.Sprintf("Run for %q already finished.", planName)), nil
+	default:
+		job.Cancel()
+		// Wait briefly for completion.
+		select {
+		case <-job.Done:
+			return mcp.NewToolResultText(fmt.Sprintf("Cancelled run for %q.", planName)), nil
+		case <-time.After(100 * time.Millisecond):
+			return mcp.NewToolResultText(fmt.Sprintf("Cancel signal sent for %q. Use arc_run_status to check.", planName)), nil
+		}
+	}
 }
 

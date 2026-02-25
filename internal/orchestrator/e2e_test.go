@@ -537,7 +537,7 @@ func TestE2EMultiPhase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	err := Launch(ctx, LaunchOptions{
+	result, err := Launch(ctx, LaunchOptions{
 		PlanName:   "e2e-multi",
 		PlansDir:   plansDir,
 		ArcHome:    t.TempDir(),
@@ -546,6 +546,9 @@ func TestE2EMultiPhase(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Launch failed: %v", err)
+	}
+	if result.Status != "complete" {
+		t.Fatalf("expected result status complete, got %q", result.Status)
 	}
 
 	// Verify both phases complete
@@ -893,7 +896,7 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err := Launch(ctx, LaunchOptions{
+	result, err := Launch(ctx, LaunchOptions{
 		PlanName:   "e2e-dep-blocked",
 		PlansDir:   plansDir,
 		ArcHome:    t.TempDir(),
@@ -905,6 +908,136 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no runnable phases") {
 		t.Fatalf("expected 'no runnable phases' error, got: %v", err)
+	}
+	if result.Status != "blocked" {
+		t.Fatalf("expected result status blocked, got %q", result.Status)
+	}
+}
+
+// TestE2EParallelPhasesNoDeps verifies that phases with no dependencies
+// run in parallel via Launch(). Two independent "direct" workflow phases
+// should both complete without one waiting on the other.
+func TestE2EParallelPhasesNoDeps(t *testing.T) {
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "direct")
+
+	// Override plan.json to remove dependencies (setupE2E creates serial deps)
+	planDir := filepath.Join(plansDir, "e2e-parallel")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Dependencies = map[string][]string{} // no deps — both should be ready
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The direct workflow is: execute → complete (1 agent call each).
+	// With two phases running in parallel, call ordering is nondeterministic.
+	// Write enough scripts for both phases (at least 2 calls).
+	for i := 0; i < 4; i++ {
+		writeScript(t, scriptDir, i, "Task done.")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, err := Launch(ctx, LaunchOptions{
+		PlanName:   "e2e-parallel",
+		PlansDir:   plansDir,
+		ArcHome:    t.TempDir(),
+		ProjectDir: projectDir,
+		Logger:     e2eLogger(),
+	})
+	if err != nil {
+		t.Fatalf("Launch failed: %v", err)
+	}
+	elapsed := time.Since(start)
+	if result.Status != "complete" {
+		t.Fatalf("expected result status complete, got %q", result.Status)
+	}
+
+	// Both phases should be complete
+	alphaState := readState(t, plansDir, "e2e-parallel", "alpha")
+	if alphaState.PhaseStatus != "complete" {
+		t.Fatalf("alpha: expected phase_status=complete, got %q", alphaState.PhaseStatus)
+	}
+	betaState := readState(t, plansDir, "e2e-parallel", "beta")
+	if betaState.PhaseStatus != "complete" {
+		t.Fatalf("beta: expected phase_status=complete, got %q", betaState.PhaseStatus)
+	}
+
+	// Sanity check: both finished in a single orchestrator loop iteration.
+	// With sequential execution this would take 2 iterations; with parallel it's 1.
+	// We can't measure this directly, but we can check it completed quickly.
+	if elapsed > 15*time.Second {
+		t.Fatalf("expected parallel phases to complete quickly, took %v", elapsed)
+	}
+}
+
+// TestE2EStopOnFailure verifies that StopOnFailure returns a LaunchResult with
+// Status="failed" (no error) and populates FailedPhase when a phase has a hard failure.
+func TestE2EStopOnFailure(t *testing.T) {
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stopfail", []string{"alpha", "beta"}, "direct")
+
+	// Override plan.json to remove dependencies so both phases are ready.
+	planDir := filepath.Join(plansDir, "e2e-stopfail")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Dependencies = map[string][]string{}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alpha will succeed normally.
+	for i := 0; i < 4; i++ {
+		writeScript(t, scriptDir, i, "Task done.")
+	}
+
+	// Give beta an invalid workflow type so RunPhase fails hard at
+	// "loading workflow:" (after successfully reading state, so PhasesReady
+	// still considers it ready).
+	betaDir := filepath.Join(planDir, "phases", "beta")
+	betaState := arc.NewPhaseState("e2e-stopfail", "beta", "direct")
+	betaState.WorkflowType = "nonexistent-workflow"
+	writeState(t, betaDir, betaState)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := Launch(ctx, LaunchOptions{
+		PlanName:      "e2e-stopfail",
+		PlansDir:      plansDir,
+		ArcHome:       t.TempDir(),
+		ProjectDir:    projectDir,
+		Logger:        e2eLogger(),
+		StopOnFailure: true,
+	})
+	// StopOnFailure returns nil error — failure goes into the result.
+	if err != nil {
+		t.Fatalf("expected nil error with StopOnFailure, got: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected result status failed, got %q", result.Status)
+	}
+	if result.FailedPhase != "beta" {
+		t.Fatalf("expected FailedPhase=beta, got %q", result.FailedPhase)
+	}
+	if result.FailedReason == "" {
+		t.Fatal("expected FailedReason to be set")
+	}
+	if result.PhaseSummary == nil {
+		t.Fatal("expected PhaseSummary to be populated")
 	}
 }
 

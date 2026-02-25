@@ -215,7 +215,7 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 		timeout = 14400
 	}
 
-	err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
+	_, err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
 		PlanName:   planName,
 		PlansDir:   plansDir,
 		ArcHome:    opts.ArcHome,

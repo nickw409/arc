@@ -106,7 +106,7 @@ func newRunCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			return orchestrator.Launch(ctx, orchestrator.LaunchOptions{
+			_, err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
 				PlanName:    planName,
 				PlansDir:    plansDir,
 				ArcHome:     arcHome,
@@ -116,6 +116,7 @@ func newRunCmd() *cobra.Command {
 				Timeout:     timeout,
 				UseWorktree: useWorktree,
 			})
+			return err
 		},
 	}
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,22 +22,32 @@ import (
 
 // LaunchOptions configures the orchestrator launcher.
 type LaunchOptions struct {
-	PlanName    string
-	PlansDir    string
-	ArcHome     string
-	ProjectDir  string // working directory for git commits; empty uses process cwd
-	Config      *config.Config
-	Logger      *slog.Logger
-	Timeout     int  // wall-clock timeout in seconds (0 = no timeout)
-	UseWorktree bool // if true, run agents in isolated git worktrees
+	PlanName      string
+	PlansDir      string
+	ArcHome       string
+	ProjectDir    string // working directory for git commits; empty uses process cwd
+	Config        *config.Config
+	Logger        *slog.Logger
+	Timeout       int  // wall-clock timeout in seconds (0 = no timeout)
+	UseWorktree   bool // if true, run agents in isolated git worktrees
+	StopOnFailure bool // if true, cancel in-progress phases and return on first failure
+}
+
+// LaunchResult describes the outcome of an orchestrator run.
+type LaunchResult struct {
+	Status       string            // "complete", "failed", "cancelled", "blocked"
+	FailedPhase  string            // which phase caused the stop (empty if complete)
+	FailedReason string            // why it failed
+	PhaseSummary map[string]string // phase name → final status
+	Usage        arc.Usage
 }
 
 // Launch starts the orchestrator for a plan.
-func Launch(ctx context.Context, opts LaunchOptions) error {
+func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
 
 	if err := acquireLock(planDir); err != nil {
-		return fmt.Errorf("acquiring lock: %w", err)
+		return nil, fmt.Errorf("acquiring lock: %w", err)
 	}
 	defer releaseLock(planDir)
 
@@ -50,7 +61,7 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 	// Load plan.json
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
-		return fmt.Errorf("reading plan.json: %w", err)
+		return nil, fmt.Errorf("reading plan.json: %w", err)
 	}
 
 	// Clean up review output files from previous adversarial reviews
@@ -70,12 +81,38 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 	fmt.Println("==========================================")
 	fmt.Println()
 
+	// Helper to build a LaunchResult from current phase states.
+	buildResult := func(status, failedPhase, failedReason string) *LaunchResult {
+		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		summary := make(map[string]string, len(meta.Phases))
+		var totalUsage arc.Usage
+		for _, p := range meta.Phases {
+			ps := phaseStates[p]
+			if ps == nil {
+				summary[p] = "pending"
+				continue
+			}
+			summary[p] = ps.PhaseStatus
+			totalUsage = totalUsage.Add(ps.Usage)
+		}
+		return &LaunchResult{
+			Status:       status,
+			FailedPhase:  failedPhase,
+			FailedReason: failedReason,
+			PhaseSummary: summary,
+			Usage:        totalUsage,
+		}
+	}
+
+	// Track phases already running to avoid double-launching.
+	running := make(map[string]bool)
+
 	// Main orchestration loop
 	for {
 		if ctx.Err() != nil {
 			fmt.Println("\nOrchestrator timed out or cancelled.")
 			fmt.Println("Re-run to continue from where it left off.")
-			return ctx.Err()
+			return buildResult("cancelled", "", ctx.Err().Error()), ctx.Err()
 		}
 
 		// Load all phase states
@@ -98,7 +135,7 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 		if allDone {
 			fmt.Println("\nAll phases complete.")
 			if err := generateCompletionReport(planDir, opts.PlanName, meta, phaseStates); err != nil {
-				return err
+				return nil, err
 			}
 			if _, err := plan.GenerateSummary(plan.SummaryOptions{
 				PlanDir:     planDir,
@@ -112,46 +149,108 @@ func Launch(ctx context.Context, opts LaunchOptions) error {
 			if meta.WorkflowType == "performance" {
 				printUsageSummary(meta, phaseStates)
 			}
-			return nil
+			return buildResult("complete", "", ""), nil
 		}
 
-		// Find next ready phase
-		next := state.NextPhase(meta, phaseStates)
-		if next == "" {
+		// Find all ready phases
+		ready := state.PhasesReady(meta, phaseStates)
+		if len(ready) == 0 {
 			// No phases are ready — all remaining are blocked by dependencies
 			fmt.Println("\nNo phases ready to execute. Remaining phases are blocked by dependencies.")
 			printBlockedSummary(meta, phaseStates)
-			return fmt.Errorf("no runnable phases")
+			return buildResult("blocked", "", "no runnable phases"), fmt.Errorf("no runnable phases")
 		}
 
-		opts.Logger.Info("starting phase", "phase", next)
-		fmt.Printf("\n[%s] Starting phase\n", next)
-
-		err := RunPhase(ctx, RunPhaseOptions{
-			PlanName:    opts.PlanName,
-			PhaseName:   next,
-			PlansDir:    opts.PlansDir,
-			ArcHome:     opts.ArcHome,
-			ProjectDir:  opts.ProjectDir,
-			Config:      opts.Config,
-			Logger:      opts.Logger,
-			UseWorktree: opts.UseWorktree,
-		})
-
-		if err != nil {
-			// Check if it's a blocked error — continue to next phase
-			ps := loadPhaseState(planDir, next)
-			if ps != nil && (ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred") {
-				fmt.Printf("[%s] Phase %s, continuing...\n", next, ps.PhaseStatus)
-				continue
+		// Filter out phases that are already being tracked as running
+		// (shouldn't happen in the current flow, but guard against it).
+		var toRun []string
+		for _, phase := range ready {
+			if !running[phase] {
+				toRun = append(toRun, phase)
 			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return fmt.Errorf("phase %s failed: %w", next, err)
+		}
+		if len(toRun) == 0 {
+			// All ready phases are somehow already running — shouldn't happen,
+			// but treat like no runnable phases.
+			fmt.Println("\nNo new phases ready to execute.")
+			return buildResult("blocked", "", "no runnable phases"), fmt.Errorf("no runnable phases")
 		}
 
-		fmt.Printf("[%s] Complete\n", next)
+		// Launch all ready phases concurrently
+		type phaseResult struct {
+			phase string
+			err   error
+		}
+		results := make(chan phaseResult, len(toRun))
+		var wg sync.WaitGroup
+
+		// When StopOnFailure is set, use a child context so we can cancel
+		// sibling phases in the same batch on first failure.
+		batchCtx, batchCancel := context.WithCancel(ctx)
+
+		for _, phase := range toRun {
+			running[phase] = true
+			wg.Add(1)
+			go func(phaseName string) {
+				defer wg.Done()
+				opts.Logger.Info("starting phase", "phase", phaseName)
+				fmt.Printf("\n[%s] Starting phase\n", phaseName)
+
+				err := RunPhase(batchCtx, RunPhaseOptions{
+					PlanName:    opts.PlanName,
+					PhaseName:   phaseName,
+					PlansDir:    opts.PlansDir,
+					ArcHome:     opts.ArcHome,
+					ProjectDir:  opts.ProjectDir,
+					Config:      opts.Config,
+					Logger:      opts.Logger,
+					UseWorktree: opts.UseWorktree,
+				})
+				results <- phaseResult{phase: phaseName, err: err}
+			}(phase)
+		}
+
+		// Close results channel after all goroutines complete.
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		// Process results as they arrive.
+		var fatalErr error
+		var failedPhase string
+		for r := range results {
+			delete(running, r.phase)
+			if r.err != nil {
+				ps := loadPhaseState(planDir, r.phase)
+				if ps != nil && (ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred") {
+					fmt.Printf("[%s] Phase %s, continuing...\n", r.phase, ps.PhaseStatus)
+					continue
+				}
+				if ctx.Err() != nil {
+					batchCancel()
+					return buildResult("cancelled", "", ctx.Err().Error()), ctx.Err()
+				}
+				// Record the first fatal error but continue draining results
+				if fatalErr == nil {
+					fatalErr = fmt.Errorf("phase %s failed: %w", r.phase, r.err)
+					failedPhase = r.phase
+					if opts.StopOnFailure {
+						batchCancel()
+					}
+				}
+			} else {
+				fmt.Printf("[%s] Complete\n", r.phase)
+			}
+		}
+		batchCancel()
+
+		if fatalErr != nil {
+			if opts.StopOnFailure {
+				return buildResult("failed", failedPhase, fatalErr.Error()), nil
+			}
+			return buildResult("failed", failedPhase, fatalErr.Error()), fatalErr
+		}
 	}
 }
 

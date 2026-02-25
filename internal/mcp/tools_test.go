@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/plan"
 )
 
@@ -21,6 +23,7 @@ func newTestHandler(t *testing.T) (*handlerContext, string) {
 		projectDir: dir,
 		arcHome:    dir,
 		logger:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		jobs:       make(map[string]*runJob),
 	}, dir
 }
 
@@ -615,4 +618,233 @@ func createApprovedPlan(t *testing.T, dir, planName string) {
 	meta.ReviewStatus = "approved"
 	data, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644)
+}
+
+// --- RunStatus tests ---
+
+func TestHandleRunStatusNoJobs(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	result, err := callTool(context.Background(), h, h.handleRunStatus, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "No active runs") {
+		t.Fatalf("expected 'No active runs', got: %s", text)
+	}
+}
+
+func TestHandleRunStatusActiveJob(t *testing.T) {
+	h, dir := newTestHandler(t)
+	os.MkdirAll(filepath.Join(dir, ".plans", "active"), 0755)
+
+	// Inject a fake running job.
+	h.mu.Lock()
+	h.jobs["test-plan"] = &runJob{
+		PlanName:  "test-plan",
+		Cancel:    func() {},
+		Done:      make(chan struct{}),
+		StartedAt: time.Now(),
+	}
+	h.mu.Unlock()
+
+	result, err := callTool(context.Background(), h, h.handleRunStatus, map[string]any{
+		"plan_name": "test-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "in progress") {
+		t.Fatalf("expected 'in progress', got: %s", text)
+	}
+}
+
+func TestHandleRunStatusCompletedJob(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	done := make(chan struct{})
+	close(done)
+	h.mu.Lock()
+	h.jobs["done-plan"] = &runJob{
+		PlanName:  "done-plan",
+		Cancel:    func() {},
+		Done:      done,
+		StartedAt: time.Now().Add(-5 * time.Second),
+		Result: &orchestrator.LaunchResult{
+			Status:       "complete",
+			PhaseSummary: map[string]string{"impl": "complete"},
+		},
+	}
+	h.mu.Unlock()
+
+	result, err := callTool(context.Background(), h, h.handleRunStatus, map[string]any{
+		"plan_name": "done-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "finished") {
+		t.Fatalf("expected 'finished', got: %s", text)
+	}
+	if !strings.Contains(text, "complete") {
+		t.Fatalf("expected 'complete' status, got: %s", text)
+	}
+
+	// Job should be cleaned up.
+	h.mu.Lock()
+	_, exists := h.jobs["done-plan"]
+	h.mu.Unlock()
+	if exists {
+		t.Fatal("expected completed job to be cleaned up")
+	}
+}
+
+func TestHandleRunStatusFallthrough(t *testing.T) {
+	h, dir := newTestHandler(t)
+	plansDir := filepath.Join(dir, ".plans", "active")
+
+	plan.Create(plan.CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "test-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "feature",
+	})
+
+	// No job in registry — should fall through to arc_status.
+	result, err := callTool(context.Background(), h, h.handleRunStatus, map[string]any{
+		"plan_name": "test-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "test-plan") {
+		t.Fatalf("expected plan status output, got: %s", text)
+	}
+}
+
+// --- RunCancel tests ---
+
+func TestHandleRunCancelNoJob(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	result, err := callTool(context.Background(), h, h.handleRunCancel, map[string]any{
+		"plan_name": "nonexistent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for non-existent job")
+	}
+}
+
+func TestHandleRunCancelRunningJob(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	cancelled := false
+	done := make(chan struct{})
+	h.mu.Lock()
+	h.jobs["cancel-plan"] = &runJob{
+		PlanName: "cancel-plan",
+		Cancel: func() {
+			cancelled = true
+			close(done)
+		},
+		Done:      done,
+		StartedAt: time.Now(),
+	}
+	h.mu.Unlock()
+
+	result, err := callTool(context.Background(), h, h.handleRunCancel, map[string]any{
+		"plan_name": "cancel-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	if !cancelled {
+		t.Fatal("expected cancel to be called")
+	}
+}
+
+func TestHandleRunCancelMissingName(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	result, err := callTool(context.Background(), h, h.handleRunCancel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing plan_name")
+	}
+}
+
+// --- Run async tests ---
+
+func TestHandleRunAlreadyRunning(t *testing.T) {
+	h, dir := newTestHandler(t)
+	createApprovedPlan(t, dir, "running-plan")
+
+	// Create .arc.yaml so config loading succeeds.
+	os.WriteFile(filepath.Join(dir, ".arc.yaml"), []byte("{}"), 0644)
+
+	// Inject a fake running job.
+	h.mu.Lock()
+	h.jobs["running-plan"] = &runJob{
+		PlanName:  "running-plan",
+		Cancel:    func() {},
+		Done:      make(chan struct{}),
+		StartedAt: time.Now(),
+	}
+	h.mu.Unlock()
+
+	result, err := callTool(context.Background(), h, h.handleRun, map[string]any{
+		"plan_name": "running-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for already running plan")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "already running") {
+		t.Fatalf("expected 'already running', got: %s", text)
+	}
+}
+
+func TestHandleRunStartsAsync(t *testing.T) {
+	h, dir := newTestHandler(t)
+	createApprovedPlan(t, dir, "async-plan")
+
+	// Create .arc.yaml so config loading succeeds.
+	os.WriteFile(filepath.Join(dir, ".arc.yaml"), []byte("{}"), 0644)
+
+	result, err := callTool(context.Background(), h, h.handleRun, map[string]any{
+		"plan_name": "async-plan",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Started run") {
+		t.Fatalf("expected 'Started run', got: %s", text)
+	}
+
+	// Verify job was registered.
+	h.mu.Lock()
+	_, exists := h.jobs["async-plan"]
+	h.mu.Unlock()
+	if !exists {
+		t.Fatal("expected job to be registered")
+	}
 }

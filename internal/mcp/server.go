@@ -24,6 +24,7 @@ func Run(ctx context.Context, opts ServerOptions) error {
 		projectDir: opts.ProjectDir,
 		arcHome:    opts.ArcHome,
 		logger:     opts.Logger,
+		jobs:       make(map[string]*runJob),
 	}
 	hctx.registerTools(s)
 

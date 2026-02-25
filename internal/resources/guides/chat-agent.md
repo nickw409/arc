@@ -31,7 +31,9 @@ You have Arc orchestration tools available via MCP. Arc is an AI-powered workflo
 | `arc_dev` | End-to-end: analyze task, generate plan, review, execute |
 | `arc_plan` | Create a plan with named phases and workflow type |
 | `arc_review` | Adversarial review with auto-remediation (required before `arc_run`) |
-| `arc_run` | Launch orchestrator for all phases (long-running) |
+| `arc_run` | Launch orchestrator asynchronously — returns immediately |
+| `arc_run_status` | Check progress of a running/completed arc_run |
+| `arc_run_cancel` | Cancel a running arc_run |
 | `arc_iterate` | Run a single phase iteration |
 | `arc_status` | Show plan/phase status |
 | `arc_list_plans` | List all active plans with workflow type and review status |
@@ -91,7 +93,7 @@ Key rules:
 ## Important Notes
 
 - **Review before run**: `arc_run` requires review status "approved" or "conditional". Always run `arc_review` first.
-- **`arc_run` is long-running**: It launches the full orchestrator loop and may take many minutes. Use `arc_status` to monitor.
+- **`arc_run` is async**: It returns immediately. Poll with `arc_run_status` to monitor progress. Cancel with `arc_run_cancel`. On phase failure, the run stops and reports which phase failed so you can intervene.
 - **`arc_dev` is self-contained**: It handles planning, review, and execution automatically. Use `arc_dev` when you don't need manual control.
 - **`arc_iterate` for single steps**: If you want to advance one phase by one iteration (useful for debugging or manual control).
 - **Archive when done**: Use `arc_archive` to move completed plans out of the active directory.
