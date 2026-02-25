@@ -169,28 +169,39 @@ func ResolveParams(b *Block, params map[string]string) (*Block, error) {
 		merged[k] = v
 	}
 
-	// Deep copy the block to avoid mutating the original
+	// Deep copy the block to avoid mutating the original, substituting exits.
+	exits := make([]string, len(b.Exits))
+	for i, e := range b.Exits {
+		exits[i] = substituteParams(e, merged)
+	}
 	resolved := &Block{
 		Name:        b.Name,
 		Description: b.Description,
 		Params:      b.Params,
 		Entry:       b.Entry,
-		Exits:       b.Exits,
+		Exits:       exits,
 	}
 
 	resolved.States = make([]BlockState, len(b.States))
 	for i, s := range b.States {
+		// Substitute verdicts.
+		verdicts := make([]string, len(s.Verdicts))
+		for j, v := range s.Verdicts {
+			verdicts[j] = substituteParams(v, merged)
+		}
+
 		rs := BlockState{
 			Name:        s.Name,
 			Description: substituteParams(s.Description, merged),
 			Prompt:      substituteParams(s.Prompt, merged),
-			Verdicts:    s.Verdicts,
+			Verdicts:    verdicts,
 		}
 
+		// Substitute next map keys and values.
 		if s.Next != nil {
 			rs.Next = make(map[string]string, len(s.Next))
 			for k, v := range s.Next {
-				rs.Next[k] = v
+				rs.Next[substituteParams(k, merged)] = substituteParams(v, merged)
 			}
 		}
 

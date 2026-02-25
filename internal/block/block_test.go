@@ -145,6 +145,62 @@ states:
 	}
 }
 
+func TestResolveParamsVerdictsAndExits(t *testing.T) {
+	data := []byte(`
+name: judge
+description: Generic judge
+params:
+  verdict_a: {default: "approved"}
+  verdict_b: {default: "rejected"}
+entry: judge
+exits: ["${verdict_a}", "${verdict_b}"]
+states:
+  - name: judge
+    prompt: prompts/judge.md
+    verdicts: ["${verdict_a}", "${verdict_b}"]
+    next:
+      "${verdict_a}": "$${verdict_a}"
+      "${verdict_b}": "$${verdict_b}"
+`)
+
+	b, err := LoadBlock(data)
+	if err != nil {
+		t.Fatalf("LoadBlock failed: %v", err)
+	}
+
+	resolved, err := ResolveParams(b, map[string]string{
+		"verdict_a": "approved",
+		"verdict_b": "gaps_found",
+	})
+	if err != nil {
+		t.Fatalf("ResolveParams failed: %v", err)
+	}
+
+	// Exits substituted
+	if len(resolved.Exits) != 2 || resolved.Exits[0] != "approved" || resolved.Exits[1] != "gaps_found" {
+		t.Errorf("exits = %v, want [approved gaps_found]", resolved.Exits)
+	}
+
+	// Verdicts substituted
+	state := resolved.States[0]
+	if len(state.Verdicts) != 2 || state.Verdicts[0] != "approved" || state.Verdicts[1] != "gaps_found" {
+		t.Errorf("verdicts = %v, want [approved gaps_found]", state.Verdicts)
+	}
+
+	// Next map keys and values substituted: "approved" → "$approved"
+	if next := state.Next["approved"]; next != "$approved" {
+		t.Errorf("next[approved] = %q, want $approved", next)
+	}
+	if next := state.Next["gaps_found"]; next != "$gaps_found" {
+		t.Errorf("next[gaps_found] = %q, want $gaps_found", next)
+	}
+
+	// Old keys must be gone
+	if _, ok := state.Next["${verdict_a}"]; ok {
+		t.Error("unreplaced key ${verdict_a} still present in next map")
+	}
+}
+
 func TestResolveParamsDefaults(t *testing.T) {
 	data := []byte(`
 name: test
