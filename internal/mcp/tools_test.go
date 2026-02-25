@@ -24,6 +24,7 @@ func newTestHandler(t *testing.T) (*handlerContext, string) {
 		arcHome:    dir,
 		logger:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		jobs:       make(map[string]*runJob),
+		jobsCtx:    context.Background(),
 	}, dir
 }
 
@@ -821,6 +822,13 @@ func TestHandleRunAlreadyRunning(t *testing.T) {
 
 func TestHandleRunStartsAsync(t *testing.T) {
 	h, dir := newTestHandler(t)
+
+	// Use a cancellable context for jobsCtx so the background job
+	// is cleaned up when the test finishes.
+	jobsCtx, jobsCancel := context.WithCancel(context.Background())
+	t.Cleanup(jobsCancel)
+	h.jobsCtx = jobsCtx
+
 	createApprovedPlan(t, dir, "async-plan")
 
 	// Create .arc.yaml so config loading succeeds.
@@ -842,11 +850,15 @@ func TestHandleRunStartsAsync(t *testing.T) {
 
 	// Verify job was registered.
 	h.mu.Lock()
-	_, exists := h.jobs["async-plan"]
+	job, exists := h.jobs["async-plan"]
 	h.mu.Unlock()
 	if !exists {
 		t.Fatal("expected job to be registered")
 	}
+
+	// Cancel and wait for the background job to stop before TempDir cleanup.
+	jobsCancel()
+	<-job.Done
 }
 
 func TestHandleDiscoverMissingTask(t *testing.T) {

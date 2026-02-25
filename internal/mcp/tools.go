@@ -42,6 +42,7 @@ type handlerContext struct {
 	logger     *slog.Logger
 	mu         sync.Mutex
 	jobs       map[string]*runJob // keyed by plan name
+	jobsCtx    context.Context    // parent context for all background jobs; cancelled on server shutdown
 }
 
 func (h *handlerContext) plansDir() string {
@@ -137,6 +138,39 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("task_description", mcp.Required(), mcp.Description("Description of the task to analyze")),
 		mcp.WithString("model", mcp.Description("Model override for the discovery agent")),
 	), h.handleDiscover)
+}
+
+// drainJobs cancels all running jobs and waits for them to finish cleanup.
+// This ensures child processes (claude CLI) are killed before the MCP server exits.
+func (h *handlerContext) drainJobs(logger *slog.Logger) {
+	h.mu.Lock()
+	var active []*runJob
+	for name, job := range h.jobs {
+		select {
+		case <-job.Done:
+			// Already finished.
+		default:
+			logger.Info("cancelling running job on shutdown", "plan", name)
+			job.Cancel()
+			active = append(active, job)
+		}
+	}
+	h.mu.Unlock()
+
+	if len(active) == 0 {
+		return
+	}
+
+	// Wait up to 10 seconds for jobs to finish (agent SIGKILL + cleanup).
+	deadline := time.After(10 * time.Second)
+	for _, job := range active {
+		select {
+		case <-job.Done:
+		case <-deadline:
+			logger.Warn("timed out waiting for jobs to drain, exiting anyway")
+			return
+		}
+	}
 }
 
 func (h *handlerContext) handleStatus(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -236,7 +270,7 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 		}
 	}
 
-	jobCtx, jobCancel := context.WithCancel(ctx)
+	jobCtx, jobCancel := context.WithCancel(h.jobsCtx)
 	job := &runJob{
 		PlanName:  planName,
 		Cancel:    jobCancel,
