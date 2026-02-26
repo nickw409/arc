@@ -88,10 +88,10 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 	), h.handleReview)
 
 	s.AddTool(mcp.NewTool("arc_manage",
-		mcp.WithDescription("Manage phase state. Supports actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show."),
+		mcp.WithDescription("Manage phase state. Supports actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity."),
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan")),
 		mcp.WithString("phase", mcp.Required(), mcp.Description("Name of the phase")),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity")),
 		mcp.WithString("reason", mcp.Description("Reason (required for defer and block)")),
 		mcp.WithNumber("passing", mcp.Description("Passing test count (for tests action)")),
 		mcp.WithNumber("total", mcp.Description("Total test count (for tests action)")),
@@ -99,6 +99,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("note", mcp.Description("Note text (for note action)")),
 		mcp.WithNumber("iteration", mcp.Description("Iteration number (for iteration action)")),
 		mcp.WithString("source_phase", mcp.Description("Source phase name (for copy-from action)")),
+		mcp.WithString("activity", mcp.Description("Activity message (for activity action)")),
 	), h.handleManage)
 
 	s.AddTool(mcp.NewTool("arc_guide",
@@ -564,6 +565,17 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText(buf.String()), nil
+
+	case "activity":
+		activity, _ := args["activity"].(string)
+		opts.Activity = activity
+		if err := plan.ManageActivity(opts); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if activity == "" {
+			return mcp.NewToolResultText(fmt.Sprintf("Cleared activity for %s/%s", planName, phase)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Set activity for %s/%s: %s", planName, phase, activity)), nil
 
 	default:
 		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — valid actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show", action)), nil

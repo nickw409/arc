@@ -37,12 +37,15 @@ The adversary found bugs and wrote failing tests to prove them. Your job is to f
 
 Do NOT modify any test files — only fix the implementation code.
 
+- Use `arc manage {{plan}} {{phase}} activity "<message>"` to report what you are currently doing (e.g. `arc manage {{plan}} {{phase}} activity "Analyzing failing tests"`, `arc manage {{plan}} {{phase}} activity "Fixing implementation"`, `arc manage {{plan}} {{phase}} activity "Running tests"`)
+
 {{> common/test-commands.md}}
 
 {{> common/do-not-rules.md}}
 {{else}}
 Write the implementation and a thorough test suite, then make all tests pass.
 
+- Use `arc manage {{plan}} {{phase}} activity "<message>"` to report what you are currently doing (e.g. `arc manage {{plan}} {{phase}} activity "Reading plan"`, `arc manage {{plan}} {{phase}} activity "Writing implementation"`, `arc manage {{plan}} {{phase}} activity "Running tests"`, `arc manage {{plan}} {{phase}} activity "Fixing failures"`)
 - Use `arc manage {{plan}} {{phase}} note <text>` to record intermediate progress
 - Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after each test run
 

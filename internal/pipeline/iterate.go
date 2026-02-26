@@ -119,6 +119,8 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 			s.Iteration.Current++
 			s.LastVerdict = string(skipVerdict)
 			s.GlobalIterations++
+			s.Activity = ""
+			s.ActivityUpdatedAt = ""
 			s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
 				Iteration: s.Iteration.Current,
 				State:     curState,
@@ -170,6 +172,8 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 			s.Iteration.Current++
 			s.LastVerdict = verdict
 			s.GlobalIterations++
+			s.Activity = ""
+			s.ActivityUpdatedAt = ""
 			s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
 				Iteration: s.Iteration.Current,
 				State:     curState,
@@ -309,6 +313,8 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		s.Iteration.Current++
 		s.LastVerdict = string(verdict)
 		s.GlobalIterations++
+		s.Activity = ""
+		s.ActivityUpdatedAt = ""
 		if verdict != "" {
 			s.VerdictsHistory = append(s.VerdictsHistory, arc.VerdictEntry{
 				Iteration: s.Iteration.Current,

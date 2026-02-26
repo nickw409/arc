@@ -43,6 +43,7 @@ Actions:
 		newManageCopyFromCmd(),
 		newManageShowCmd(),
 		newManageResetReviewCmd(),
+		newManageActivityCmd(),
 	)
 
 	return cmd
@@ -242,6 +243,27 @@ func newManageShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := baseManageOpts(args)
 			return plan.ManageShow(os.Stdout, opts)
+		},
+	}
+}
+
+func newManageActivityCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "activity <plan> <phase> <text>",
+		Short: "Set agent activity message",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := baseManageOpts(args)
+			opts.Activity = args[2]
+			if err := plan.ManageActivity(opts); err != nil {
+				return err
+			}
+			if args[2] == "" {
+				fmt.Printf("Cleared activity for %s/%s\n", args[0], args[1])
+			} else {
+				fmt.Printf("Set activity for %s/%s: %s\n", args[0], args[1], args[2])
+			}
+			return nil
 		},
 	}
 }

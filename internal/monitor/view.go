@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // formatTokens formats a token count in human-readable form (e.g. 52401 → "52k").
@@ -265,6 +266,18 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		}
 	}
 
+	// Activity line: dim second line shown only for active phases on wide terminals
+	if width >= 80 && pv.Activity != "" && isActiveStatus(pv.Status) {
+		activityLine := fmt.Sprintf("      ↳ %s", pv.Activity)
+		if len(activityLine) > width-2 {
+			activityLine = activityLine[:width-5] + "..."
+		}
+		if selected {
+			return selectedStyle.Render(style.Render(row)) + "\n" + selectedStyle.Render(dimStyle.Render(activityLine))
+		}
+		return style.Render(row) + "\n" + dimStyle.Render(activityLine)
+	}
+
 	if selected {
 		return selectedStyle.Render(style.Render(row))
 	}
@@ -333,6 +346,19 @@ func (m Model) renderDetailPanel() string {
 	// Notes
 	if pv.Notes != "" {
 		lines = append(lines, fmt.Sprintf("  Notes:  %s", pv.Notes))
+	}
+
+	// Activity
+	if pv.Activity != "" {
+		actLine := fmt.Sprintf("  Activity: %s", pv.Activity)
+		if pv.ActivityUpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, pv.ActivityUpdatedAt); err == nil {
+				actLine += dimStyle.Render(fmt.Sprintf("  (at %s)", t.Format("15:04:05")))
+			}
+		}
+		lines = append(lines, actLine)
+	} else if isActiveStatus(pv.Status) {
+		lines = append(lines, dimStyle.Render("  Activity: —"))
 	}
 
 	// Chunks

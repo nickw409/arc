@@ -343,6 +343,14 @@ All workflows share two terminal states:
 
 Block-composed workflows use a `pipeline:` key instead of `states:`. Each pipeline step references a block by type. Steps can be named and can route individual block exits to specific downstream steps.
 
+**Registering a custom workflow:** `arc_plan` only accepts built-in workflow type names. To use a custom pipeline, create the plan with a built-in type (e.g., `direct`), then overwrite the generated `workflow.yaml`:
+
+```
+.plans/active/<plan-name>/workflow.yaml
+```
+
+Write your custom pipeline YAML to that path before calling `arc_run`. The orchestrator reads `workflow.yaml` from the plan directory at runtime, so editing it after plan creation works.
+
 ```yaml
 name: my-workflow
 version: 1
@@ -426,7 +434,7 @@ The calling pipeline step sets the param explicitly:
 
 ### Available Blocks
 
-All blocks support a `prompt` param to swap the agent prompt and a `max_turns` param to control agent length.
+All blocks support a `prompt` param to swap the agent prompt and a `max_turns` param to control agent length. The `model` param (accepted by `act`) passes `--model <value>` directly to the claude CLI — valid values are whatever the claude CLI accepts (e.g., `sonnet`, `opus`, `haiku`, or a full model ID like `claude-sonnet-4-5-20250929`).
 
 | Block | Exits | Params | Purpose |
 |-------|-------|--------|---------|
@@ -434,8 +442,10 @@ All blocks support a `prompt` param to swap the agent prompt and a `max_turns` p
 | `adversary` | `bugs_found`, `no_bugs_found` | `prompt`, `max_turns` (30) | Writes adversarial failing tests to expose bugs in existing code |
 | `tests` | `done` | `prompt`, `max_turns` (100), `timeout` (1800) | Writes tests capturing intended behavior |
 | `test-review` | `approved`, `gaps_found` | `prompt`, `max_turns` (15), `max_state_iterations`, `on_max_iterations` | Reviews test coverage and quality |
-| `review` | `approved`, `concerns` | `prompt`, `max_turns` (50), `timeout` (900) | Reviews implementation quality |
+| `review` | `approved`, `concerns` | `prompt`, `max_turns` (50), `timeout` (900), `max_state_iterations`, `on_max_iterations` | Reviews implementation quality |
 | `judge` | configurable | `prompt`, `max_turns` (15), `verdict_a` (approved), `verdict_b` (rejected), `max_state_iterations`, `on_max_iterations` | Generic two-verdict branching block; override `verdict_a`/`verdict_b` to name your own exits |
+
+**`max_state_iterations` / `on_max_iterations`:** These params are accepted and stored on the state config but are **not currently enforced at runtime** — the pipeline does not read them. Do not rely on them to cap iterations. Use the global `max_iterations` in `.arc.yaml` or the phase-level iteration counter instead.
 
 **`judge` example** — approve or reject a draft:
 
@@ -464,11 +474,13 @@ arc plan <name> <phase1> [phase2] ...   # Create plan scaffolding
 arc review <plan-name>                   # Adversarial review with auto-remediation
 arc review <plan-name> --phase <phase>   # Review a single phase
 arc run <plan-name>                      # Launch orchestrator for all phases
-arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase
+arc iterate <plan-name> <phase-name>     # Run a single iteration for a phase (manual step)
 arc status <plan-name>                   # Show plan/phase status
 arc manage reset-review <plan> <phase>   # Clear review cache and iteration counter
 arc chat                                 # Launch interactive Claude session with Arc MCP tools
 ```
+
+**`arc_iterate` use case:** Run exactly one agent session for a phase, then return. Use it when `arc_run` stopped due to a blocked phase and you want to try one more iteration after editing `plan.md`, without re-launching the full orchestrator. Also useful for stepping through a phase manually to inspect intermediate state.
 
 ### Adversarial Review
 
@@ -489,6 +501,8 @@ When adversaries find issues, they emit structured suggestions (find-and-replace
 3. Applies fixes to `plan.md`
 4. Re-reviews until all pass or iteration limit (5) is hit
 
+**At the 5-iteration ceiling:** the review sets status to `"conditional"` (not `"approved"`, not `"blocked"`). `arc_run` accepts both `"approved"` and `"conditional"`, so the plan can still run — but the unresolved concerns remain. Inspect `plan.json`'s `review_results` field to see which adversaries didn't pass.
+
 All blocking adversaries must approve before a plan can run.
 
 ### Execution Model
@@ -498,6 +512,8 @@ Each phase runs as a single long-lived agent session (up to 200 turns / 3600s fo
 If a session crashes (non-zero exit, no extractable verdict), the orchestrator retries once. If it fails again, the phase is marked `blocked`.
 
 After each session the agent's `## Memory` output section is saved to `{phase-dir}/memory/{state-name}.md`. On re-entry to the same state (e.g., after a review loop sends impl back), that memory is injected into the prompt as `## Previous Run Notes` so the agent picks up where it left off.
+
+**`## Memory` format:** Agents write a freeform summary of what they did, what worked, what failed, and the current implementation state. It is read verbatim on re-entry — write it as notes to your future self. No required structure; aim for 3-10 bullet points covering: files touched, decisions made, tests passing, and any blockers encountered.
 
 ### State Tracking
 
@@ -523,6 +539,39 @@ Each phase maintains a `state.json` file:
 
 Use `arc manage <plan> <phase> show` to print a phase's current `state.json`.
 
+### Plan Metadata (`plan.json`)
+
+Each plan has a `plan.json` at `.plans/active/<plan-name>/plan.json`:
+
+```json
+{
+  "name": "fix-auth",
+  "created": "2025-01-01T00:00:00Z",
+  "status": "active",
+  "phases": ["investigate", "fix"],
+  "phase_order": {"investigate": 1, "fix": 2},
+  "dependencies": {"fix": ["investigate"]},
+  "review_status": "approved",
+  "reviewed_at": "2025-01-01T01:00:00Z",
+  "review_iterations": 2,
+  "review_results": {"executability": "approved", "consistency": "approved"},
+  "workflow_type": "bugfix",
+  "split_phases": {}
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `phases` | Ordered phase list (determines execution order) |
+| `phase_order` | Position of each phase (1-indexed) |
+| `dependencies` | Which phases must complete before each phase runs |
+| `review_status` | `"unreviewed"`, `"approved"`, or `"conditional"` |
+| `review_results` | Per-adversary review verdicts |
+| `workflow_type` | Must match a built-in type; determines which workflow YAML is copied |
+| `split_phases` | Maps original phase names to the sub-phases they were split into |
+
+**Splitting a phase manually:** Edit `plan.json` to add new phase names to `phases` and `phase_order`, add entries to `dependencies`, create the new phase directories with `state.json` and `plan.md`, and remove or rename the original phase.
+
 ### Arc Chat (MCP Mode)
 
 `arc chat` launches an interactive Claude session with Arc registered as an MCP server. In this mode, Arc tools are available as MCP tool calls — use these instead of CLI commands.
@@ -536,7 +585,7 @@ Use `arc manage <plan> <phase> show` to print a phase's current `state.json`.
 | `arc_status` | `arc status <plan>` | Show phases and state for a specific plan |
 | `arc_plan` | `arc plan` | Create a new plan with phases |
 | `arc_review` | `arc review` | Run adversarial review on a plan |
-| `arc_run` | `arc run` | Launch orchestrator (runs async, returns immediately) |
+| `arc_run` | `arc run` | Launch orchestrator (runs async, returns immediately). Returns text `"Started run for plan <name>."` — pass the same `plan_name` to `arc_run_status` to monitor. |
 | `arc_run_status` | — | Check progress of a running orchestrator |
 | `arc_run_cancel` | — | Cancel a running orchestrator |
 | `arc_iterate` | `arc iterate` | Run a single phase iteration |
@@ -563,6 +612,8 @@ Use `arc manage <plan> <phase> show` to print a phase's current `state.json`.
 | `copy-from` | `source-phase` | Copy state from another phase |
 | `reset-review` | — | Clear review cache and iteration counter |
 
+**Skipping a phase:** `arc_manage <plan> <phase> complete` marks the phase as already done. The orchestrator skips phases that are already `complete` and moves to the next unfinished phase.
+
 ### Worktree Behavior
 
 By default, `arc_run` creates a **shared git worktree** for the plan — a separate branch where all phases execute. Changes are merged back to the original branch when the plan completes. This keeps in-progress work isolated from your working tree.
@@ -575,12 +626,16 @@ Options:
 | `per_phase_worktree: true` | Each phase gets its own worktree; merged and cleaned up per-phase |
 | `worktree: false` | No isolation — all phases run in-tree on the current branch |
 
+**Worktree location:** Created via `os.MkdirTemp` — a system temp directory matching the pattern `arc-worktree-*`. The branch name is `arc/<plan-name>` (shared) or `arc/<plan-name>/<phase-name>` (per-phase). Use `git worktree list` to find the exact path.
+
+**Merge strategy:** `git merge --no-ff <branch>` — always creates a merge commit. On conflict, the merge is aborted automatically and the run fails. There is no auto-rebase or conflict resolution.
+
 ### Failure Intervention
 
 When a run stops with a blocked phase, the pipeline has already exhausted its mechanical retries. You must diagnose and fix it:
 
 1. **Inspect the failed phase** — `arc_manage <plan> <phase> show` to read `state.json` and understand the last verdict, iteration count, and notes.
-2. **Read the agent's last output** — look in the phase worktree directory for the transcript or any output files left by the agent.
+2. **Find the worktree** — run `git worktree list` to locate the `arc-worktree-*` temp directory. The branch is `arc/<plan-name>`. Agent output is captured in memory (not written to a file), but any files written by the agent will be in the worktree directory.
 3. **Diagnose the real problem:**
    - **Ambiguous plan** — edit `plan.md` to be more specific and concrete.
    - **Phase too large** — split into smaller phases; update `plan.json` and create new phase directories.

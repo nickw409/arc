@@ -109,6 +109,15 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 			line += fmt.Sprintf(" disputes:%d", len(state.Disputes))
 		}
 
+		// Add activity if present
+		if state.Activity != "" {
+			activity := state.Activity
+			if len(activity) > 60 {
+				activity = activity[:57] + "..."
+			}
+			line += fmt.Sprintf(" — %s", activity)
+		}
+
 		// Check blocked-by deps
 		deps := meta.Dependencies[phase]
 		var blockedBy []string

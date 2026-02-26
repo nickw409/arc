@@ -40,6 +40,8 @@ Your job is to find bugs, edge cases, and specification violations in the implem
 
 {{> common/test-commands.md}}
 
+- Use `arc manage {{plan}} {{phase}} activity "<message>"` to report what you are currently doing (e.g. `arc manage {{plan}} {{phase}} activity "Reading implementation"`, `arc manage {{plan}} {{phase}} activity "Writing adversary tests"`, `arc manage {{plan}} {{phase}} activity "Running tests to confirm failures"`)
+
 ## Verdict
 
 After running your tests, output exactly one of:

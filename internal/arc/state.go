@@ -41,6 +41,8 @@ type PhaseState struct {
 	BlockedReason       string              `json:"blocked_reason,omitempty"`
 	BlockedAt           string              `json:"blocked_at,omitempty"`
 	Usage               Usage               `json:"usage,omitempty"`
+	Activity            string              `json:"activity,omitempty"`
+	ActivityUpdatedAt   string              `json:"activity_updated_at,omitempty"`
 	AdversaryRound      int                 `json:"adversary_round,omitempty"`
 	AdversaryTests      map[string][]string `json:"adversary_tests,omitempty"` // round → test file paths
 }

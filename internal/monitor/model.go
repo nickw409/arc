@@ -69,6 +69,9 @@ type PhaseView struct {
 	Notes               string
 	ExecutedEscalations []string
 
+	Activity          string
+	ActivityUpdatedAt string
+
 	ChunksTotal  int
 	ChunksDone   int
 	ChunkCurrent string
@@ -248,6 +251,8 @@ func PhaseViewFromState(state *arc.PhaseState) PhaseView {
 		DeferredReason:      state.DeferredReason,
 		Notes:               state.Notes,
 		ExecutedEscalations: state.ExecutedEscalations,
+		Activity:            state.Activity,
+		ActivityUpdatedAt:   state.ActivityUpdatedAt,
 	}
 
 	// Last commit: truncate to 7 chars

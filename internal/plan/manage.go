@@ -24,6 +24,7 @@ type ManageOptions struct {
 	Note        string
 	Iteration   int
 	SourcePhase string
+	Activity    string
 }
 
 func stateFileFor(opts ManageOptions) *state.StateFile {
@@ -118,6 +119,19 @@ func ManageNote(opts ManageOptions) error {
 func ManageIteration(opts ManageOptions) error {
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
 		s.Iteration.Current = opts.Iteration
+		return nil
+	})
+}
+
+// ManageActivity sets or clears the agent activity message.
+func ManageActivity(opts ManageOptions) error {
+	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
+		s.Activity = opts.Activity
+		if opts.Activity == "" {
+			s.ActivityUpdatedAt = ""
+		} else {
+			s.ActivityUpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
 		return nil
 	})
 }

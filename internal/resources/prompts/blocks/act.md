@@ -33,6 +33,7 @@ You may create new files, modify existing files, and run any commands needed.
 
 {{> common/test-commands.md}}
 
+- Use `arc manage {{plan}} {{phase}} activity "<message>"` to report what you are currently doing (e.g. `arc manage {{plan}} {{phase}} activity "Reading specification"`, `arc manage {{plan}} {{phase}} activity "Writing implementation"`, `arc manage {{plan}} {{phase}} activity "Running tests"`, `arc manage {{plan}} {{phase}} activity "Fixing failures"`)
 - Use `arc manage {{plan}} {{phase}} note <text>` to record intermediate progress
 - Use `arc manage {{plan}} {{phase}} tests <passing> <total>` after each test run
 

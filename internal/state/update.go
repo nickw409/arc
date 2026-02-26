@@ -49,6 +49,20 @@ func ApproveDispute(sf *StateFile, reason string) error {
 	})
 }
 
+// SetActivity sets the agent's current activity message and timestamp.
+// Passing an empty string clears the activity.
+func SetActivity(sf *StateFile, activity string) error {
+	return sf.Update(func(s *arc.PhaseState) error {
+		s.Activity = activity
+		if activity == "" {
+			s.ActivityUpdatedAt = ""
+		} else {
+			s.ActivityUpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		return nil
+	})
+}
+
 // UpdateTests updates test counts and stuck_iterations tracking.
 func UpdateTests(sf *StateFile, passing, total int) error {
 	return sf.Update(func(s *arc.PhaseState) error {
