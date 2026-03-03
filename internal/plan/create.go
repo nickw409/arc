@@ -20,8 +20,9 @@ type CreateOptions struct {
 	Name           string
 	Phases         []string
 	WorkflowType   string
-	PlanContent    map[string]string // optional: phase name → plan.md content (skip template)
-	CustomWorkflow []byte            // optional: custom workflow YAML (written as workflow.yaml)
+	PlanContent    map[string]string   // optional: phase name → plan.md content (skip template)
+	CustomWorkflow []byte              // optional: custom workflow YAML (written as workflow.yaml)
+	Resolver       *resources.Resolver // if nil, uses NewResolver("", "") (embedded-only)
 }
 
 // Create creates a new plan with directory structure, state files, and templates.
@@ -49,8 +50,14 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		opts.WorkflowType = "feature"
 	}
 
+	// Resolve effective resolver
+	r := opts.Resolver
+	if r == nil {
+		r = resources.NewResolver("", "")
+	}
+
 	// Validate workflow type exists (for non-feature, we'll copy it; for feature, just check)
-	validWorkflows := resources.ListWorkflows()
+	validWorkflows := r.ListWorkflows()
 	found := false
 	for _, w := range validWorkflows {
 		if w == opts.WorkflowType {
@@ -93,7 +100,7 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 			return nil, fmt.Errorf("write workflow.yaml: %w", err)
 		}
 	} else if opts.WorkflowType != "feature" {
-		workflowData, err := resources.WorkflowBytes(opts.WorkflowType)
+		workflowData, err := r.WorkflowBytes(opts.WorkflowType)
 		if err != nil {
 			return nil, fmt.Errorf("read workflow %s: %w", opts.WorkflowType, err)
 		}

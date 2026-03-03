@@ -2,6 +2,7 @@ name: adversary
 description: Write adversarial tests to find bugs — not for quality review; use `review` or `judge` for review tasks
 params:
   max_turns: {default: "30"}
+  timeout: {default: "1200"}
   prompt: {default: "prompts/blocks/adversary.md"}
 entry: adversary
 exits: [bugs_found, no_bugs_found]
@@ -11,6 +12,7 @@ states:
     prompt: ${prompt}
     agent:
       max_turns: ${max_turns}
+      timeout: ${timeout}
       allowed_tools: [Read, Grep, Glob, Write, Bash]
     verdicts: [bugs_found, no_bugs_found]
     next:

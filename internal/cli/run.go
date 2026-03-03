@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/orchestrator"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -107,6 +108,9 @@ func newRunCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
+			homeDir, _ := os.UserHomeDir()
+			resolver := resources.NewResolver(projectRoot, homeDir)
+
 			_, err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
 				PlanName:         planName,
 				PlansDir:         plansDir,
@@ -117,6 +121,7 @@ func newRunCmd() *cobra.Command {
 				Timeout:          timeout,
 				UseWorktree:      useWorktree,
 				PerPhaseWorktree: perPhaseWorktree,
+				Resolver:         resolver,
 			})
 			return err
 		},

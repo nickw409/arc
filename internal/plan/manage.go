@@ -125,15 +125,25 @@ func ManageIteration(opts ManageOptions) error {
 
 // ManageActivity sets or clears the agent activity message.
 func ManageActivity(opts ManageOptions) error {
-	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
+	var ts string
+	err := stateFileFor(opts).Update(func(s *arc.PhaseState) error {
 		s.Activity = opts.Activity
 		if opts.Activity == "" {
 			s.ActivityUpdatedAt = ""
 		} else {
-			s.ActivityUpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			ts = time.Now().UTC().Format(time.RFC3339)
+			s.ActivityUpdatedAt = ts
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if opts.Activity != "" {
+		phaseDir := filepath.Join(opts.PlansDir, opts.PlanName, "phases", opts.Phase)
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] activity: %s", ts, opts.Phase, opts.Activity))
+	}
+	return nil
 }
 
 // ManageCopyFrom copies state from another phase.
@@ -155,6 +165,41 @@ func ManageCopyFrom(opts ManageOptions) error {
 		s.Plan = plan
 		return nil
 	})
+}
+
+// ManageReset replaces a phase's state with a fresh NewPhaseState,
+// preserving only identity fields (plan, phase, workflow_type, parent_phase).
+func ManageReset(opts ManageOptions) error {
+	sf := stateFileFor(opts)
+	existing, err := sf.Read()
+	if err != nil {
+		return err
+	}
+	fresh := arc.NewPhaseState(existing.Plan, existing.Phase, existing.WorkflowType)
+	fresh.ParentPhase = existing.ParentPhase
+	return sf.Write(fresh)
+}
+
+// ManageResetPlan resets all phases in a plan by reading plan.json for the
+// phase list and calling ManageReset on each.
+func ManageResetPlan(opts ManageOptions) error {
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	data, err := os.ReadFile(filepath.Join(planDir, "plan.json"))
+	if err != nil {
+		return fmt.Errorf("read plan.json: %w", err)
+	}
+	var meta arc.PlanMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return fmt.Errorf("parse plan.json: %w", err)
+	}
+	for _, phase := range meta.Phases {
+		phaseOpts := opts
+		phaseOpts.Phase = phase
+		if err := ManageReset(phaseOpts); err != nil {
+			return fmt.Errorf("reset %s: %w", phase, err)
+		}
+	}
+	return nil
 }
 
 // ManageShow writes the phase state to the writer in formatted JSON.

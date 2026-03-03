@@ -26,10 +26,6 @@ func SetAgentCommandNameForTest(name string) {
 	agentCommandName = name
 }
 
-// workflowBytesFunc loads raw workflow YAML for a given workflow type.
-// Tests override this to inject custom workflows.
-var workflowBytesFunc = resources.WorkflowBytes
-
 // IterateOptions configures a single state run.
 type IterateOptions struct {
 	PlanName     string
@@ -38,8 +34,9 @@ type IterateOptions struct {
 	Instructions string
 	PlansDir     string
 	ArcHome      string
-	WorkingDir   string // if set, agent runs in this directory (e.g. worktree)
-	ChatMode     bool   // if true, skip workflow-defined escalation rules
+	WorkingDir   string              // if set, agent runs in this directory (e.g. worktree)
+	ChatMode     bool                // if true, skip workflow-defined escalation rules
+	Resolver     *resources.Resolver // if nil, uses NewResolver("", "") (embedded-only)
 }
 
 // RunState executes the current phase state, running the agent until it produces a verdict.
@@ -55,13 +52,19 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	}
 	phaseState := *statePtr
 
+	// Resolve effective resolver
+	r := opts.Resolver
+	if r == nil {
+		r = resources.NewResolver("", "")
+	}
+
 	// Load workflow
-	wfBytes, err := workflowBytesFunc(phaseState.WorkflowType)
+	wfBytes, err := r.WorkflowBytes(phaseState.WorkflowType)
 	if err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("loading workflow %q: %w", phaseState.WorkflowType, err)}
 	}
 
-	wf, err := workflow.LoadBytes(wfBytes)
+	wf, err := workflow.LoadBytesWithBlockLoader(wfBytes, r.BlockBytes)
 	if err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("parsing workflow: %w", err)}
 	}
@@ -103,10 +106,21 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("state %q not found in workflow", phaseState.CurrentState)}
 	}
 
-	// run_once: skip on all visits after the first.
+	// run_once: skip on all visits after the first successful completion.
 	// phase.go pre-increments StateIterations before calling RunState, so
-	// a count of > 1 means this state has already executed at least once.
-	if stateConfig.RunOnce && phaseState.StateIterations[phaseState.CurrentState] > 1 {
+	// a count of > 1 means this state has been entered before. We also require
+	// a prior verdict entry for this state to confirm the previous visit
+	// actually completed — if the run was interrupted mid-execution, there will
+	// be no verdict entry and we should re-run rather than skip.
+	hasPriorVerdict := func() bool {
+		for _, e := range phaseState.VerdictsHistory {
+			if e.State == phaseState.CurrentState {
+				return true
+			}
+		}
+		return false
+	}
+	if stateConfig.RunOnce && phaseState.StateIterations[phaseState.CurrentState] > 1 && hasPriorVerdict() {
 		skipVerdict := arc.Verdict(stateConfig.SkipVerdict)
 		nextState, err := machine.NextState(phaseState.CurrentState, skipVerdict)
 		if err != nil {
@@ -247,12 +261,16 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	// Build spawn options, applying per-state agent config if present
 	spawnOpts := buildSpawnOptions(stateConfig, &phaseState, rendered, opts.WorkingDir)
 
+	// Log iteration start
+	_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] iter %d started", timeNow(), phaseState.CurrentState, phaseState.Iteration.Current))
+
 	// Spawn agent
 	spawnResult, err := agent.Spawn(ctx, spawnOpts)
 	if err != nil {
 		if ctx.Err() != nil {
 			return &arc.IterationResult{Action: arc.ActionAbort, Err: ctx.Err()}
 		}
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] error: agent spawn failed: %v", timeNow(), phaseState.CurrentState, err))
 		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent spawn failed: %w", err)}
 	}
 
@@ -284,8 +302,10 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		verdict, err = prompt.ExtractVerdict(spawnResult.Output, validVerdicts)
 		if err != nil {
 			if spawnResult.ExitCode != 0 {
+				_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] error: exit code %d, verdict extraction failed: %v", timeNow(), phaseState.CurrentState, spawnResult.ExitCode, err))
 				return &arc.IterationResult{Action: arc.ActionRetry, Usage: spawnResult.Usage, Err: fmt.Errorf("agent exited with code %d (verdict extraction also failed: %v)", spawnResult.ExitCode, err)}
 			}
+			_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] error: verdict extraction failed: %v", timeNow(), phaseState.CurrentState, err))
 			return &arc.IterationResult{Action: arc.ActionRetry, Err: err}
 		}
 
@@ -333,6 +353,12 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		"next_state", nextState,
 		"verdict", string(verdict),
 	)
+
+	if verdict != "" {
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] → [%s] verdict: %s", timeNow(), curState, nextState, verdict))
+	} else {
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] → [%s]", timeNow(), curState, nextState))
+	}
 
 	return &arc.IterationResult{
 		NextState: nextState,

@@ -28,7 +28,8 @@ Actions:
   note <text>           Set notes field
   iteration <n>         Set current iteration
   copy-from <phase>     Copy state from another phase
-  show                  Pretty-print state.json`,
+  show                  Pretty-print state.json
+  reset [phase]         Fully reset a phase (or all phases) to initial state`,
 	}
 
 	cmd.AddCommand(
@@ -44,6 +45,7 @@ Actions:
 		newManageShowCmd(),
 		newManageResetReviewCmd(),
 		newManageActivityCmd(),
+		newManageResetCmd(),
 	)
 
 	return cmd
@@ -262,6 +264,34 @@ func newManageActivityCmd() *cobra.Command {
 				fmt.Printf("Cleared activity for %s/%s\n", args[0], args[1])
 			} else {
 				fmt.Printf("Set activity for %s/%s: %s\n", args[0], args[1], args[2])
+			}
+			return nil
+		},
+	}
+}
+
+func newManageResetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset <plan> [phase]",
+		Short: "Fully reset a phase (or all phases) to initial state",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			planName := args[0]
+			opts := plan.ManageOptions{
+				PlansDir: filepath.Join(".plans", "active"),
+				PlanName: planName,
+			}
+			if len(args) == 2 {
+				opts.Phase = args[1]
+				if err := plan.ManageReset(opts); err != nil {
+					return err
+				}
+				fmt.Printf("Reset %s/%s\n", planName, args[1])
+			} else {
+				if err := plan.ManageResetPlan(opts); err != nil {
+					return err
+				}
+				fmt.Printf("Reset all phases in %s\n", planName)
 			}
 			return nil
 		},

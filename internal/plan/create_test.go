@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/resources"
 )
 
 func TestCreatePlanStructure(t *testing.T) {
@@ -672,5 +673,91 @@ func TestCreateOptions_PlanContentForNonexistentPhase(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dir, "nonexist-phase", "phases", "cc"))
 	if err == nil {
 		t.Error("phase directory 'cc' should not exist")
+	}
+}
+
+func TestCreatePlanCustomWorkflowType(t *testing.T) {
+	// Create a custom workflow YAML in a temp project dir
+	projDir := t.TempDir()
+	wfDir := filepath.Join(projDir, ".arc", "workflows")
+	if err := os.MkdirAll(wfDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	wfYAML := `name: my-wf
+version: 1
+description: Custom workflow
+entry_state: impl
+terminal_states: [complete, blocked]
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    description: Done
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Blocked
+    prompt: prompts/common/blocked.md
+`
+	if err := os.WriteFile(filepath.Join(wfDir, "my-wf.yaml"), []byte(wfYAML), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	plansDir := t.TempDir()
+	resolver := resources.NewResolver(projDir, "")
+
+	meta, err := Create(CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "my-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "my-wf",
+		Resolver:     resolver,
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil PlanMeta")
+	}
+	if meta.WorkflowType != "my-wf" {
+		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "my-wf")
+	}
+}
+
+func TestCreatePlanNilResolverUsesEmbedded(t *testing.T) {
+	dir := t.TempDir()
+
+	meta, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "my-plan",
+		Phases:       []string{"fix"},
+		WorkflowType: "bugfix",
+		Resolver:     nil, // explicitly nil — should use embedded
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil PlanMeta")
+	}
+	if meta.WorkflowType != "bugfix" {
+		t.Errorf("WorkflowType = %q, want bugfix", meta.WorkflowType)
+	}
+}
+
+func TestCreatePlanUnknownWorkflowTypeError(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Create(CreateOptions{
+		PlansDir:     dir,
+		Name:         "my-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "nonexistent-xyz",
+		Resolver:     nil,
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown workflow type, got nil")
 	}
 }

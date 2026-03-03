@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/spf13/cobra"
 )
 
@@ -24,11 +26,16 @@ func newPlanCmd() *cobra.Command {
 				workflowType = "feature"
 			}
 
+			projectRoot, _ := os.Getwd()
+			homeDir, _ := os.UserHomeDir()
+			resolver := resources.NewResolver(projectRoot, homeDir)
+
 			meta, err := plan.Create(plan.CreateOptions{
 				PlansDir:     plansDir,
 				Name:         name,
 				Phases:       phases,
 				WorkflowType: workflowType,
+				Resolver:     resolver,
 			})
 			if err != nil {
 				return err

@@ -45,10 +45,10 @@ func Load(path string) (*arc.Workflow, error) {
 	return LoadBytes(data)
 }
 
-// LoadBytes loads a workflow from raw YAML bytes.
-// If the YAML contains a "pipeline" key, it uses block composition.
-// Otherwise it loads as a traditional state-machine workflow.
-func LoadBytes(data []byte) (*arc.Workflow, error) {
+// LoadBytesWithBlockLoader loads a workflow from raw YAML bytes, using blockLoader to resolve blocks.
+// If the YAML contains a "pipeline" key, uses block composition with the provided loader.
+// Otherwise loads as a traditional state-machine workflow (blockLoader is unused).
+func LoadBytesWithBlockLoader(data []byte, blockLoader func(string) ([]byte, error)) (*arc.Workflow, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty workflow data")
 	}
@@ -60,7 +60,7 @@ func LoadBytes(data []byte) (*arc.Workflow, error) {
 
 	// Pipeline format: compose from blocks
 	if len(raw.Pipeline) > 0 {
-		return loadComposed(raw)
+		return loadComposed(raw, blockLoader)
 	}
 
 	w := &arc.Workflow{
@@ -103,14 +103,20 @@ func LoadBytes(data []byte) (*arc.Workflow, error) {
 	return w, nil
 }
 
+// LoadBytes loads a workflow from raw YAML bytes using the embedded block loader.
+// Calls LoadBytesWithBlockLoader(data, resources.BlockBytes).
+func LoadBytes(data []byte) (*arc.Workflow, error) {
+	return LoadBytesWithBlockLoader(data, resources.BlockBytes)
+}
+
 // loadComposed resolves a pipeline-format workflow by loading blocks and composing them.
-func loadComposed(raw rawWorkflow) (*arc.Workflow, error) {
+func loadComposed(raw rawWorkflow, blockLoader func(string) ([]byte, error)) (*arc.Workflow, error) {
 	// Load all referenced blocks
 	blockDefs := make(map[string]*block.Block)
 	for _, step := range raw.Pipeline {
 		if step.Block != "" {
 			if _, ok := blockDefs[step.Block]; !ok {
-				b, err := loadBlockDef(step.Block)
+				b, err := loadBlockDef(step.Block, blockLoader)
 				if err != nil {
 					return nil, fmt.Errorf("loading block %q: %w", step.Block, err)
 				}
@@ -120,7 +126,7 @@ func loadComposed(raw rawWorkflow) (*arc.Workflow, error) {
 		if step.Parallel != nil {
 			for _, pbr := range step.Parallel.Blocks {
 				if _, ok := blockDefs[pbr.Block]; !ok {
-					b, err := loadBlockDef(pbr.Block)
+					b, err := loadBlockDef(pbr.Block, blockLoader)
 					if err != nil {
 						return nil, fmt.Errorf("loading parallel block %q: %w", pbr.Block, err)
 					}
@@ -171,9 +177,12 @@ func loadComposed(raw rawWorkflow) (*arc.Workflow, error) {
 	return wf, nil
 }
 
-// loadBlockDef loads a block definition from embedded resources.
-func loadBlockDef(name string) (*block.Block, error) {
-	data, err := resources.BlockBytes(name)
+// loadBlockDef loads a block definition using the provided loader function.
+func loadBlockDef(name string, blockLoader func(string) ([]byte, error)) (*block.Block, error) {
+	if blockLoader == nil {
+		return nil, fmt.Errorf("no block loader provided (cannot load block %q)", name)
+	}
+	data, err := blockLoader(name)
 	if err != nil {
 		return nil, err
 	}

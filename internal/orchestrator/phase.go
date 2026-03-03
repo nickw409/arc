@@ -25,12 +25,13 @@ type RunPhaseOptions struct {
 	PhaseName    string
 	PlansDir     string
 	ArcHome      string
-	ProjectDir   string // working directory for git commits; empty uses process cwd
+	ProjectDir   string              // working directory for git commits; empty uses process cwd
 	Config       *config.Config
 	Logger       *slog.Logger
-	UseWorktree  bool   // if true, create a per-phase worktree (instead of shared plan-level)
-	WorkingDir   string // override working directory for agents (set by worktree)
-	ChatMode     bool   // if true, block immediately instead of retrying on failure
+	UseWorktree  bool                // if true, create a per-phase worktree (instead of shared plan-level)
+	WorkingDir   string              // override working directory for agents (set by worktree)
+	ChatMode     bool                // if true, block immediately instead of retrying on failure
+	Resolver     *resources.Resolver // if nil, uses NewResolver("", "")
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
@@ -46,12 +47,18 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 		return fmt.Errorf("reading state: %w", err)
 	}
 
+	// Resolve effective resolver
+	r := opts.Resolver
+	if r == nil {
+		r = resources.NewResolver("", "")
+	}
+
 	// Load workflow
-	wfBytes, err := resources.WorkflowBytes(phaseState.WorkflowType)
+	wfBytes, err := r.WorkflowBytes(phaseState.WorkflowType)
 	if err != nil {
 		return fmt.Errorf("loading workflow: %w", err)
 	}
-	wf, err := workflow.LoadBytes(wfBytes)
+	wf, err := workflow.LoadBytesWithBlockLoader(wfBytes, r.BlockBytes)
 	if err != nil {
 		return fmt.Errorf("parsing workflow: %w", err)
 	}
@@ -153,6 +160,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			ArcHome:    opts.ArcHome,
 			WorkingDir: opts.WorkingDir,
 			ChatMode:   opts.ChatMode,
+			Resolver:   opts.Resolver,
 		})
 
 		// Accumulate usage from this run into phase state
@@ -174,6 +182,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 					ArcHome:    opts.ArcHome,
 					WorkingDir: opts.WorkingDir,
 					ChatMode:   opts.ChatMode,
+					Resolver:   opts.Resolver,
 				})
 				if !result.Usage.IsZero() {
 					sf.Update(func(s *arc.PhaseState) error {
@@ -419,6 +428,7 @@ func handleDispute(ctx context.Context, opts RunPhaseOptions, sf *state.StateFil
 			PlansDir:  opts.PlansDir,
 			ArcHome:   opts.ArcHome,
 			ChatMode:  opts.ChatMode,
+			Resolver:  opts.Resolver,
 		})
 		if result.Err != nil {
 			opts.Logger.Warn("fix run failed", "error", result.Err)

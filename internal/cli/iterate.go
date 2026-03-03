@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/nwiley/arc/internal/pipeline"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/spf13/cobra"
 )
 
@@ -39,11 +40,16 @@ func newIterateCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
+			projectRoot, _ := os.Getwd()
+			homeDir, _ := os.UserHomeDir()
+			resolver := resources.NewResolver(projectRoot, homeDir)
+
 			result := pipeline.RunState(context.Background(), logger, pipeline.IterateOptions{
-				PlanName: planName,
+				PlanName:  planName,
 				PhaseName: phaseName,
-				PlansDir: plansDir,
-				ArcHome:  arcHome,
+				PlansDir:  plansDir,
+				ArcHome:   arcHome,
+				Resolver:  resolver,
 			})
 
 			if result.Err != nil {

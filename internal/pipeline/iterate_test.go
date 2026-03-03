@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/resources"
 )
 
 var testBin string
@@ -554,12 +555,16 @@ func TestRunStateMemorySaved(t *testing.T) {
 
 func TestRunStateRunOnceSkip(t *testing.T) {
 	// check.adversary is run_once in the feature workflow.
-	// Pre-set StateIterations to 2 to simulate a second visit (phase.go pre-increments).
+	// Pre-set StateIterations to 2 and a prior verdict entry to simulate a
+	// successful second visit (phase.go pre-increments, prior run completed).
 	// The agent must NOT be spawned — the skip verdict is produced automatically.
 	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
 	st.CurrentState = "check.adversary"
 	st.PhaseStatus = "adversary"
 	st.StateIterations = map[string]int{"check.adversary": 2}
+	st.VerdictsHistory = []arc.VerdictEntry{
+		{Iteration: 1, State: "check.adversary", Verdict: "bugs_found", Timestamp: "2026-01-01T00:00:00Z"},
+	}
 
 	plansDir := setupTestPlan(t, st)
 
@@ -584,17 +589,102 @@ func TestRunStateRunOnceSkip(t *testing.T) {
 	}
 }
 
-// withTestWorkflow installs a custom workflow loader for the duration of the test.
-func withTestWorkflow(t *testing.T, wfType string, data []byte) {
-	t.Helper()
-	orig := workflowBytesFunc
-	workflowBytesFunc = func(name string) ([]byte, error) {
-		if name == wfType {
-			return data, nil
-		}
-		return orig(name)
+func TestRunStateRunOnceNoSkipWhenInterrupted(t *testing.T) {
+	// If StateIterations > 1 but there is no prior verdict for check.adversary,
+	// the previous visit was interrupted — the agent must run, not be skipped.
+	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
+	st.CurrentState = "check.adversary"
+	st.PhaseStatus = "adversary"
+	st.StateIterations = map[string]int{"check.adversary": 2}
+	// No VerdictsHistory entry for check.adversary — simulates an interrupted run.
+
+	plansDir := setupTestPlan(t, st)
+
+	// Agent exits with code 1 → ActionRetry. If we see ActionRetry we know the
+	// agent was actually spawned (skip did not fire).
+	t.Setenv("MOCK_EXIT_CODE", "1")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionRetry {
+		t.Fatalf("got Action=%v, want ActionRetry (agent must run after interrupted visit); err=%v", result.Action, result.Err)
 	}
-	t.Cleanup(func() { workflowBytesFunc = orig })
+}
+
+func TestRunStateUsesResolverWorkflow(t *testing.T) {
+	// Create a custom workflow in a temp project dir
+	projDir := t.TempDir()
+	wfDir := filepath.Join(projDir, ".arc", "workflows")
+	if err := os.MkdirAll(wfDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Write a minimal valid workflow YAML
+	wfYAML := `name: test-wf
+version: 1
+description: Test workflow
+entry_state: impl
+terminal_states: [complete, blocked]
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    description: Done
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Blocked
+    prompt: prompts/common/blocked.md
+`
+	if err := os.WriteFile(filepath.Join(wfDir, "test-wf.yaml"), []byte(wfYAML), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resolver := resources.NewResolver(projDir, "")
+
+	// Create a phase in "complete" state so RunState returns early (terminal)
+	state := arc.NewPhaseState("test-plan", "test-phase", "test-wf")
+	state.CurrentState = "complete"
+	state.PhaseStatus = "complete"
+
+	plansDir := setupTestPlan(t, state)
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+		Resolver:  resolver,
+	})
+
+	// Should succeed — terminal state detected after loading the custom workflow
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+}
+
+func TestRunStateNilResolverFallsBackToEmbedded(t *testing.T) {
+	// Nil resolver should fall back to embedded workflows (e.g. "feature")
+	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
+	state.CurrentState = "complete"
+	state.PhaseStatus = "complete"
+
+	plansDir := setupTestPlan(t, state)
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+		Resolver:  nil, // explicitly nil
+	})
+
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
 }
 
 // Ensure the pipeline types are valid by referencing them.

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -353,6 +354,110 @@ func TestConstraintsLoading(t *testing.T) {
 				t.Errorf("OnMaxIterations = %q, want %q", found.Constraints.OnMaxIterations, tt.wantOn)
 			}
 		})
+	}
+}
+
+func TestLoadBytesWithBlockLoaderCustomBlock(t *testing.T) {
+	// State-machine workflow (no pipeline: key). blockLoader is unused.
+	data, err := os.ReadFile(testdataPath("valid-feature.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	wf, err := LoadBytesWithBlockLoader(data, resources.BlockBytes)
+	if err != nil {
+		t.Fatalf("LoadBytesWithBlockLoader failed: %v", err)
+	}
+	if wf == nil {
+		t.Fatal("expected non-nil workflow")
+	}
+	if len(wf.States) == 0 {
+		t.Fatal("expected at least one state")
+	}
+}
+
+func TestLoadBytesWithBlockLoaderPipelineUsesLoader(t *testing.T) {
+	// Pipeline YAML referencing block "impl". Custom loader returns valid impl block YAML.
+	loaderCalled := false
+
+	implBlockBytes, err := resources.BlockBytes("act")
+	if err != nil {
+		t.Fatalf("failed to load embedded act block: %v", err)
+	}
+
+	data := []byte(`
+name: test-pipeline
+version: 1
+pipeline:
+  - block: impl
+terminal_states: [complete, blocked]
+`)
+
+	wf, err := LoadBytesWithBlockLoader(data, func(name string) ([]byte, error) {
+		if name == "impl" {
+			loaderCalled = true
+			return implBlockBytes, nil
+		}
+		return resources.BlockBytes(name)
+	})
+	if err != nil {
+		t.Fatalf("LoadBytesWithBlockLoader failed: %v", err)
+	}
+	if wf == nil {
+		t.Fatal("expected non-nil workflow")
+	}
+	if !loaderCalled {
+		t.Fatal("expected custom loader to be called with 'impl'")
+	}
+}
+
+func TestLoadBytesWithBlockLoaderCustomLoader(t *testing.T) {
+	// Pipeline YAML referencing block "custom-block". Loader returns valid block YAML.
+	adversaryBytes, err := resources.BlockBytes("adversary")
+	if err != nil {
+		t.Fatalf("failed to load embedded adversary block: %v", err)
+	}
+
+	data := []byte(`
+name: custom-pipeline
+version: 1
+pipeline:
+  - block: custom-block
+terminal_states: [complete, blocked]
+`)
+
+	wf, err := LoadBytesWithBlockLoader(data, func(name string) ([]byte, error) {
+		if name == "custom-block" {
+			return adversaryBytes, nil
+		}
+		return nil, fmt.Errorf("unexpected block: %s", name)
+	})
+	if err != nil {
+		t.Fatalf("expected success with custom block loader, got: %v", err)
+	}
+	if wf == nil {
+		t.Fatal("expected non-nil workflow")
+	}
+}
+
+func TestLoadBytesWithBlockLoaderLoaderError(t *testing.T) {
+	// Pipeline YAML referencing "missing-block". Loader always returns error.
+	data := []byte(`
+name: error-pipeline
+version: 1
+pipeline:
+  - block: missing-block
+terminal_states: [complete, blocked]
+`)
+
+	_, err := LoadBytesWithBlockLoader(data, func(name string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	})
+	if err == nil {
+		t.Fatal("expected error for missing block, got nil")
+	}
+	if !containsString(err.Error(), "missing-block") {
+		t.Fatalf("expected error to contain 'missing-block', got: %v", err)
 	}
 }
 

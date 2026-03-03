@@ -20,6 +20,7 @@ import (
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/pipeline"
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
 )
@@ -88,10 +89,10 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 	), h.handleReview)
 
 	s.AddTool(mcp.NewTool("arc_manage",
-		mcp.WithDescription("Manage phase state. Supports actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity."),
+		mcp.WithDescription("Manage phase state. Supports actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity, reset."),
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan")),
-		mcp.WithString("phase", mcp.Required(), mcp.Description("Name of the phase")),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity")),
+		mcp.WithString("phase", mcp.Description("Name of the phase (optional for reset — omit to reset all phases in the plan)")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity, reset")),
 		mcp.WithString("reason", mcp.Description("Reason (required for defer and block)")),
 		mcp.WithNumber("passing", mcp.Description("Passing test count (for tests action)")),
 		mcp.WithNumber("total", mcp.Description("Total test count (for tests action)")),
@@ -201,11 +202,15 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError("at least one phase is required"), nil
 	}
 
+	homeDir, _ := os.UserHomeDir()
+	resolver := resources.NewResolver(h.projectDir, homeDir)
+
 	meta, err := plan.Create(plan.CreateOptions{
 		PlansDir:     h.plansDir(),
 		Name:         name,
 		Phases:       phases,
 		WorkflowType: workflowType,
+		Resolver:     resolver,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -273,6 +278,9 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 	h.jobs[planName] = job
 	h.mu.Unlock()
 
+	runHomeDir, _ := os.UserHomeDir()
+	runResolver := resources.NewResolver(h.projectDir, runHomeDir)
+
 	go func() {
 		defer close(job.Done)
 		job.Result, job.Err = orchestrator.Launch(jobCtx, orchestrator.LaunchOptions{
@@ -287,6 +295,7 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 			PerPhaseWorktree: perPhaseWorktree,
 			StopOnFailure:    true,
 			ChatMode:         true,
+			Resolver:         runResolver,
 		})
 	}()
 
@@ -308,12 +317,16 @@ func (h *handlerContext) handleIterate(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(fmt.Sprintf("phase %q not found in plan %q", phaseName, planName)), nil
 	}
 
+	iterHomeDir, _ := os.UserHomeDir()
+	iterResolver := resources.NewResolver(h.projectDir, iterHomeDir)
+
 	result := pipeline.RunState(ctx, h.logger, pipeline.IterateOptions{
 		PlanName:  planName,
 		PhaseName: phaseName,
 		PlansDir:  h.plansDir(),
 		ArcHome:   h.arcHome,
 		ChatMode:  true,
+		Resolver:  iterResolver,
 	})
 
 	if result.Err != nil {
@@ -463,8 +476,11 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 	phase, _ := args["phase"].(string)
 	action, _ := args["action"].(string)
 
-	if planName == "" || phase == "" || action == "" {
-		return mcp.NewToolResultError("plan_name, phase, and action are required"), nil
+	if planName == "" || action == "" {
+		return mcp.NewToolResultError("plan_name and action are required"), nil
+	}
+	if phase == "" && action != "reset" {
+		return mcp.NewToolResultError("phase is required for this action"), nil
 	}
 
 	opts := plan.ManageOptions{
@@ -577,8 +593,20 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Set activity for %s/%s: %s", planName, phase, activity)), nil
 
+	case "reset":
+		if phase == "" {
+			if err := plan.ManageResetPlan(opts); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Reset all phases in %s", planName)), nil
+		}
+		if err := plan.ManageReset(opts); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Reset %s/%s", planName, phase)), nil
+
 	default:
-		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — valid actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show", action)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — valid actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity, reset", action)), nil
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
 	"github.com/nwiley/arc/internal/worktree"
@@ -23,17 +24,18 @@ import (
 
 // LaunchOptions configures the orchestrator launcher.
 type LaunchOptions struct {
-	PlanName      string
-	PlansDir      string
-	ArcHome       string
-	ProjectDir    string // working directory for git commits; empty uses process cwd
-	Config        *config.Config
-	Logger        *slog.Logger
-	Timeout       int  // wall-clock timeout in seconds (0 = no timeout)
-	UseWorktree      bool // if true, run agents in isolated git worktrees
-	PerPhaseWorktree bool // if true, create a separate worktree per phase instead of one shared worktree
-	StopOnFailure    bool // if true, cancel in-progress phases and return on first failure
-	ChatMode      bool // if true, skip escalation ladder and block immediately for chat-agent intervention
+	PlanName         string
+	PlansDir         string
+	ArcHome          string
+	ProjectDir       string              // working directory for git commits; empty uses process cwd
+	Config           *config.Config
+	Logger           *slog.Logger
+	Timeout          int                 // wall-clock timeout in seconds (0 = no timeout)
+	UseWorktree      bool                // if true, run agents in isolated git worktrees
+	PerPhaseWorktree bool                // if true, create a separate worktree per phase instead of one shared worktree
+	StopOnFailure    bool                // if true, cancel in-progress phases and return on first failure
+	ChatMode         bool                // if true, skip escalation ladder and block immediately for chat-agent intervention
+	Resolver         *resources.Resolver // passed through to RunPhaseOptions
 }
 
 // LaunchResult describes the outcome of an orchestrator run.
@@ -298,6 +300,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 					UseWorktree: opts.UseWorktree && opts.PerPhaseWorktree,
 					WorkingDir:  workingDir,
 					ChatMode:    opts.ChatMode,
+					Resolver:    opts.Resolver,
 				})
 				results <- phaseResult{phase: phaseName, err: err}
 			}(phase)
