@@ -323,6 +323,33 @@ func TestRunParallelCreatesResultsDir(t *testing.T) {
 	}
 }
 
+func TestRunParallelWithEmptyParams(t *testing.T) {
+	// Regression test: empty params in parallel config should not break execution.
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "do task a"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	if verdict != "all_complete" {
+		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
+	}
+}
+
 func TestRunParallelNoBranches(t *testing.T) {
 	phaseDir, sf := setupParallelTestPlan(t)
 	ps, _ := sf.Read()

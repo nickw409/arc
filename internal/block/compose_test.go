@@ -265,7 +265,7 @@ func TestBlockStateToConfig_MaxStateIterations(t *testing.T) {
 				Next:        map[string]string{"approved": "$approved", "gaps_found": "$gaps_found"},
 			}
 
-			sc := blockStateToConfig(bs, "test")
+			sc := blockStateToConfig(bs, "test", nil)
 
 			if tt.wantNil {
 				if sc.Constraints != nil {
@@ -543,6 +543,89 @@ func TestComposePipelineMissingBlock(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing block")
 	}
+}
+
+func TestBlockStateToConfigPassesParams(t *testing.T) {
+	bs := BlockState{
+		Name:   "adversary",
+		Prompt: "prompts/blocks/adversary.md",
+	}
+	params := map[string]string{"focus": "edge cases", "max_turns": "20"}
+	sc := blockStateToConfig(bs, "test", params)
+
+	if sc.Params == nil {
+		t.Fatal("expected non-nil Params")
+	}
+	if sc.Params["focus"] != "edge cases" {
+		t.Errorf("Params[focus] = %q, want %q", sc.Params["focus"], "edge cases")
+	}
+	if sc.Params["max_turns"] != "20" {
+		t.Errorf("Params[max_turns] = %q, want %q", sc.Params["max_turns"], "20")
+	}
+}
+
+func TestBlockStateToConfigNilParams(t *testing.T) {
+	bs := BlockState{
+		Name:   "impl",
+		Prompt: "prompts/blocks/impl.md",
+	}
+	sc := blockStateToConfig(bs, "test", nil)
+
+	if sc.Params != nil {
+		t.Errorf("expected nil Params, got %v", sc.Params)
+	}
+}
+
+func TestComposeSequentialCarriesParams(t *testing.T) {
+	blocks := []ResolvedBlock{
+		{Name: "impl", Block: makeImplBlock(), Params: map[string]string{"mode": "strict"}},
+		{Name: "adversary", Block: makeAdversaryBlock()},
+	}
+
+	wf, err := ComposeSequential(blocks)
+	if err != nil {
+		t.Fatalf("ComposeSequential failed: %v", err)
+	}
+
+	// Find impl.impl state and check its params
+	for _, s := range wf.States {
+		if s.Name == "impl.impl" {
+			if s.Params == nil || s.Params["mode"] != "strict" {
+				t.Errorf("impl.impl Params[mode] = %v, want strict", s.Params)
+			}
+			return
+		}
+	}
+	t.Fatal("impl.impl state not found")
+}
+
+func TestComposePipelineCarriesParams(t *testing.T) {
+	blockDefs := map[string]*Block{
+		"adversary": makeAdversaryBlock(),
+	}
+
+	steps := []PipelineStep{
+		{
+			Block:  "adversary",
+			Name:   "adversary",
+			Params: map[string]string{"focus": "security"},
+		},
+	}
+
+	wf, _, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+
+	for _, s := range wf.States {
+		if s.Name == "adversary.adversary" {
+			if s.Params == nil || s.Params["focus"] != "security" {
+				t.Errorf("adversary.adversary Params[focus] = %v, want security", s.Params)
+			}
+			return
+		}
+	}
+	t.Fatal("adversary.adversary state not found")
 }
 
 func TestValidateComposition(t *testing.T) {

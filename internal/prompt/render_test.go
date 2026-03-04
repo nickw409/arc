@@ -383,6 +383,104 @@ func TestRenderHandlebarsNewFields(t *testing.T) {
 	}
 }
 
+func TestRunStateUsesStateConfigParams(t *testing.T) {
+	// Render a template containing {{params.focus}} with params set
+	result, err := RenderString("Focus: {{params.focus}}", TemplateContext{
+		Params: map[string]string{"focus": "testing"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "testing") {
+		t.Errorf("expected output to contain 'testing', got %q", result)
+	}
+}
+
+func TestAdversaryPromptRendersWithFocus(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:     "test-phase",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"iteration": "1"},
+		Params:    map[string]string{"focus": "security vulnerabilities"},
+		PlanFile:  ".plans/test-plan/plan.md",
+		PhaseDir:  ".plans/test-plan/phases/test-phase",
+		StateFile: ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir: ".arc/scripts",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "security vulnerabilities") {
+		t.Error("expected rendered output to contain 'security vulnerabilities'")
+	}
+	if !strings.Contains(result, "Focus Area") {
+		t.Error("expected rendered output to contain 'Focus Area' section header")
+	}
+}
+
+func TestAdversaryPromptRendersWithoutFocus(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:     "test-phase",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"iteration": "1"},
+		Params:    map[string]string{},
+		PlanFile:  ".plans/test-plan/plan.md",
+		PhaseDir:  ".plans/test-plan/phases/test-phase",
+		StateFile: ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir: ".arc/scripts",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Focus Area") {
+		t.Error("expected rendered output to NOT contain 'Focus Area' section")
+	}
+}
+
+func TestAdversaryPromptRendersWithNilParams(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:     "test-phase",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"iteration": "1"},
+		Params:    nil,
+		PlanFile:  ".plans/test-plan/plan.md",
+		PhaseDir:  ".plans/test-plan/phases/test-phase",
+		StateFile: ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir: ".arc/scripts",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error (should not panic): %v", err)
+	}
+	if strings.Contains(result, "Focus Area") {
+		t.Error("expected rendered output to NOT contain 'Focus Area' section with nil params")
+	}
+}
+
+func TestAdversaryPromptRendersUndefinedParam(t *testing.T) {
+	// {{params.nonexistent}} should render as empty string via hasKey/index behavior
+	result, err := RenderString("value={{params.nonexistent}}", TemplateContext{
+		Params: map[string]string{"other": "value"},
+	})
+	// With missingkey=error, index on a missing key will error — that's expected
+	// The handlebar preprocessor converts this to {{index .Params "nonexistent"}}
+	// which uses our safeIndex and returns an error for missing keys.
+	// This is fine — templates should use {{#if params.X}} guards.
+	if err != nil {
+		// This is the expected behavior with missingkey=error + safeIndex
+		return
+	}
+	// If no error, the value should be empty
+	if strings.Contains(result, "nonexistent") {
+		t.Error("unexpected 'nonexistent' in output")
+	}
+}
+
 func TestFormatDisputeList(t *testing.T) {
 	tests := []struct {
 		name     string

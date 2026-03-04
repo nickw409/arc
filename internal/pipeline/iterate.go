@@ -223,13 +223,17 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("loading prompt %q: %w", promptPath, err)}
 	}
 
+	params := stateConfig.Params
+	if params == nil {
+		params = map[string]string{}
+	}
 	tmplCtx := prompt.TemplateContext{
 		Phase:          phaseState.Phase,
 		Plan:           phaseState.Plan,
 		Iteration:      phaseState.Iteration.Current,
 		PlanMD:         string(planMD),
 		State:          prompt.StateToTemplateMap(&phaseState),
-		Params:         map[string]string{},
+		Params:         params,
 		PlanFile:       filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
 		PhaseDir:       phaseDir,
 		StateFile:      filepath.Join(phaseDir, "state.json"),

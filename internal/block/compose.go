@@ -63,7 +63,7 @@ func ComposeSequential(blocks []ResolvedBlock) (*arc.Workflow, error) {
 		}
 
 		for _, bs := range resolved.States {
-			sc := blockStateToConfig(bs, prefix)
+			sc := blockStateToConfig(bs, prefix, rb.Params)
 
 			// Wire exit references ($exit_name) to next block or terminal
 			if sc.Transition.Branches != nil {
@@ -226,7 +226,7 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 			prefix := rb.Name
 
 			for _, bs := range rb.Block.States {
-				sc := blockStateToConfig(bs, prefix)
+				sc := blockStateToConfig(bs, prefix, rb.Params)
 				if sc.Transition.Branches != nil {
 					for verdict, target := range sc.Transition.Branches {
 						if isExitRef(target) {
@@ -299,13 +299,14 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 }
 
 // blockStateToConfig converts a BlockState to an arc.StateConfig with namespaced name.
-func blockStateToConfig(bs BlockState, prefix string) arc.StateConfig {
+func blockStateToConfig(bs BlockState, prefix string, params map[string]string) arc.StateConfig {
 	sc := arc.StateConfig{
 		Name:        prefix + "." + bs.Name,
 		Description: bs.Description,
 		Prompt:      bs.Prompt,
 		Verdicts:    bs.Verdicts,
 		Agent:       bs.Agent.ToAgentConfig(),
+		Params:      params,
 	}
 
 	if bs.Constraints != nil {
