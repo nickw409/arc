@@ -286,6 +286,19 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent spawn failed: %w", err)}
 	}
 
+	// Log agent lifecycle info to history
+	_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] agent pid=%d exit=%d duration=%s",
+		timeNow(), phaseState.CurrentState, spawnResult.PID, spawnResult.ExitCode, spawnResult.Duration.Round(time.Second)))
+
+	// Log truncated stderr on non-zero exit
+	if spawnResult.ExitCode != 0 && spawnResult.Stderr != "" {
+		snippet := spawnResult.Stderr
+		if len(snippet) > 500 {
+			snippet = snippet[:500] + "..."
+		}
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] stderr: %s", timeNow(), phaseState.CurrentState, snippet))
+	}
+
 	// Log per-turn summaries from stream-json output
 	for _, ts := range spawnResult.TurnSummaries {
 		tools := strings.Join(ts.Tools, ", ")

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -33,11 +32,14 @@ type SpawnOptions struct {
 // SpawnResult is the outcome of a spawned agent subprocess.
 type SpawnResult struct {
 	Output         string
+	Stderr         string        // captured stderr from the subprocess
 	ExitCode       int
 	TimedOut       bool
-	InactivityKill bool // true if watchdog killed the process
+	InactivityKill bool          // true if watchdog killed the process
+	Duration       time.Duration // wall-clock time from Start() to Wait() return
 	Usage          arc.Usage
 	TurnSummaries  []TurnSummary // per-turn metadata from stream
+	PID            int           // subprocess PID (for diagnostics)
 }
 
 // inactivityTimeout is the duration after which a process with no stdout
@@ -128,11 +130,16 @@ func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.C
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+
+	pid := cmd.Process.Pid
+	startTime := time.Now()
+	slog.Info("agent started", "pid", pid)
 
 	// Heartbeat for watchdog
 	var lastActivity atomic.Int64
@@ -203,8 +210,23 @@ func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.C
 	output := <-outputCh   // Wait for scanner to finish before cmd.Wait() closes pipe
 	waitErr := cmd.Wait()
 	watchdogCancel()
+	duration := time.Since(startTime)
 
-	return buildStreamResult(ctx, timeoutCtx, waitErr, output, watchdogFired.Load())
+	exitCode := 0
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	slog.Info("agent exited", "pid", pid, "exit_code", exitCode, "duration", duration, "stderr_len", stderr.Len())
+
+	result, err2 := buildStreamResult(ctx, timeoutCtx, waitErr, output, watchdogFired.Load())
+	if result != nil {
+		result.Stderr = stderr.String()
+		result.Duration = duration
+		result.PID = pid
+	}
+	return result, err2
 }
 
 // buildStreamResult constructs a SpawnResult from stream parsing output.
@@ -308,41 +330,61 @@ func usageFromStreamResult(sr *streamResult) arc.Usage {
 // --output-format json).
 func spawnBuffered(ctx context.Context, timeoutCtx context.Context, cmd *exec.Cmd) (*SpawnResult, error) {
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
+	pid := cmd.Process.Pid
+	startTime := time.Now()
+	slog.Info("agent started", "pid", pid)
+
 	err := cmd.Wait()
+	duration := time.Since(startTime)
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	slog.Info("agent exited", "pid", pid, "exit_code", exitCode, "duration", duration, "stderr_len", stderr.Len())
 
 	var result *SpawnResult
 	if err != nil {
 		if timeoutCtx.Err() != nil && ctx.Err() == nil {
 			result = &SpawnResult{
 				Output:   stdout.String(),
+				Stderr:   stderr.String(),
 				ExitCode: -1,
 				TimedOut: true,
+				Duration: duration,
+				PID:      pid,
 			}
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		} else {
-			exitCode := 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
 			result = &SpawnResult{
 				Output:   stdout.String(),
+				Stderr:   stderr.String(),
 				ExitCode: exitCode,
 				TimedOut: false,
+				Duration: duration,
+				PID:      pid,
 			}
 		}
 	} else {
 		result = &SpawnResult{
 			Output:   stdout.String(),
+			Stderr:   stderr.String(),
 			ExitCode: 0,
 			TimedOut: false,
+			Duration: duration,
+			PID:      pid,
 		}
 	}
 
