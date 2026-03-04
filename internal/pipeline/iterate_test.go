@@ -687,6 +687,173 @@ func TestRunStateNilResolverFallsBackToEmbedded(t *testing.T) {
 	}
 }
 
+func TestRunStateAppendsAgentLifecycleToHistory(t *testing.T) {
+	// Linear state: impl.act → check.adversary. Agent exits 0.
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "fix.act"
+	st.PhaseStatus = "fix.act"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	t.Setenv("MOCK_OUTPUT", "Implementation complete.\n")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+
+	history, err := os.ReadFile(filepath.Join(phaseDir, "history.md"))
+	if err != nil {
+		t.Fatalf("failed to read history.md: %v", err)
+	}
+	histStr := string(history)
+	if !strings.Contains(histStr, "[fix.act] agent pid=") {
+		t.Fatalf("history.md missing lifecycle entry, got:\n%s", histStr)
+	}
+	if !strings.Contains(histStr, "exit=0") {
+		t.Fatalf("history.md missing exit=0, got:\n%s", histStr)
+	}
+	if !strings.Contains(histStr, "duration=") {
+		t.Fatalf("history.md missing duration, got:\n%s", histStr)
+	}
+}
+
+func TestRunStateAppendsStderrSnippetOnNonZeroExit(t *testing.T) {
+	// Branching state: audit.adversary exits 1 with stderr.
+	// Exit 1 + no valid verdict → ActionRetry, but history should contain stderr.
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "audit.adversary"
+	st.PhaseStatus = "audit.adversary"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	t.Setenv("MOCK_EXIT_CODE", "1")
+	t.Setenv("MOCK_STDERR", "connection refused")
+	t.Setenv("MOCK_OUTPUT", "## Verdict\n\nno_bugs_found\n") // verdict present despite non-zero exit
+
+	_ = RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	history, err := os.ReadFile(filepath.Join(phaseDir, "history.md"))
+	if err != nil {
+		t.Fatalf("failed to read history.md: %v", err)
+	}
+	histStr := string(history)
+	if !strings.Contains(histStr, "stderr: connection refused") {
+		t.Fatalf("history.md missing stderr snippet, got:\n%s", histStr)
+	}
+}
+
+func TestRunStateTruncatesLongStderrInHistory(t *testing.T) {
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "fix.act"
+	st.PhaseStatus = "fix.act"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	longStderr := strings.Repeat("x", 600)
+	t.Setenv("MOCK_EXIT_CODE", "1")
+	t.Setenv("MOCK_STDERR", longStderr)
+	t.Setenv("MOCK_OUTPUT", "some output")
+
+	_ = RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	history, err := os.ReadFile(filepath.Join(phaseDir, "history.md"))
+	if err != nil {
+		t.Fatalf("failed to read history.md: %v", err)
+	}
+	histStr := string(history)
+	// Find the stderr line
+	for _, line := range strings.Split(histStr, "\n") {
+		if strings.Contains(line, "stderr:") {
+			// Extract the snippet after "stderr: "
+			idx := strings.Index(line, "stderr: ")
+			if idx < 0 {
+				continue
+			}
+			snippet := line[idx+len("stderr: "):]
+			if len(snippet) != 503 { // 500 + "..."
+				t.Fatalf("stderr snippet length = %d, want 503 (500 + '...')", len(snippet))
+			}
+			if !strings.HasSuffix(snippet, "...") {
+				t.Fatalf("stderr snippet should end with '...', got: %q", snippet[len(snippet)-10:])
+			}
+			return
+		}
+	}
+	t.Fatal("history.md missing stderr line")
+}
+
+func TestRunStateNoStderrAppendOnZeroExit(t *testing.T) {
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "fix.act"
+	st.PhaseStatus = "fix.act"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	t.Setenv("MOCK_STDERR", "some warning")
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+
+	history, err := os.ReadFile(filepath.Join(phaseDir, "history.md"))
+	if err != nil {
+		t.Fatalf("failed to read history.md: %v", err)
+	}
+	if strings.Contains(string(history), "stderr:") {
+		t.Fatalf("history.md should NOT contain stderr line on exit=0, got:\n%s", string(history))
+	}
+}
+
+func TestRunStateNoStderrAppendWhenEmpty(t *testing.T) {
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "fix.act"
+	st.PhaseStatus = "fix.act"
+
+	plansDir := setupTestPlan(t, st)
+	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
+
+	t.Setenv("MOCK_EXIT_CODE", "1")
+	t.Setenv("MOCK_OUTPUT", "some output")
+	// No MOCK_STDERR set
+
+	_ = RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	history, err := os.ReadFile(filepath.Join(phaseDir, "history.md"))
+	if err != nil {
+		t.Fatalf("failed to read history.md: %v", err)
+	}
+	if strings.Contains(string(history), "stderr:") {
+		t.Fatalf("history.md should NOT contain stderr line when stderr is empty, got:\n%s", string(history))
+	}
+}
+
 // Ensure the pipeline types are valid by referencing them.
 var _ = IterateOptions{}
 var _ = (*arc.IterationResult)(nil)

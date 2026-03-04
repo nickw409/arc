@@ -291,7 +291,172 @@ func TestSpawnStdinDelivery(t *testing.T) {
 	}
 }
 
-func TestSpawnStderrDiscarded(t *testing.T) {
+func TestSpawnCapturesStderr(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", "ok")
+	t.Setenv("MOCK_STDERR", "warning: something happened")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Stderr != "warning: something happened" {
+		t.Fatalf("got Stderr %q, want %q", result.Stderr, "warning: something happened")
+	}
+	if !strings.Contains(result.Output, "ok") {
+		t.Fatalf("got Output %q, want to contain %q", result.Output, "ok")
+	}
+}
+
+func TestSpawnStderrEmptyOnSuccess(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", "ok")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("got Stderr %q, want empty", result.Stderr)
+	}
+}
+
+func TestSpawnResultHasDuration(t *testing.T) {
+	t.Setenv("MOCK_SLEEP_MS", "100")
+	t.Setenv("MOCK_OUTPUT", "ok")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Duration < 100*time.Millisecond {
+		t.Fatalf("got Duration %v, want >= 100ms", result.Duration)
+	}
+}
+
+func TestSpawnResultHasPIDAndZeroDuration(t *testing.T) {
+	t.Setenv("MOCK_OUTPUT", "ok")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.PID <= 0 {
+		t.Fatalf("got PID %d, want > 0", result.PID)
+	}
+	if result.Duration < 0 {
+		t.Fatalf("got Duration %v, want >= 0", result.Duration)
+	}
+}
+
+func TestSpawnStderrOnNonZeroExit(t *testing.T) {
+	t.Setenv("MOCK_EXIT_CODE", "1")
+	t.Setenv("MOCK_STDERR", "error: details")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("got ExitCode %d, want 1", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "error: details") {
+		t.Fatalf("got Stderr %q, want to contain %q", result.Stderr, "error: details")
+	}
+}
+
+func TestSpawnStderrOnTimeout(t *testing.T) {
+	t.Setenv("MOCK_SLEEP_MS", "5000")
+	t.Setenv("MOCK_STDERR", "partial")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+		Timeout:     1 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.TimedOut {
+		t.Fatal("expected TimedOut=true")
+	}
+	if result.PID <= 0 {
+		t.Fatalf("got PID %d, want > 0", result.PID)
+	}
+	if result.Duration < 1*time.Second {
+		t.Fatalf("got Duration %v, want >= 1s", result.Duration)
+	}
+}
+
+func TestSpawnContextCancellation(t *testing.T) {
+	t.Setenv("MOCK_SLEEP_MS", "5000")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	result, err := Spawn(ctx, SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+		Timeout:     10 * time.Second,
+	})
+	if result != nil {
+		t.Fatal("expected nil result for context cancellation")
+	}
+	if err == nil {
+		t.Fatal("expected error for context cancellation")
+	}
+}
+
+func TestSpawnLongStderr(t *testing.T) {
+	longStderr := strings.Repeat("x", 600)
+	t.Setenv("MOCK_STDERR", longStderr)
+	t.Setenv("MOCK_OUTPUT", "ok")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Stderr) != 600 {
+		t.Fatalf("got Stderr length %d, want 600 (no truncation in Spawn)", len(result.Stderr))
+	}
+}
+
+func TestSpawnStderrWithNewlines(t *testing.T) {
+	t.Setenv("MOCK_STDERR", "line1\nline2\nline3")
+	t.Setenv("MOCK_OUTPUT", "ok")
+
+	result, err := Spawn(context.Background(), SpawnOptions{
+		Prompt:      "test",
+		CommandName: testBin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Stderr, "line1\nline2\nline3") {
+		t.Fatalf("got Stderr %q, want to contain newlines", result.Stderr)
+	}
+}
+
+func TestSpawnStderrNotInOutput(t *testing.T) {
 	t.Setenv("MOCK_OUTPUT", "stdout data\n")
 	t.Setenv("MOCK_STDERR", "stderr noise")
 
@@ -307,6 +472,9 @@ func TestSpawnStderrDiscarded(t *testing.T) {
 	}
 	if strings.Contains(result.Output, "stderr") {
 		t.Fatal("stderr content should not appear in Output")
+	}
+	if result.Stderr != "stderr noise" {
+		t.Fatalf("got Stderr %q, want %q", result.Stderr, "stderr noise")
 	}
 }
 

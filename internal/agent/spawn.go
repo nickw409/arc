@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -30,9 +30,12 @@ type SpawnOptions struct {
 // SpawnResult is the outcome of a spawned agent subprocess.
 type SpawnResult struct {
 	Output   string
+	Stderr   string        // captured stderr from the subprocess
 	ExitCode int
 	TimedOut bool
+	Duration time.Duration // wall-clock time from Start() to Wait() return
 	Usage    arc.Usage
+	PID      int // subprocess PID (for diagnostics)
 }
 
 // Spawn launches a Claude CLI sub-agent as a subprocess.
@@ -91,41 +94,61 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 	}
 
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
+	pid := cmd.Process.Pid
+	startTime := time.Now()
+	slog.Info("agent started", "pid", pid, "max_turns", maxTurns, "timeout", timeout)
+
 	err := cmd.Wait()
+	duration := time.Since(startTime)
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	slog.Info("agent exited", "pid", pid, "exit_code", exitCode, "duration", duration, "stderr_len", stderr.Len())
 
 	var result *SpawnResult
 	if err != nil {
 		if timeoutCtx.Err() != nil && ctx.Err() == nil {
 			result = &SpawnResult{
 				Output:   stdout.String(),
+				Stderr:   stderr.String(),
 				ExitCode: -1,
 				TimedOut: true,
+				Duration: duration,
+				PID:      pid,
 			}
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		} else {
-			exitCode := 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
 			result = &SpawnResult{
 				Output:   stdout.String(),
+				Stderr:   stderr.String(),
 				ExitCode: exitCode,
 				TimedOut: false,
+				Duration: duration,
+				PID:      pid,
 			}
 		}
 	} else {
 		result = &SpawnResult{
 			Output:   stdout.String(),
+			Stderr:   stderr.String(),
 			ExitCode: 0,
 			TimedOut: false,
+			Duration: duration,
+			PID:      pid,
 		}
 	}
 
