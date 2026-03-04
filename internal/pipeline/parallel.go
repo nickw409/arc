@@ -16,14 +16,16 @@ import (
 
 // RunParallelOptions configures a parallel execution run.
 type RunParallelOptions struct {
-	PhaseDir   string
-	StateFile  *state.StateFile
-	PhaseState *arc.PhaseState
-	Config     *arc.ParallelConfig
-	PlanMD     string
-	ArcHome    string
-	PlansDir   string
-	PlanName   string
+	PhaseDir        string
+	StateFile       *state.StateFile
+	PhaseState      *arc.PhaseState
+	Config          *arc.ParallelConfig
+	ValidVerdicts   []arc.Verdict // if non-empty, extract verdicts from branch output and merge
+	PositiveVerdict arc.Verdict   // if non-empty, used to determine which verdict "wins" in merge
+	PlanMD          string
+	ArcHome         string
+	PlansDir        string
+	PlanName        string
 }
 
 // RunParallel spawns agents for each branch in parallel, collects results,
@@ -69,13 +71,17 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 				return
 			}
 
+			branchParams := b.Params
+			if branchParams == nil {
+				branchParams = map[string]string{}
+			}
 			tmplCtx := prompt.TemplateContext{
 				Phase:        opts.PhaseState.Phase,
 				Plan:         opts.PhaseState.Plan,
 				Iteration:    opts.PhaseState.Iteration.Current,
 				PlanMD:       opts.PlanMD,
 				State:        prompt.StateToTemplateMap(opts.PhaseState),
-				Params:       map[string]string{},
+				Params:       branchParams,
 				PlanFile:     filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
 				PhaseDir:     opts.PhaseDir,
 				StateFile:    filepath.Join(opts.PhaseDir, "state.json"),
@@ -134,9 +140,33 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 		totalUsage = totalUsage.Add(r.usage)
 	}
 
-	verdict, err := JoinParallel(cfg.Strategy, exitCodes, cfg.N)
-	if err != nil {
-		return "", totalUsage, fmt.Errorf("joining parallel results: %w", err)
+	// Verdict-aware joining: if validVerdicts is set, extract verdicts from
+	// branch outputs and merge them instead of using exit codes.
+	var verdict string
+	if len(opts.ValidVerdicts) > 0 {
+		branchVerdicts := make(map[string]arc.Verdict)
+		for _, b := range cfg.Branches {
+			output, readErr := os.ReadFile(filepath.Join(resultsDir, b.Name+".log"))
+			if readErr != nil {
+				return "", totalUsage, fmt.Errorf("reading branch %q output: %w", b.Name, readErr)
+			}
+			v, extractErr := prompt.ExtractVerdict(string(output), opts.ValidVerdicts)
+			if extractErr != nil {
+				return "", totalUsage, fmt.Errorf("extracting verdict from branch %q: %w", b.Name, extractErr)
+			}
+			branchVerdicts[b.Name] = v
+		}
+		merged, mergeErr := MergeVerdicts(cfg.Strategy, branchVerdicts, opts.ValidVerdicts, opts.PositiveVerdict)
+		if mergeErr != nil {
+			return "", totalUsage, fmt.Errorf("merging branch verdicts: %w", mergeErr)
+		}
+		verdict = string(merged)
+	} else {
+		var joinErr error
+		verdict, joinErr = JoinParallel(cfg.Strategy, exitCodes, cfg.N)
+		if joinErr != nil {
+			return "", totalUsage, fmt.Errorf("joining parallel results: %w", joinErr)
+		}
 	}
 
 	if err := state.FinishParallel(opts.StateFile, verdict); err != nil {

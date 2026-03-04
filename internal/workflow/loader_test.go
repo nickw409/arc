@@ -461,6 +461,193 @@ terminal_states: [complete, blocked]
 	}
 }
 
+func TestFeatureWorkflowLoadsWithParallelAdversary(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	// Find the fork state
+	var forkState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Parallel != nil {
+			forkState = &wf.States[i]
+			break
+		}
+	}
+	if forkState == nil {
+		t.Fatal("feature workflow should have a parallel (fork) state")
+	}
+	if len(forkState.Parallel.Branches) != 2 {
+		t.Fatalf("fork should have 2 adversary branches, got %d", len(forkState.Parallel.Branches))
+	}
+}
+
+func TestFeatureWorkflowParallelBranchFocus(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	var forkState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Parallel != nil {
+			forkState = &wf.States[i]
+			break
+		}
+	}
+	if forkState == nil {
+		t.Fatal("fork state not found")
+	}
+
+	focus0 := forkState.Parallel.Branches[0].Params["focus"]
+	focus1 := forkState.Parallel.Branches[1].Params["focus"]
+	if focus0 == "" {
+		t.Fatal("first branch should have a focus param")
+	}
+	if focus1 == "" {
+		t.Fatal("second branch should have a focus param")
+	}
+	if focus0 == focus1 {
+		t.Fatalf("adversary branches should have different focus areas, both have %q", focus0)
+	}
+}
+
+func TestFeatureWorkflowParallelRouting(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	var forkState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Parallel != nil {
+			forkState = &wf.States[i]
+			break
+		}
+	}
+	if forkState == nil {
+		t.Fatal("fork state not found")
+	}
+
+	bugsTarget := forkState.Transition.Branches[arc.VerdictBugsFound]
+	if bugsTarget != "impl.act" {
+		t.Fatalf("bugs_found should route to impl.act, got %q", bugsTarget)
+	}
+	noBugsTarget := forkState.Transition.Branches[arc.VerdictNoBugsFound]
+	if noBugsTarget != "complete" {
+		t.Fatalf("no_bugs_found should route to complete, got %q", noBugsTarget)
+	}
+}
+
+func TestFeatureWorkflowTerminalStates(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	hasComplete := false
+	hasBlocked := false
+	for _, ts := range wf.TerminalStates {
+		if ts == "complete" {
+			hasComplete = true
+		}
+		if ts == "blocked" {
+			hasBlocked = true
+		}
+	}
+	if !hasComplete {
+		t.Fatal("expected 'complete' in terminal states")
+	}
+	if !hasBlocked {
+		t.Fatal("expected 'blocked' in terminal states")
+	}
+}
+
+func TestFeatureWorkflowEntryState(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	if wf.EntryState != "impl.act" {
+		t.Fatalf("expected entry state 'impl.act', got %q", wf.EntryState)
+	}
+}
+
+func TestFeatureWorkflowRunOnceOnForkState(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	var forkState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Parallel != nil {
+			forkState = &wf.States[i]
+			break
+		}
+	}
+	if forkState == nil {
+		t.Fatal("fork state not found")
+	}
+	if !forkState.RunOnce {
+		t.Fatal("fork state should have RunOnce=true")
+	}
+	if forkState.SkipVerdict != "no_bugs_found" {
+		t.Fatalf("fork state SkipVerdict should be 'no_bugs_found', got %q", forkState.SkipVerdict)
+	}
+}
+
+func TestFeatureWorkflowParallelStrategy(t *testing.T) {
+	data, err := resources.WorkflowBytes("feature")
+	if err != nil {
+		t.Fatalf("WorkflowBytes: %v", err)
+	}
+	wf, err := LoadBytes(data)
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+
+	var forkState *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Parallel != nil {
+			forkState = &wf.States[i]
+			break
+		}
+	}
+	if forkState == nil {
+		t.Fatal("fork state not found")
+	}
+	if forkState.Parallel.Strategy != "all" {
+		t.Fatalf("expected strategy 'all', got %q", forkState.Parallel.Strategy)
+	}
+}
+
 // containsString is a simple helper for checking substrings in error messages.
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)

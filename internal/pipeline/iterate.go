@@ -159,15 +159,23 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 			return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("reading plan.md: %w", err)}
 		}
 
+		// Convert state verdicts ([]string) to []arc.Verdict for verdict-aware joining.
+		var validVerdicts []arc.Verdict
+		for _, v := range stateConfig.Verdicts {
+			validVerdicts = append(validVerdicts, arc.Verdict(v))
+		}
+
 		verdict, parallelUsage, err := RunParallel(ctx, logger, RunParallelOptions{
-			PhaseDir:   phaseDir,
-			StateFile:  sf,
-			PhaseState: &phaseState,
-			Config:     stateConfig.Parallel,
-			PlanMD:     string(planMD),
-			ArcHome:    opts.ArcHome,
-			PlansDir:   opts.PlansDir,
-			PlanName:   opts.PlanName,
+			PhaseDir:        phaseDir,
+			StateFile:       sf,
+			PhaseState:      &phaseState,
+			Config:          stateConfig.Parallel,
+			ValidVerdicts:   validVerdicts,
+			PositiveVerdict: arc.Verdict(stateConfig.SkipVerdict),
+			PlanMD:          string(planMD),
+			ArcHome:         opts.ArcHome,
+			PlansDir:        opts.PlansDir,
+			PlanName:        opts.PlanName,
 		})
 		if err != nil {
 			return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("parallel execution: %w", err)}
@@ -223,13 +231,17 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("loading prompt %q: %w", promptPath, err)}
 	}
 
+	params := stateConfig.Params
+	if params == nil {
+		params = map[string]string{}
+	}
 	tmplCtx := prompt.TemplateContext{
 		Phase:          phaseState.Phase,
 		Plan:           phaseState.Plan,
 		Iteration:      phaseState.Iteration.Current,
 		PlanMD:         string(planMD),
 		State:          prompt.StateToTemplateMap(&phaseState),
-		Params:         map[string]string{},
+		Params:         params,
 		PlanFile:       filepath.Join(opts.PlansDir, opts.PlanName, "plan.md"),
 		PhaseDir:       phaseDir,
 		StateFile:      filepath.Join(phaseDir, "state.json"),

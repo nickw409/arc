@@ -132,11 +132,11 @@ func TestMapStateToStatusEmptyString(t *testing.T) {
 }
 
 func TestRunStateReturnsActionContinue(t *testing.T) {
-	// Use check.adversary state which is branching (no_bugs_found -> complete, bugs_found -> impl.act).
+	// Use audit.adversary state which is branching (no_bugs_found -> complete, bugs_found -> fix.act).
 	// Mock agent outputs a verdict of "no_bugs_found".
-	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "check.adversary"
-	state.PhaseStatus = "check.adversary"
+	state := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	state.CurrentState = "audit.adversary"
+	state.PhaseStatus = "audit.adversary"
 
 	plansDir := setupTestPlan(t, state)
 
@@ -212,10 +212,10 @@ func TestRunStateContextCancelled(t *testing.T) {
 }
 
 func TestRunStateLinearStateNoVerdicts(t *testing.T) {
-	// "impl.act" is a linear state (next: check.adversary). No verdict extraction needed.
-	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "impl.act"
-	state.PhaseStatus = "impl.act"
+	// "fix.act" in audit workflow is a linear state (next: audit.adversary). No verdict extraction needed.
+	state := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	state.CurrentState = "fix.act"
+	state.PhaseStatus = "fix.act"
 
 	plansDir := setupTestPlan(t, state)
 
@@ -230,8 +230,8 @@ func TestRunStateLinearStateNoVerdicts(t *testing.T) {
 	if result.Action != arc.ActionContinue {
 		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
 	}
-	if result.NextState != "check.adversary" {
-		t.Fatalf("got NextState=%q, want %q", result.NextState, "check.adversary")
+	if result.NextState != "audit.adversary" {
+		t.Fatalf("got NextState=%q, want %q", result.NextState, "audit.adversary")
 	}
 	// No verdict for linear states
 	if result.Verdict != "" {
@@ -269,10 +269,10 @@ func TestRunStateNonzeroExit(t *testing.T) {
 }
 
 func TestRunStateVerdictUnknown(t *testing.T) {
-	// check.adversary is branching; agent outputs invalid verdict.
-	state := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	state.CurrentState = "check.adversary"
-	state.PhaseStatus = "check.adversary"
+	// audit.adversary is branching; agent outputs invalid verdict.
+	state := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	state.CurrentState = "audit.adversary"
+	state.PhaseStatus = "audit.adversary"
 
 	plansDir := setupTestPlan(t, state)
 
@@ -524,9 +524,9 @@ func TestRunStateMemoryInjection(t *testing.T) {
 
 func TestRunStateMemorySaved(t *testing.T) {
 	// Agent outputs a ## Memory section; verify it gets saved to disk.
-	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	st.CurrentState = "check.adversary"
-	st.PhaseStatus = "check.adversary"
+	st := arc.NewPhaseState("test-plan", "test-phase", "audit")
+	st.CurrentState = "audit.adversary"
+	st.PhaseStatus = "audit.adversary"
 
 	plansDir := setupTestPlan(t, st)
 	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
@@ -544,7 +544,7 @@ func TestRunStateMemorySaved(t *testing.T) {
 	}
 
 	// Verify memory file was written
-	mem, err := ReadMemory(phaseDir, "check.adversary")
+	mem, err := ReadMemory(phaseDir, "audit.adversary")
 	if err != nil {
 		t.Fatalf("ReadMemory failed: %v", err)
 	}
@@ -554,16 +554,16 @@ func TestRunStateMemorySaved(t *testing.T) {
 }
 
 func TestRunStateRunOnceSkip(t *testing.T) {
-	// check.adversary is run_once in the feature workflow.
+	// _fork_0 is run_once in the feature workflow (parallel adversary fork).
 	// Pre-set StateIterations to 2 and a prior verdict entry to simulate a
 	// successful second visit (phase.go pre-increments, prior run completed).
 	// The agent must NOT be spawned — the skip verdict is produced automatically.
 	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	st.CurrentState = "check.adversary"
+	st.CurrentState = "_fork_0"
 	st.PhaseStatus = "adversary"
-	st.StateIterations = map[string]int{"check.adversary": 2}
+	st.StateIterations = map[string]int{"_fork_0": 2}
 	st.VerdictsHistory = []arc.VerdictEntry{
-		{Iteration: 1, State: "check.adversary", Verdict: "bugs_found", Timestamp: "2026-01-01T00:00:00Z"},
+		{Iteration: 1, State: "_fork_0", Verdict: "bugs_found", Timestamp: "2026-01-01T00:00:00Z"},
 	}
 
 	plansDir := setupTestPlan(t, st)
@@ -590,13 +590,13 @@ func TestRunStateRunOnceSkip(t *testing.T) {
 }
 
 func TestRunStateRunOnceNoSkipWhenInterrupted(t *testing.T) {
-	// If StateIterations > 1 but there is no prior verdict for check.adversary,
+	// If StateIterations > 1 but there is no prior verdict for _fork_0,
 	// the previous visit was interrupted — the agent must run, not be skipped.
 	st := arc.NewPhaseState("test-plan", "test-phase", "feature")
-	st.CurrentState = "check.adversary"
+	st.CurrentState = "_fork_0"
 	st.PhaseStatus = "adversary"
-	st.StateIterations = map[string]int{"check.adversary": 2}
-	// No VerdictsHistory entry for check.adversary — simulates an interrupted run.
+	st.StateIterations = map[string]int{"_fork_0": 2}
+	// No VerdictsHistory entry for _fork_0 — simulates an interrupted run.
 
 	plansDir := setupTestPlan(t, st)
 

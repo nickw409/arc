@@ -2,7 +2,9 @@ package block
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/nwiley/arc/internal/arc"
 )
@@ -63,7 +65,7 @@ func ComposeSequential(blocks []ResolvedBlock) (*arc.Workflow, error) {
 		}
 
 		for _, bs := range resolved.States {
-			sc := blockStateToConfig(bs, prefix)
+			sc := blockStateToConfig(bs, prefix, rb.Params)
 
 			// Wire exit references ($exit_name) to next block or terminal
 			if sc.Transition.Branches != nil {
@@ -135,6 +137,10 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 
 	for _, step := range steps {
 		if step.Parallel != nil {
+			if len(step.Parallel.Blocks) == 0 {
+				return nil, nil, fmt.Errorf("parallel step has no blocks")
+			}
+
 			forkName := fmt.Sprintf("_fork_%d", parallelIdx)
 			joinName := fmt.Sprintf("_join_%d", parallelIdx)
 
@@ -164,6 +170,9 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 				},
 				forkState: forkName,
 				joinState: joinName,
+				route:     step.Route,
+				runOnce:   step.RunOnce,
+				skipExit:  step.SkipExit,
 			})
 			parallelIdx++
 		} else {
@@ -226,7 +235,7 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 			prefix := rb.Name
 
 			for _, bs := range rb.Block.States {
-				sc := blockStateToConfig(bs, prefix)
+				sc := blockStateToConfig(bs, prefix, rb.Params)
 				if sc.Transition.Branches != nil {
 					for verdict, target := range sc.Transition.Branches {
 						if isExitRef(target) {
@@ -260,19 +269,90 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 				firstEntry = prefix + "." + rb.Block.Entry
 			}
 		} else {
-			// Parallel group — add synthetic fork/join states.
+			// Parallel group — build a fork state with ParallelConfig.
+			// The fork state dispatches branches concurrently and produces
+			// a merged verdict, eliminating the need for a separate join state.
 			pg := rs.parallel
+
+			// Build branches from parallel blocks.
+			var branches []arc.ParallelBranch
+			for _, rb := range pg.Blocks {
+				if len(rb.Block.States) == 0 {
+					continue
+				}
+				// Use the block's entry state prompt.
+				entryState := rb.Block.States[0]
+				for _, bs := range rb.Block.States {
+					if bs.Name == rb.Block.Entry {
+						entryState = bs
+						break
+					}
+				}
+				// Copy params to prevent aliasing between branches.
+				var paramsCopy map[string]string
+				if rb.Params != nil {
+					paramsCopy = make(map[string]string, len(rb.Params))
+					for k, v := range rb.Params {
+						paramsCopy[k] = v
+					}
+				}
+				branches = append(branches, arc.ParallelBranch{
+					Name:   rb.Name,
+					Prompt: entryState.Prompt,
+					Params: paramsCopy,
+				})
+			}
+
+			// Collect verdicts from the entry state of each block. Agents
+			// produce state-level verdicts (e.g. "bugs_found"), not block
+			// exit names (which may differ).
+			verdictSet := make(map[string]bool)
+			for _, rb := range pg.Blocks {
+				for _, bs := range rb.Block.States {
+					if bs.Name == rb.Block.Entry {
+						for _, v := range bs.Verdicts {
+							verdictSet[v] = true
+						}
+						break
+					}
+				}
+			}
+			var verdicts []string
+			for v := range verdictSet {
+				verdicts = append(verdicts, v)
+			}
+			sort.Strings(verdicts)
+
+			// Build transitions from the parallel step's route map.
+			forkTransitions := make(map[arc.Verdict]string)
+			for _, v := range verdicts {
+				if routeTarget, ok := rs.route[v]; ok {
+					if entry, ok := stepEntry[routeTarget]; ok {
+						forkTransitions[arc.Verdict(v)] = entry
+					} else {
+						forkTransitions[arc.Verdict(v)] = routeTarget
+					}
+				} else {
+					forkTransitions[arc.Verdict(v)] = defaultNext
+				}
+			}
+
+			// Merge agent config from blocks (most permissive).
+			agentCfg := mergeBlockAgentConfigs(pg.Blocks)
+
 			allStates = append(allStates, arc.StateConfig{
 				Name:        rs.forkState,
 				Description: "Fork into parallel blocks",
 				Prompt:      "prompts/common/complete.md",
-				Transition:  arc.Transition{Branches: map[arc.Verdict]string{"": rs.joinState}},
-			})
-			allStates = append(allStates, arc.StateConfig{
-				Name:        rs.joinState,
-				Description: "Join parallel blocks",
-				Prompt:      "prompts/common/complete.md",
-				Transition:  arc.Transition{Branches: map[arc.Verdict]string{"": defaultNext}},
+				Parallel: &arc.ParallelConfig{
+					Branches: branches,
+					Strategy: pg.Strategy,
+				},
+				Agent:       agentCfg,
+				Verdicts:    verdicts,
+				Transition:  arc.Transition{Branches: forkTransitions},
+				RunOnce:     rs.runOnce,
+				SkipVerdict: rs.skipExit,
 			})
 			parallelGroups = append(parallelGroups, *pg)
 
@@ -299,13 +379,22 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 }
 
 // blockStateToConfig converts a BlockState to an arc.StateConfig with namespaced name.
-func blockStateToConfig(bs BlockState, prefix string) arc.StateConfig {
+func blockStateToConfig(bs BlockState, prefix string, params map[string]string) arc.StateConfig {
+	// Copy params to prevent aliasing — each state gets its own map.
+	var paramsCopy map[string]string
+	if params != nil {
+		paramsCopy = make(map[string]string, len(params))
+		for k, v := range params {
+			paramsCopy[k] = v
+		}
+	}
 	sc := arc.StateConfig{
 		Name:        prefix + "." + bs.Name,
 		Description: bs.Description,
 		Prompt:      bs.Prompt,
 		Verdicts:    bs.Verdicts,
 		Agent:       bs.Agent.ToAgentConfig(),
+		Params:      paramsCopy,
 	}
 
 	if bs.Constraints != nil {
@@ -356,6 +445,17 @@ func ValidateComposition(wf *arc.Workflow, blocks []ResolvedBlock) []error {
 		}
 	}
 
+	// Check fork states have valid parallel config
+	for _, s := range wf.States {
+		isFork := strings.HasPrefix(s.Name, "_fork_")
+		if isFork && s.Parallel == nil {
+			errs = append(errs, fmt.Errorf("state %q has verdicts but no parallel config", s.Name))
+		}
+		if s.Parallel != nil && len(s.Verdicts) == 0 {
+			errs = append(errs, fmt.Errorf("state %q has parallel config but no verdicts", s.Name))
+		}
+	}
+
 	// Check every non-terminal state can reach a terminal state (reverse BFS)
 	terminalSet := make(map[string]bool, len(wf.TerminalStates))
 	for _, ts := range wf.TerminalStates {
@@ -397,6 +497,52 @@ func ValidateComposition(wf *arc.Workflow, blocks []ResolvedBlock) []error {
 	}
 
 	return errs
+}
+
+// mergeBlockAgentConfigs produces a merged AgentConfig from all blocks in a
+// parallel group. Uses the most permissive values: highest max_turns, highest
+// timeout, union of allowed_tools, first non-empty model.
+func mergeBlockAgentConfigs(blocks []ResolvedBlock) *arc.AgentConfig {
+	var maxTurns, timeout int
+	toolSet := make(map[string]bool)
+	var model string
+
+	for _, rb := range blocks {
+		for _, bs := range rb.Block.States {
+			if bs.Name == rb.Block.Entry && bs.Agent != nil {
+				ac := bs.Agent
+				if mt := parseInt(ac.MaxTurns); mt > maxTurns {
+					maxTurns = mt
+				}
+				if to := parseInt(ac.Timeout); to > timeout {
+					timeout = to
+				}
+				for _, t := range ac.AllowedTools {
+					toolSet[t] = true
+				}
+				if model == "" && ac.Model != "" {
+					model = ac.Model
+				}
+			}
+		}
+	}
+
+	if maxTurns == 0 && timeout == 0 && len(toolSet) == 0 && model == "" {
+		return nil
+	}
+
+	var tools []string
+	for t := range toolSet {
+		tools = append(tools, t)
+	}
+	sort.Strings(tools)
+
+	return &arc.AgentConfig{
+		MaxTurns:     maxTurns,
+		AllowedTools: tools,
+		Timeout:      timeout,
+		Model:        model,
+	}
 }
 
 // intFromString converts a string to int, ignoring errors.

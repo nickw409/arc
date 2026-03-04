@@ -9,11 +9,17 @@ pipeline:
       prompt: "prompts/feature/impl.md"
       max_turns: "200"
       timeout: "3600"
-  - block: adversary
-    name: check
+  - parallel:
+      strategy: all
+      blocks:
+        - name: check-a
+          block: adversary
+          params: {focus: "core functionality, edge cases, and boundary conditions", max_turns: "20", timeout: "1200"}
+        - name: check-b
+          block: adversary
+          params: {focus: "error handling, integration points, and spec compliance", max_turns: "20", timeout: "1200"}
     run_once: true
     skip_exit: no_bugs_found
-    params: {max_turns: "30"}
     route:
       bugs_found: impl
       no_bugs_found: complete

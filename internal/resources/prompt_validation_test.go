@@ -233,6 +233,10 @@ func TestVerdictConsistency(t *testing.T) {
 		hasVerdictSection := strings.Contains(content, "## Verdict")
 
 		for _, ref := range stateRefs {
+			// Skip fork states — parallel dispatchers that don't use prompts for agents.
+			if strings.HasPrefix(ref.state, "_fork_") {
+				continue
+			}
 			if len(ref.verdicts) > 0 {
 				// Branching state: prompt must have verdict section.
 				if !hasVerdictSection {

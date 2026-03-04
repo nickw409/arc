@@ -29,6 +29,7 @@ type TemplateContext struct {
 	DisputeCount   int
 	DisputeList    string
 	PreviousMemory string // notes saved by a previous run of the same state
+	ScoutReport    string // scout agent output (edge cases to test)
 }
 
 // Render loads a prompt template from embedded resources and renders it.
@@ -72,14 +73,14 @@ func preprocessHandlebars(s string) string {
 	})
 
 	// Handle {{X.Y}} dot-access without pipes.
-	// Convert to: {{index .X "Y"}}
+	// Convert to: {{safeGet .X "Y"}} — lenient lookup returning "" for nil/missing.
 	dotAccessRe := regexp.MustCompile(`\{\{(\w+)\.(\w+)\}\}`)
 	s = dotAccessRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := dotAccessRe.FindStringSubmatch(match)
 		mapName := parts[1]
 		key := parts[2]
 		capName := capitalize(mapName)
-		return fmt.Sprintf(`{{index .%s "%s"}}`, capName, key)
+		return fmt.Sprintf(`{{safeGet .%s "%s"}}`, capName, key)
 	})
 
 	// {{#if X.Y}} -> {{if hasKey .X "Y"}} for map field access in conditionals
@@ -138,7 +139,8 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// safeIndex is a custom index function that returns an error for nil maps.
+// safeIndex is a custom index function that returns an error for nil maps
+// and missing keys. Used by explicit {{index .X "Y"}} calls in Go templates.
 func safeIndex(item interface{}, indices ...interface{}) (interface{}, error) {
 	v := reflect.ValueOf(item)
 	if !v.IsValid() || (v.Kind() == reflect.Map && v.IsNil()) {
@@ -156,6 +158,27 @@ func safeIndex(item interface{}, indices ...interface{}) (interface{}, error) {
 		v = result
 	}
 	return v.Interface(), nil
+}
+
+// safeGet looks up a key in a map, returning empty string for nil maps or
+// missing keys. Used by Handlebars-style {{params.X}} access after
+// preprocessing converts it to {{safeGet .Params "X"}}.
+func safeGet(item interface{}, key string) string {
+	if item == nil {
+		return ""
+	}
+	v := reflect.ValueOf(item)
+	if !v.IsValid() || (v.Kind() == reflect.Map && v.IsNil()) {
+		return ""
+	}
+	if v.Kind() != reflect.Map {
+		return ""
+	}
+	result := v.MapIndex(reflect.ValueOf(key))
+	if !result.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%v", result.Interface())
 }
 
 // defaultIndex looks up a key in a map and returns a default value if the map
@@ -222,6 +245,7 @@ func contextToMap(ctx TemplateContext) map[string]interface{} {
 		"DisputeCount":   ctx.DisputeCount,
 		"DisputeList":    ctx.DisputeList,
 		"PreviousMemory": ctx.PreviousMemory,
+		"ScoutReport":    ctx.ScoutReport,
 		// Lowercase keys for Handlebars-style references
 		"phase":           ctx.Phase,
 		"plan":            ctx.Plan,
@@ -237,15 +261,27 @@ func contextToMap(ctx TemplateContext) map[string]interface{} {
 		"dispute_count":   ctx.DisputeCount,
 		"dispute_list":    ctx.DisputeList,
 		"previous_memory": ctx.PreviousMemory,
+		"scout_report":    ctx.ScoutReport,
 	}
 }
 
 // RenderString renders a prompt template from a raw string.
+// If tmplStr looks like a resource path (e.g. "prompts/blocks/adversary.md"),
+// the prompt content is loaded from embedded resources first.
 func RenderString(tmplStr string, ctx TemplateContext) (string, error) {
+	// Detect resource paths passed as template strings and resolve them.
+	if strings.HasPrefix(tmplStr, "prompts/") && strings.HasSuffix(tmplStr, ".md") && !strings.Contains(tmplStr, "\n") {
+		resourcePath := strings.TrimPrefix(tmplStr, "prompts/")
+		if loaded, err := resources.PromptBytes(resourcePath); err == nil && len(loaded) > 0 {
+			tmplStr = string(loaded)
+		}
+	}
+
 	processed := preprocessHandlebars(tmplStr)
 
 	funcMap := template.FuncMap{
 		"index":        safeIndex,
+		"safeGet":      safeGet,
 		"defaultIndex": defaultIndex,
 		"hasKey":       hasKey,
 	}

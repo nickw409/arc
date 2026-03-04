@@ -20,8 +20,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
+
+func flock(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+}
+
+func funlock(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+}
 
 func main() {
 	sleepMS, _ := strconv.Atoi(os.Getenv("MOCK_SLEEP_MS"))
@@ -72,6 +81,21 @@ func main() {
 
 func getScriptedResponse(scriptDir string) string {
 	counterPath := filepath.Join(scriptDir, ".call_count")
+	lockPath := counterPath + ".lock"
+
+	// Acquire file lock for atomic counter increment.
+	// This prevents races when parallel branches spawn concurrent mock agents.
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening lock file: %v\n", err)
+		os.Exit(1)
+	}
+	defer lockFile.Close()
+	if err := flock(lockFile); err != nil {
+		fmt.Fprintf(os.Stderr, "error acquiring lock: %v\n", err)
+		os.Exit(1)
+	}
+	defer funlock(lockFile)
 
 	// Read current counter (default 0)
 	count := 0

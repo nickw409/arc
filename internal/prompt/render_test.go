@@ -383,6 +383,113 @@ func TestRenderHandlebarsNewFields(t *testing.T) {
 	}
 }
 
+func TestRunStateUsesStateConfigParams(t *testing.T) {
+	// Render a template containing {{params.focus}} with params set
+	result, err := RenderString("Focus: {{params.focus}}", TemplateContext{
+		Params: map[string]string{"focus": "testing"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "testing") {
+		t.Fatalf("expected output to contain 'testing', got %q", result)
+	}
+}
+
+func TestAdversaryPromptRendersWithFocus(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{"focus": "security vulnerabilities"},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "security vulnerabilities") {
+		t.Fatal("expected rendered output to contain 'security vulnerabilities'")
+	}
+	if !strings.Contains(result, "Focus Area") {
+		t.Fatal("expected rendered output to contain 'Focus Area' section")
+	}
+}
+
+func TestAdversaryPromptRendersWithoutFocus(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Focus Area") {
+		t.Fatal("expected rendered output to NOT contain 'Focus Area' section")
+	}
+}
+
+func TestAdversaryPromptRendersWithNilParams(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       nil,
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Focus Area") {
+		t.Fatal("expected rendered output to NOT contain 'Focus Area' section")
+	}
+}
+
+func TestAdversaryPromptRendersUndefinedParam(t *testing.T) {
+	// Using {{#if params.X}} with an undefined param should safely render nothing
+	// (hasKey returns false for missing keys). Direct access via {{params.X}}
+	// errors because of safeIndex + missingkey=error, so templates should
+	// always guard param access with {{#if}}.
+	result, err := RenderString("{{#if params.nonexistent}}FOUND{{/if}}OK", TemplateContext{
+		Params: map[string]string{"other": "value"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "FOUND") {
+		t.Fatal("expected undefined param conditional to not render")
+	}
+	if !strings.Contains(result, "OK") {
+		t.Fatalf("expected 'OK' in output, got %q", result)
+	}
+}
+
 func TestFormatDisputeList(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -422,5 +529,84 @@ func TestFormatDisputeList(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAdversaryPromptScoutReportSection(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+		ScoutReport:  "Edge case: empty input array\nEdge case: nil pointer",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Scout Report") {
+		t.Fatal("expected rendered output to contain 'Scout Report' section")
+	}
+	if !strings.Contains(result, "Edge case: empty input array") {
+		t.Fatal("expected rendered output to contain scout report content")
+	}
+}
+
+func TestAdversaryPromptNoScoutReport(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Scout Report") {
+		t.Fatal("expected rendered output to NOT contain 'Scout Report' section when scout_report is empty")
+	}
+}
+
+func TestAdversaryPromptTestExecutionRules(t *testing.T) {
+	result, err := Render("blocks/adversary.md", TemplateContext{
+		Phase:        "test-phase",
+		Plan:         "test-plan",
+		Iteration:    1,
+		PlanMD:       "# Test Plan",
+		State:        map[string]string{"iteration": "1"},
+		Params:       map[string]string{},
+		PlanFile:     ".plans/test-plan/plan.md",
+		PhaseDir:     ".plans/test-plan/phases/test-phase",
+		StateFile:    ".plans/test-plan/phases/test-phase/state.json",
+		ScriptsDir:   ".arc/scripts",
+		Mode:         "implement",
+		DisputeCount: 0,
+		DisputeList:  "(none)",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Test Execution Rules") {
+		t.Fatal("expected rendered output to contain 'Test Execution Rules' section")
+	}
+	if !strings.Contains(result, "ONLY run the specific test file") {
+		t.Fatal("expected rendered output to contain scoped test execution guidance")
 	}
 }

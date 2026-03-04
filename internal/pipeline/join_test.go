@@ -3,6 +3,8 @@ package pipeline
 import (
 	"strings"
 	"testing"
+
+	"github.com/nwiley/arc/internal/arc"
 )
 
 func TestJoinParallel(t *testing.T) {
@@ -146,5 +148,99 @@ func TestJoinParallel(t *testing.T) {
 				t.Fatalf("JoinParallel(%q, %v, %d) = %q, want %q", tc.strategy, tc.results, tc.n, got, tc.want)
 			}
 		})
+	}
+}
+
+// ── MergeVerdicts tests ──────────────────────────────────────────────────────
+
+var bugsFoundNoBugsFound = []arc.Verdict{"bugs_found", "no_bugs_found"}
+
+func TestMergeVerdictsAllBugsFound(t *testing.T) {
+	v, err := MergeVerdicts("all", map[string]arc.Verdict{"a": "bugs_found", "b": "bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "bugs_found" {
+		t.Fatalf("got %q, want %q", v, "bugs_found")
+	}
+}
+
+func TestMergeVerdictsAllNoBugsFound(t *testing.T) {
+	v, err := MergeVerdicts("all", map[string]arc.Verdict{"a": "no_bugs_found", "b": "no_bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "no_bugs_found" {
+		t.Fatalf("got %q, want %q", v, "no_bugs_found")
+	}
+}
+
+func TestMergeVerdictsMixedAllStrategy(t *testing.T) {
+	v, err := MergeVerdicts("all", map[string]arc.Verdict{"a": "bugs_found", "b": "no_bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// bugs_found < no_bugs_found alphabetically, so bugs_found wins
+	if v != "bugs_found" {
+		t.Fatalf("got %q, want %q", v, "bugs_found")
+	}
+}
+
+func TestMergeVerdictsEmptyBranchVerdicts(t *testing.T) {
+	_, err := MergeVerdicts("all", map[string]arc.Verdict{}, bugsFoundNoBugsFound)
+	if err == nil {
+		t.Fatal("expected error for empty branch verdicts")
+	}
+}
+
+func TestMergeVerdictsInvalidStrategy(t *testing.T) {
+	_, err := MergeVerdicts("unknown", map[string]arc.Verdict{"a": "bugs_found"}, bugsFoundNoBugsFound)
+	if err == nil {
+		t.Fatal("expected error for invalid strategy")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("error = %q, want containing 'unsupported'", err.Error())
+	}
+}
+
+func TestMergeVerdictsInvalidVerdict(t *testing.T) {
+	_, err := MergeVerdicts("all", map[string]arc.Verdict{"a": "invalid_verdict", "b": "bugs_found"}, bugsFoundNoBugsFound)
+	if err == nil {
+		t.Fatal("expected error for invalid verdict")
+	}
+	if !strings.Contains(err.Error(), "invalid verdict") {
+		t.Fatalf("error = %q, want containing 'invalid verdict'", err.Error())
+	}
+}
+
+func TestMergeVerdictsAnyStrategy(t *testing.T) {
+	// For "any" strategy, the last alphabetically wins when mixed
+	v, err := MergeVerdicts("any", map[string]arc.Verdict{"a": "bugs_found", "b": "no_bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// no_bugs_found > bugs_found alphabetically
+	if v != "no_bugs_found" {
+		t.Fatalf("got %q, want %q", v, "no_bugs_found")
+	}
+}
+
+func TestMergeVerdictsAnyStrategyAllSame(t *testing.T) {
+	v, err := MergeVerdicts("any", map[string]arc.Verdict{"a": "bugs_found", "b": "bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "bugs_found" {
+		t.Fatalf("got %q, want %q", v, "bugs_found")
+	}
+}
+
+func TestMergeVerdictsSingleBranch(t *testing.T) {
+	v, err := MergeVerdicts("all", map[string]arc.Verdict{"solo": "no_bugs_found"}, bugsFoundNoBugsFound)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "no_bugs_found" {
+		t.Fatalf("got %q, want %q", v, "no_bugs_found")
 	}
 }

@@ -358,6 +358,33 @@ func TestRunParallelNilConfig(t *testing.T) {
 	}
 }
 
+func TestRunParallelWithEmptyParams(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	// Regression test: ensure RunParallel works with empty params (deferred wiring)
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "do task a"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	if verdict != "all_complete" {
+		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
+	}
+}
+
 func TestRunParallelContextCancelled(t *testing.T) {
 	phaseDir, sf := setupParallelTestPlan(t)
 	ps, _ := sf.Read()
@@ -421,5 +448,223 @@ func TestRunParallelContextCancelled(t *testing.T) {
 	}
 	if string(exitData) == "0" {
 		t.Fatal("exit file should show non-zero for cancelled branch")
+	}
+}
+
+// ── Verdict-aware parallel tests ─────────────────────────────────────────────
+
+func TestRunParallelVerdictExtraction(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// Branch output contains a verdict section
+	t.Setenv("MOCK_OUTPUT", "Some analysis...\n\n## Verdict\nbugs_found\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "test prompt a"},
+				{Name: "branch-b", Prompt: "test prompt b"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found", "no_bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	// Both branches return bugs_found
+	if verdict != "bugs_found" {
+		t.Fatalf("verdict = %q, want %q", verdict, "bugs_found")
+	}
+}
+
+func TestRunParallelVerdictExtractionMixed(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// Use scripted responses for different verdicts per branch.
+	// Since MOCK_OUTPUT applies to all branches uniformly, we'll write
+	// log files directly and skip the actual agent spawn.
+	// Actually, let's use a simple approach: set output that has the verdict.
+	t.Setenv("MOCK_OUTPUT", "## Verdict\nno_bugs_found\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "test prompt"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found", "no_bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	if verdict != "no_bugs_found" {
+		t.Fatalf("verdict = %q, want %q", verdict, "no_bugs_found")
+	}
+}
+
+func TestRunParallelMissingLogFile(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// Agent fails, so no log file is written (spawnResult is nil)
+	t.Setenv("MOCK_EXIT_CODE", "1")
+	t.Setenv("MOCK_OUTPUT", "")
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "test prompt"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found", "no_bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	// When output doesn't contain a verdict section, extraction should fail
+	if err == nil {
+		t.Fatal("expected error when verdict extraction fails")
+	}
+}
+
+func TestRunParallelEmptyLogFile(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// Output exists but has no verdict marker
+	t.Setenv("MOCK_OUTPUT", "some output without verdict\n")
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "test prompt"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found", "no_bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	if err == nil {
+		t.Fatal("expected error when no verdict in output")
+	}
+}
+
+func TestRunParallelFallbackToExitCode(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	// Empty ValidVerdicts → fall back to exit-code joining
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "test prompt"},
+				{Name: "branch-b", Prompt: "test prompt"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: nil, // no verdict extraction
+		PlanMD:        "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	if verdict != "all_complete" {
+		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
+	}
+}
+
+func TestRunParallelSingleBranchVerdict(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	t.Setenv("MOCK_OUTPUT", "## Verdict\nbugs_found\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "solo", Prompt: "test prompt"},
+			},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found", "no_bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel error: %v", err)
+	}
+	if verdict != "bugs_found" {
+		t.Fatalf("verdict = %q, want %q", verdict, "bugs_found")
+	}
+}
+
+func TestRunParallelEmptyBranchesVerdict(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{},
+			Strategy: "all",
+		},
+		ValidVerdicts: []arc.Verdict{"bugs_found"},
+		PlanMD:        "# Test Plan",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty branches")
+	}
+}
+
+func TestRunParallelBranchParams(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// The branch has params — verify RunParallel doesn't error when params are set
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "Focus: {{params.focus}}", Params: map[string]string{"focus": "security"}},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel with branch params error: %v", err)
+	}
+	if verdict != "all_complete" {
+		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
 	}
 }

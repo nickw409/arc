@@ -46,6 +46,7 @@ type StateConfig struct {
 	After       []HookConfig      `yaml:"after"`
 	Parallel    *ParallelConfig   `yaml:"parallel"`
 	Agent       *AgentConfig      `yaml:"agent"`
+	Params      map[string]string `yaml:"params" json:"params,omitempty"`
 	// RunOnce, when true, causes this state to be skipped on all visits after
 	// the first. The SkipVerdict is auto-produced instead of spawning an agent,
 	// allowing the pipeline to advance past the state on re-entry.
@@ -87,8 +88,9 @@ type ParallelConfig struct {
 }
 
 type ParallelBranch struct {
-	Name   string `yaml:"name"`
-	Prompt string `yaml:"prompt"`
+	Name   string            `yaml:"name" json:"name"`
+	Prompt string            `yaml:"prompt" json:"prompt"`
+	Params map[string]string `yaml:"params,omitempty" json:"params,omitempty"`
 }
 
 type InterventionTrigger struct {
