@@ -28,7 +28,9 @@ func sanitizeBranch(s string) string {
 }
 
 // Create creates a new worktree branch and checks it out in a temp directory.
-// Branch is created from current HEAD. Returns the worktree handle.
+// Branch is created from current HEAD. If the branch already exists from a
+// previous run, Create detects and reuses the existing worktree (preserving
+// agent work) or creates a new worktree on the existing branch.
 func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 	branch := "arc/" + sanitizeBranch(planName)
 	if phaseName != "" {
@@ -42,9 +44,36 @@ func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 
 	cmd := exec.Command("git", "worktree", "add", "-b", branch, dir)
 	cmd.Dir = projectDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if _, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
-		return nil, fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+
+		// Branch already exists — check if a worktree is still attached
+		if existingDir := findWorktreeDir(projectDir, branch); existingDir != "" {
+			// Scenario A: worktree still exists, reuse it
+			return &Worktree{
+				Branch:     branch,
+				Dir:        existingDir,
+				ProjectDir: projectDir,
+			}, nil
+		}
+
+		// Scenario B: branch exists but worktree was removed — create
+		// worktree on the existing branch (without -b)
+		dir2, err2 := os.MkdirTemp("", "arc-worktree-*")
+		if err2 != nil {
+			return nil, fmt.Errorf("creating temp dir: %w", err2)
+		}
+		cmd2 := exec.Command("git", "worktree", "add", dir2, branch)
+		cmd2.Dir = projectDir
+		if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
+			os.RemoveAll(dir2)
+			return nil, fmt.Errorf("git worktree add (existing branch): %s: %w", strings.TrimSpace(string(out2)), err2)
+		}
+		return &Worktree{
+			Branch:     branch,
+			Dir:        dir2,
+			ProjectDir: projectDir,
+		}, nil
 	}
 
 	return &Worktree{
@@ -52,6 +81,32 @@ func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 		Dir:        dir,
 		ProjectDir: projectDir,
 	}, nil
+}
+
+// findWorktreeDir returns the directory of an existing worktree checked out
+// on the given branch, or "" if none is found.
+func findWorktreeDir(projectDir, branch string) string {
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = projectDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	var currentDir string
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			currentDir = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			if strings.TrimPrefix(line, "branch refs/heads/") == branch && currentDir != "" {
+				return currentDir
+			}
+		case line == "":
+			currentDir = ""
+		}
+	}
+	return ""
 }
 
 // Remove cleans up the worktree directory and prunes git worktree metadata.
