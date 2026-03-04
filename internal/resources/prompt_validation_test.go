@@ -277,6 +277,7 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"blocks/tests.md":       true, // default prompt for tests block
 		"blocks/test-review.md": true, // default prompt for test-review block
 		"blocks/review.md":      true, // default prompt for review block
+		"blocks/scout.md":       true, // default prompt for scout block
 	}
 
 	refs := allWorkflowPromptRefs(t)

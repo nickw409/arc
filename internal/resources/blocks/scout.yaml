@@ -1,0 +1,17 @@
+name: scout
+description: Read-only reconnaissance — identifies edge cases and attack surface without modifying code
+params:
+  max_turns: {default: "10"}
+  timeout: {default: "300"}
+  prompt: {default: "prompts/blocks/scout.md"}
+entry: scout
+exits: [done]
+states:
+  - name: scout
+    description: Read code and produce structured edge-case report
+    prompt: ${prompt}
+    agent:
+      max_turns: ${max_turns}
+      timeout: ${timeout}
+      allowed_tools: [Read, Grep, Glob]
+    next: $done
