@@ -145,6 +145,17 @@ func TestEmbeddedGuideNotFound(t *testing.T) {
 	}
 }
 
+func TestAdversaryPromptContainsArcTest(t *testing.T) {
+	data, err := PromptBytes("blocks/adversary.md")
+	if err != nil {
+		t.Fatalf("PromptBytes(blocks/adversary.md) error: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "arc test") {
+		t.Fatal("adversary prompt does not contain 'arc test' instructions")
+	}
+}
+
 func TestEmbeddedWorkflowContent(t *testing.T) {
 	// Verify embedded workflows have expected content markers
 	// Pipeline-based workflows use 'pipeline:'; state-based use 'states:'

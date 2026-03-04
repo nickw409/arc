@@ -55,6 +55,17 @@ Then:
 
 {{> common/test-commands.md}}
 
+## Running Tests
+
+Use `arc test` to run your test files:
+
+```bash
+arc test path/to/your_test_file.go                    # run all tests in file
+arc test path/to/your_test_file.go -f TestSpecific     # run specific test
+```
+
+Do NOT run full test suites (`go test ./...`, `pytest`, `npm test`, `cargo test`). Only run your specific test files.
+
 ## Test Execution Rules
 
 When running tests, ONLY run the specific test file(s) you created — never the full test suite. This keeps execution fast and avoids timeouts in languages with slow builds.
