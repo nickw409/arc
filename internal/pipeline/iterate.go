@@ -286,6 +286,16 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		return &arc.IterationResult{Action: arc.ActionRetry, Err: fmt.Errorf("agent spawn failed: %w", err)}
 	}
 
+	// Log per-turn summaries from stream-json output
+	for _, ts := range spawnResult.TurnSummaries {
+		tools := strings.Join(ts.Tools, ", ")
+		if tools == "" {
+			tools = "(none)"
+		}
+		_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] turn %d: in=%d out=%d tools=[%s]",
+			timeNow(), phaseState.CurrentState, ts.Turn, ts.InputTokens, ts.OutputTokens, tools))
+	}
+
 	// Extract and save memory from agent output
 	if mem := ExtractMemory(spawnResult.Output); mem != "" {
 		if writeErr := WriteMemory(phaseDir, phaseState.CurrentState, mem); writeErr != nil {

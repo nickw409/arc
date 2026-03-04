@@ -10,6 +10,9 @@
 //   - MOCK_SCRIPT_DIR: directory containing call_0.txt, call_1.txt, etc. for sequential scripted
 //     responses. A shared .call_count file tracks which response to serve next. Falls through to
 //     MOCK_OUTPUT if the script file doesn't exist.
+//   - MOCK_STREAM_JSON: multi-line value with stream-json messages to emit line by line.
+//     Each line is emitted with a configurable delay (MOCK_STREAM_DELAY_MS, default 0).
+//     If set, overrides MOCK_OUTPUT.
 package main
 
 import (
@@ -40,6 +43,24 @@ func main() {
 
 	if stderr := os.Getenv("MOCK_STDERR"); stderr != "" {
 		fmt.Fprint(os.Stderr, stderr)
+	}
+
+	// MOCK_STREAM_JSON: emit stream-json lines one at a time with optional delay
+	if streamJSON := os.Getenv("MOCK_STREAM_JSON"); streamJSON != "" {
+		delayMS, _ := strconv.Atoi(os.Getenv("MOCK_STREAM_DELAY_MS"))
+		lines := strings.Split(streamJSON, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if delayMS > 0 {
+				time.Sleep(time.Duration(delayMS) * time.Millisecond)
+			}
+			fmt.Println(line)
+		}
+		exitCode, _ := strconv.Atoi(os.Getenv("MOCK_EXIT_CODE"))
+		os.Exit(exitCode)
 	}
 
 	var output string
