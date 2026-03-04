@@ -1,0 +1,346 @@
+package plan
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/state"
+)
+
+// makeTestPlan creates a plan in a temp directory and returns plansDir.
+func makeTestPlan(t *testing.T, planName string, phases []string) string {
+	t.Helper()
+	plansDir := t.TempDir()
+	_, err := Create(CreateOptions{
+		PlansDir: plansDir,
+		Name:     planName,
+		Phases:   phases,
+	})
+	if err != nil {
+		t.Fatalf("Create plan: %v", err)
+	}
+	return plansDir
+}
+
+func TestWriteReadSpec(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	spec := &arc.PhaseSpec{
+		Spec:       "Implement the feature",
+		Test:       "go test ./...",
+		Complexity: "medium",
+		Files:      []string{"internal/foo/bar.go", "internal/foo/baz.go"},
+		Deps:       []string{"phase-b"},
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{Type: "file_exists", Target: "internal/foo/bar.go", FileExists: "internal/foo/bar.go"},
+			},
+			VerifierAgent: true,
+		},
+	}
+
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", spec); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	got, err := ReadSpec(plansDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+
+	if got.Spec != spec.Spec {
+		t.Errorf("Spec mismatch: got %q, want %q", got.Spec, spec.Spec)
+	}
+	if got.Test != spec.Test {
+		t.Errorf("Test mismatch: got %q, want %q", got.Test, spec.Test)
+	}
+	if got.Complexity != spec.Complexity {
+		t.Errorf("Complexity mismatch: got %q, want %q", got.Complexity, spec.Complexity)
+	}
+	if len(got.Files) != len(spec.Files) {
+		t.Errorf("Files length mismatch: got %d, want %d", len(got.Files), len(spec.Files))
+	} else {
+		for i, f := range spec.Files {
+			if got.Files[i] != f {
+				t.Errorf("Files[%d]: got %q, want %q", i, got.Files[i], f)
+			}
+		}
+	}
+	if len(got.Deps) != len(spec.Deps) {
+		t.Errorf("Deps length mismatch: got %d, want %d", len(got.Deps), len(spec.Deps))
+	}
+	if len(got.Gate.Assertions) != len(spec.Gate.Assertions) {
+		t.Errorf("Gate.Assertions length mismatch: got %d, want %d", len(got.Gate.Assertions), len(spec.Gate.Assertions))
+	} else if len(spec.Gate.Assertions) > 0 && got.Gate.Assertions[0] != spec.Gate.Assertions[0] {
+		t.Errorf("Gate.Assertions[0]: got %q, want %q", got.Gate.Assertions[0], spec.Gate.Assertions[0])
+	}
+	if got.Gate.VerifierAgent != spec.Gate.VerifierAgent {
+		t.Errorf("Gate.VerifierAgent: got %v, want %v", got.Gate.VerifierAgent, spec.Gate.VerifierAgent)
+	}
+}
+
+func TestAddPhase(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	spec := &arc.PhaseSpec{
+		Spec:       "Add a second phase",
+		Complexity: "simple",
+		Deps:       []string{"phase-a"},
+	}
+
+	if err := AddPhase(plansDir, "my-plan", "phase-b", spec); err != nil {
+		t.Fatalf("AddPhase: %v", err)
+	}
+
+	// Verify spec.yaml was written
+	got, err := ReadSpec(plansDir, "my-plan", "phase-b")
+	if err != nil {
+		t.Fatalf("ReadSpec after AddPhase: %v", err)
+	}
+	if got.Spec != spec.Spec {
+		t.Errorf("spec.Spec: got %q, want %q", got.Spec, spec.Spec)
+	}
+
+	// Verify state.json was written with pending status
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-b", "state.json")
+	sf := state.NewStateFile(statePath)
+	ps, err := sf.Read()
+	if err != nil {
+		t.Fatalf("read state.json: %v", err)
+	}
+	if ps.PhaseStatus != "pending" {
+		t.Errorf("PhaseStatus: got %q, want %q", ps.PhaseStatus, "pending")
+	}
+	if ps.Phase != "phase-b" {
+		t.Errorf("Phase: got %q, want %q", ps.Phase, "phase-b")
+	}
+
+	// Verify plan.json was updated
+	planDir := filepath.Join(plansDir, "my-plan")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+
+	found := false
+	for _, p := range meta.Phases {
+		if p == "phase-b" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("phase-b not in Phases list: %v", meta.Phases)
+	}
+
+	if meta.PhaseOrder["phase-b"] == 0 {
+		t.Errorf("phase-b missing from PhaseOrder")
+	}
+
+	deps, ok := meta.Dependencies["phase-b"]
+	if !ok {
+		t.Errorf("phase-b missing from Dependencies")
+	} else if len(deps) != 1 || deps[0] != "phase-a" {
+		t.Errorf("Dependencies[phase-b]: got %v, want [phase-a]", deps)
+	}
+}
+
+func TestAddPhaseDuplicate(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	spec := &arc.PhaseSpec{Spec: "Duplicate phase"}
+	err := AddPhase(plansDir, "my-plan", "phase-a", spec)
+	if err == nil {
+		t.Fatal("expected error adding duplicate phase, got nil")
+	}
+}
+
+func TestRemovePhase(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
+
+	if err := RemovePhase(plansDir, "my-plan", "phase-b"); err != nil {
+		t.Fatalf("RemovePhase: %v", err)
+	}
+
+	// Verify plan.json updated
+	planDir := filepath.Join(plansDir, "my-plan")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+
+	for _, p := range meta.Phases {
+		if p == "phase-b" {
+			t.Errorf("phase-b still in Phases list after removal")
+		}
+	}
+
+	if _, ok := meta.PhaseOrder["phase-b"]; ok {
+		t.Errorf("phase-b still in PhaseOrder after removal")
+	}
+
+	// phase-a should still be present
+	found := false
+	for _, p := range meta.Phases {
+		if p == "phase-a" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("phase-a missing from Phases after removing phase-b")
+	}
+
+	// PhaseOrder for remaining phases should be contiguous
+	if meta.PhaseOrder["phase-a"] != 1 {
+		t.Errorf("PhaseOrder[phase-a]: got %d, want 1", meta.PhaseOrder["phase-a"])
+	}
+}
+
+func TestRemovePhasePending(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
+
+	// Mark phase-b as complete
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-b", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "complete"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	err := RemovePhase(plansDir, "my-plan", "phase-b")
+	if err == nil {
+		t.Fatal("expected error removing non-pending phase, got nil")
+	}
+}
+
+func TestUpdateSpec(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	// Write initial spec
+	initial := &arc.PhaseSpec{Spec: "original spec", Complexity: "simple"}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	// Update with new spec
+	updated := &arc.PhaseSpec{Spec: "updated spec", Complexity: "complex"}
+	if err := UpdateSpec(plansDir, "my-plan", "phase-a", updated); err != nil {
+		t.Fatalf("UpdateSpec: %v", err)
+	}
+
+	got, err := ReadSpec(plansDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if got.Spec != "updated spec" {
+		t.Errorf("Spec: got %q, want %q", got.Spec, "updated spec")
+	}
+	if got.Complexity != "complex" {
+		t.Errorf("Complexity: got %q, want %q", got.Complexity, "complex")
+	}
+}
+
+func TestUpdateSpecRunning(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	// Mark phase-a as running
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-a", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "running"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	spec := &arc.PhaseSpec{Spec: "should fail"}
+	err := UpdateSpec(plansDir, "my-plan", "phase-a", spec)
+	if err == nil {
+		t.Fatal("expected error updating running phase, got nil")
+	}
+}
+
+func TestUpdateGate(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	// Write initial spec
+	initial := &arc.PhaseSpec{Spec: "phase spec"}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	newGate := arc.GateSpec{
+		Assertions: []arc.GateAssertion{
+			{Type: "file_exists", Target: "go.mod", FileExists: "go.mod"},
+			{Type: "grep", Target: "package main", Grep: "package main"},
+		},
+		VerifierAgent: true,
+	}
+	if err := UpdateGate(plansDir, "my-plan", "phase-a", newGate); err != nil {
+		t.Fatalf("UpdateGate: %v", err)
+	}
+
+	got, err := ReadSpec(plansDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if len(got.Gate.Assertions) != 2 {
+		t.Errorf("Gate.Assertions length: got %d, want 2", len(got.Gate.Assertions))
+	}
+	if !got.Gate.VerifierAgent {
+		t.Errorf("Gate.VerifierAgent: got false, want true")
+	}
+	// Original spec field must be preserved
+	if got.Spec != "phase spec" {
+		t.Errorf("Spec: got %q, want %q (should be preserved)", got.Spec, "phase spec")
+	}
+}
+
+func TestUpdateDeps(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
+
+	if err := UpdateDeps(plansDir, "my-plan", "phase-b", []string{"phase-a"}); err != nil {
+		t.Fatalf("UpdateDeps: %v", err)
+	}
+
+	planDir := filepath.Join(plansDir, "my-plan")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+
+	deps := meta.Dependencies["phase-b"]
+	if len(deps) != 1 || deps[0] != "phase-a" {
+		t.Errorf("Dependencies[phase-b]: got %v, want [phase-a]", deps)
+	}
+}
+
+func TestAddPhaseWithDeps(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
+
+	spec := &arc.PhaseSpec{
+		Spec: "Phase with multiple deps",
+		Deps: []string{"phase-a", "phase-b"},
+	}
+	if err := AddPhase(plansDir, "my-plan", "phase-c", spec); err != nil {
+		t.Fatalf("AddPhase: %v", err)
+	}
+
+	planDir := filepath.Join(plansDir, "my-plan")
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+
+	deps := meta.Dependencies["phase-c"]
+	if len(deps) != 2 {
+		t.Fatalf("Dependencies[phase-c]: got %v, want [phase-a phase-b]", deps)
+	}
+	if deps[0] != "phase-a" || deps[1] != "phase-b" {
+		t.Errorf("Dependencies[phase-c]: got %v, want [phase-a phase-b]", deps)
+	}
+}

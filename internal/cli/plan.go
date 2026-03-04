@@ -53,5 +53,9 @@ func newPlanCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&workflowType, "type", "feature", "Workflow type (feature, bugfix, investigation, refactor, performance, audit)")
+
+	// Register spec subcommands
+	addPlanSpecSubcommands(cmd)
+
 	return cmd
 }
