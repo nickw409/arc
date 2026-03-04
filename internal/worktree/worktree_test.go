@@ -284,3 +284,121 @@ func TestCleanupPlanNoWorktrees(t *testing.T) {
 		t.Fatalf("expected 0 worktrees removed, got %d", n)
 	}
 }
+
+// Regression tests for worktree restart bug:
+// Create unconditionally uses `git worktree add -b` which fails when the
+// branch already exists from a previous run. This causes the orchestrator
+// to silently fall back to in-tree execution and skip the merge on completion.
+
+func TestCreate_BranchExistsWorktreeRemoved(t *testing.T) {
+	// Scenario B: A previous run created a worktree, the worktree was removed
+	// but the branch still lingers. Create should handle this gracefully by
+	// reusing the existing branch (without -b flag).
+	projectDir := initTestRepo(t)
+
+	// First create succeeds normally
+	wt1, err := Create(projectDir, "restart-plan", "impl")
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	// Remove the worktree directory but leave the branch intact
+	cmd := exec.Command("git", "worktree", "remove", "--force", wt1.Dir)
+	cmd.Dir = projectDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree remove: %s: %v", out, err)
+	}
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = projectDir
+	pruneCmd.Run()
+
+	// Verify branch still exists
+	cmd = exec.Command("git", "branch", "--list", wt1.Branch)
+	cmd.Dir = projectDir
+	out, _ := cmd.Output()
+	if strings.TrimSpace(string(out)) == "" {
+		t.Fatal("precondition: branch should still exist after worktree removal")
+	}
+
+	// BUG: Create fails with "fatal: a branch named 'arc/restart-plan/impl' already exists"
+	// because it unconditionally passes -b to git worktree add.
+	wt2, err := Create(projectDir, "restart-plan", "impl")
+	if err != nil {
+		t.Fatalf("Create with lingering branch should succeed, got: %v", err)
+	}
+	defer Remove(wt2)
+
+	if wt2.Branch != "arc/restart-plan/impl" {
+		t.Errorf("expected branch arc/restart-plan/impl, got %q", wt2.Branch)
+	}
+	if _, err := os.Stat(wt2.Dir); os.IsNotExist(err) {
+		t.Fatal("new worktree directory should exist")
+	}
+}
+
+func TestCreate_BranchAndWorktreeAlreadyExist(t *testing.T) {
+	// Scenario A: A previous run created a worktree and it's still intact
+	// (e.g., the orchestrator timed out or was killed). The second run should
+	// detect and reuse the existing worktree, preserving agent work.
+	projectDir := initTestRepo(t)
+
+	// First create succeeds
+	wt1, err := Create(projectDir, "restart-plan", "")
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	// Simulate agent work in the worktree (must be preserved on reuse)
+	workFile := filepath.Join(wt1.Dir, "agent-output.txt")
+	if err := os.WriteFile(workFile, []byte("partial work from first run\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// BUG: Create fails with "fatal: a branch named 'arc/restart-plan' already exists"
+	// After fix: should detect and reuse the existing worktree.
+	wt2, err := Create(projectDir, "restart-plan", "")
+	if err != nil {
+		t.Fatalf("Create with existing worktree should reuse it, got: %v", err)
+	}
+	defer Remove(wt2)
+
+	// The reused worktree should point to the existing directory with preserved work
+	data, err := os.ReadFile(filepath.Join(wt2.Dir, "agent-output.txt"))
+	if err != nil {
+		t.Fatalf("agent work should be preserved in reused worktree: %v", err)
+	}
+	if string(data) != "partial work from first run\n" {
+		t.Errorf("expected preserved content, got %q", data)
+	}
+}
+
+func TestCreate_PlanLevelBranchExistsWorktreeRemoved(t *testing.T) {
+	// Same as TestCreate_BranchExistsWorktreeRemoved but for plan-level
+	// (shared) worktrees (phaseName=""), which is the path hit by
+	// orchestrator.Launch() on restart.
+	projectDir := initTestRepo(t)
+
+	wt1, err := Create(projectDir, "shared-restart", "")
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	// Remove worktree, leave branch
+	cmd := exec.Command("git", "worktree", "remove", "--force", wt1.Dir)
+	cmd.Dir = projectDir
+	cmd.CombinedOutput()
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = projectDir
+	pruneCmd.Run()
+
+	// BUG: fails because -b flag is always used
+	wt2, err := Create(projectDir, "shared-restart", "")
+	if err != nil {
+		t.Fatalf("plan-level Create with lingering branch should succeed, got: %v", err)
+	}
+	defer Remove(wt2)
+
+	if wt2.Branch != "arc/shared-restart" {
+		t.Errorf("expected branch arc/shared-restart, got %q", wt2.Branch)
+	}
+}
