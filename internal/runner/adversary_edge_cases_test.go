@@ -118,13 +118,12 @@ PASS
 ok  	example.com/pkg	0.01s
 `
 	result := parseTestOutput("go-test", stdout, "", 0)
-	// There is 1 top-level test with 2 subtests.
-	// If the parser counts each "--- PASS:" line, Total=3.
-	// This could be confusing for users. At minimum, verify the behavior is defined.
-	if result.Total != 1 && result.Total != 3 {
-		t.Fatalf("expected Total=1 (top-level only) or Total=3 (all pass lines), got %d", result.Total)
+	// There is 1 top-level test with 2 subtests. After deduplication,
+	// the parent TestFoo is removed (it's only passing because subtests passed),
+	// leaving 2 subtests as the actual test count.
+	if result.Total != 2 {
+		t.Fatalf("expected Total=2 (subtests only, parent deduplicated), got %d", result.Total)
 	}
-	// The key check: if subtests fail, do we get correct FailedNames?
 }
 
 // TestParseGoTestOutputSubtestFailure verifies that when a subtest fails,

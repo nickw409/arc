@@ -78,7 +78,7 @@ func buildCommand(opts RunBuiltinOptions, timeout time.Duration) (args []string,
 		}
 		parts = append(parts, opts.TestFile)
 		if opts.Filter != "" {
-			parts = append(parts, opts.Filter)
+			parts = append(parts, "-run", opts.Filter)
 		}
 		return parts, "custom", nil
 	}
@@ -93,7 +93,16 @@ func buildCommand(opts RunBuiltinOptions, timeout time.Duration) (args []string,
 }
 
 func buildGoTestCommand(opts RunBuiltinOptions, timeout time.Duration) []string {
-	pkg := "./" + filepath.ToSlash(filepath.Dir(opts.TestFile)) + "/"
+	dir := filepath.ToSlash(filepath.Dir(opts.TestFile))
+	var pkg string
+	switch {
+	case filepath.IsAbs(opts.TestFile):
+		pkg = dir + "/"
+	case dir == ".":
+		pkg = "./"
+	default:
+		pkg = "./" + dir + "/"
+	}
 	args := []string{"go", "test", pkg, "-v", "-count=1"}
 	if opts.Filter != "" {
 		args = append(args, "-run", opts.Filter)
@@ -136,20 +145,25 @@ var (
 func parseGoTestOutput(result *TestResult, stdout string, stderr string, exitCode int) {
 	lines := strings.Split(stdout+"\n"+stderr, "\n")
 
-	var passed, failed int
+	var passNames, failNames []string
 	for _, line := range lines {
 		if m := goPassRe.FindStringSubmatch(line); m != nil {
-			passed++
+			passNames = append(passNames, m[1])
 		}
 		if m := goFailRe.FindStringSubmatch(line); m != nil {
-			failed++
-			result.FailedNames = append(result.FailedNames, m[1])
+			failNames = append(failNames, m[1])
 		}
 	}
 
-	result.Passed = passed
-	result.Failed = failed
-	result.Total = passed + failed
+	// Deduplicate: if TestFoo/sub failed, TestFoo also shows as FAIL.
+	// Keep only the most specific names (subtests), not their parents.
+	failNames = deduplicateSubtests(failNames)
+	passNames = deduplicateSubtests(passNames)
+
+	result.Passed = len(passNames)
+	result.Failed = len(failNames)
+	result.FailedNames = failNames
+	result.Total = result.Passed + result.Failed
 
 	// Parse timing from "ok" line
 	if m := goTimingRe.FindStringSubmatch(stdout); m != nil {
@@ -163,4 +177,33 @@ func parseGoTestOutput(result *TestResult, stdout string, stderr string, exitCod
 		result.Failed = 1
 		result.Total = 1
 	}
+}
+
+// deduplicateSubtests removes parent test names when a subtest is present.
+// e.g., [TestFoo/sub2, TestFoo] → [TestFoo/sub2] because TestFoo only
+// appears as FAIL because its subtest failed.
+func deduplicateSubtests(names []string) []string {
+	if len(names) <= 1 {
+		return names
+	}
+	// Build set for quick lookup
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	var result []string
+	for _, n := range names {
+		// Keep this name only if no other name has it as a prefix (parent)
+		isParent := false
+		for _, other := range names {
+			if other != n && strings.HasPrefix(other, n+"/") {
+				isParent = true
+				break
+			}
+		}
+		if !isParent {
+			result = append(result, n)
+		}
+	}
+	return result
 }

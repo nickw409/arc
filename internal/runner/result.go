@@ -19,7 +19,7 @@ type TestResult struct {
 // Summary returns a one-line human-readable summary.
 func (r *TestResult) Summary() string {
 	dur := fmt.Sprintf("%.1fs", r.Duration.Seconds())
-	if r.Total == 0 && r.Failed == 0 {
+	if r.Total == 0 && r.Failed == 0 && r.Passed == 0 {
 		return fmt.Sprintf("0 tests (%s)", dur)
 	}
 	total := r.Passed + r.Failed
