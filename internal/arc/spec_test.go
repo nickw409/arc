@@ -1,0 +1,114 @@
+package arc
+
+import (
+	"encoding/json"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+func TestPhaseSpecJSON(t *testing.T) {
+	spec := PhaseSpec{
+		Name:       "api-auth",
+		Spec:       "Add JWT authentication middleware",
+		Files:      []string{"internal/api/auth.go", "internal/api/middleware.go"},
+		Test:       "go test ./internal/api/ -count=1",
+		Deps:       []string{"core-types"},
+		Complexity: "medium",
+		Checkpoints: []Checkpoint{
+			{Name: "middleware-struct", Description: "Middleware type with constructor", Test: "go test ./internal/api/ -run TestMiddlewareNew -count=1"},
+			{Name: "token-validation", Description: "JWT parsing and validation", Test: "go test ./internal/api/ -run TestTokenValidation -count=1"},
+		},
+		Gate: GateSpec{
+			Assertions: []GateAssertion{
+				{FileExists: "internal/api/auth.go"},
+				{Grep: "func NewMiddleware"},
+				{TestExists: "TestTokenExpiry"},
+			},
+			VerifierAgent: false,
+		},
+	}
+
+	data, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("json marshal: %v", err)
+	}
+	var spec2 PhaseSpec
+	if err := json.Unmarshal(data, &spec2); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if spec2.Name != "api-auth" {
+		t.Errorf("Name = %q, want %q", spec2.Name, "api-auth")
+	}
+	if len(spec2.Checkpoints) != 2 {
+		t.Fatalf("len(Checkpoints) = %d, want 2", len(spec2.Checkpoints))
+	}
+	if spec2.Checkpoints[0].Name != "middleware-struct" {
+		t.Errorf("Checkpoint[0].Name = %q, want %q", spec2.Checkpoints[0].Name, "middleware-struct")
+	}
+	if len(spec2.Gate.Assertions) != 3 {
+		t.Fatalf("len(Assertions) = %d, want 3", len(spec2.Gate.Assertions))
+	}
+}
+
+func TestPhaseSpecYAML(t *testing.T) {
+	yamlData := `
+name: api-auth
+spec: Add JWT authentication middleware
+files:
+  - internal/api/auth.go
+test: go test ./internal/api/ -count=1
+complexity: simple
+checkpoints:
+  - name: handler
+    description: Handler exists
+    test: go test -run TestHandler
+gate:
+  assertions:
+    - file_exists: internal/api/auth.go
+    - grep: "func NewHandler"
+  verifier_agent: true
+`
+	var spec PhaseSpec
+	if err := yaml.Unmarshal([]byte(yamlData), &spec); err != nil {
+		t.Fatalf("yaml unmarshal: %v", err)
+	}
+	if spec.Name != "api-auth" {
+		t.Errorf("Name = %q, want %q", spec.Name, "api-auth")
+	}
+	if spec.Complexity != "simple" {
+		t.Errorf("Complexity = %q, want %q", spec.Complexity, "simple")
+	}
+	if len(spec.Checkpoints) != 1 {
+		t.Fatalf("len(Checkpoints) = %d, want 1", len(spec.Checkpoints))
+	}
+	if !spec.Gate.VerifierAgent {
+		t.Error("VerifierAgent = false, want true")
+	}
+	if len(spec.Gate.Assertions) != 2 {
+		t.Fatalf("len(Assertions) = %d, want 2", len(spec.Gate.Assertions))
+	}
+	if spec.Gate.Assertions[0].FileExists != "internal/api/auth.go" {
+		t.Errorf("Assertion[0].FileExists = %q", spec.Gate.Assertions[0].FileExists)
+	}
+}
+
+func TestDefaultTurnBudget(t *testing.T) {
+	tests := []struct {
+		complexity string
+		want       int
+	}{
+		{"simple", 50},
+		{"medium", 100},
+		{"complex", 200},
+		{"", 100},
+		{"unknown", 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.complexity, func(t *testing.T) {
+			if got := DefaultTurnBudget(tt.complexity); got != tt.want {
+				t.Errorf("DefaultTurnBudget(%q) = %d, want %d", tt.complexity, got, tt.want)
+			}
+		})
+	}
+}
