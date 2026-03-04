@@ -47,7 +47,11 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 
 	// Default workflow type
 	if opts.WorkflowType == "" {
-		opts.WorkflowType = "feature"
+		if len(opts.CustomWorkflow) > 0 {
+			opts.WorkflowType = "custom"
+		} else {
+			opts.WorkflowType = "feature"
+		}
 	}
 
 	// Resolve effective resolver
@@ -56,17 +60,20 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		r = resources.NewResolver("", "")
 	}
 
-	// Validate workflow type exists (for non-feature, we'll copy it; for feature, just check)
-	validWorkflows := r.ListWorkflows()
-	found := false
-	for _, w := range validWorkflows {
-		if w == opts.WorkflowType {
-			found = true
-			break
+	// Skip validation for custom workflows (they won't be in the registry)
+	if opts.WorkflowType != "custom" {
+		// Validate workflow type exists (for non-feature, we'll copy it; for feature, just check)
+		validWorkflows := r.ListWorkflows()
+		found := false
+		for _, w := range validWorkflows {
+			if w == opts.WorkflowType {
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		return nil, fmt.Errorf("invalid workflow type %q", opts.WorkflowType)
+		if !found {
+			return nil, fmt.Errorf("invalid workflow type %q", opts.WorkflowType)
+		}
 	}
 
 	// 3. Check plan doesn't already exist

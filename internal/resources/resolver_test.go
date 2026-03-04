@@ -462,6 +462,43 @@ func TestResolverListBlocksMerged(t *testing.T) {
 	}
 }
 
+func TestResolveWorkflowBytesCustom(t *testing.T) {
+	planDir := t.TempDir()
+	wfContent := "name: custom\nversion: 1\n"
+	writeFile(t, filepath.Join(planDir, "workflow.yaml"), wfContent)
+
+	r := NewResolver("", "")
+	got, err := ResolveWorkflowBytes(r, "custom", planDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(got) != wfContent {
+		t.Errorf("got %q, want %q", got, wfContent)
+	}
+}
+
+func TestResolveWorkflowBytesCustomMissing(t *testing.T) {
+	planDir := t.TempDir()
+	// No workflow.yaml written
+
+	r := NewResolver("", "")
+	_, err := ResolveWorkflowBytes(r, "custom", planDir)
+	if err == nil {
+		t.Fatal("expected error for missing workflow.yaml, got nil")
+	}
+}
+
+func TestResolveWorkflowBytesNonCustom(t *testing.T) {
+	r := NewResolver("", "")
+	got, err := ResolveWorkflowBytes(r, "feature", "/nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Error("expected non-empty embedded feature workflow")
+	}
+}
+
 func TestResolverNonExistentDirs(t *testing.T) {
 	r := NewResolver("/nonexistent/path/abc", "/another/nonexistent/xyz")
 	got, err := r.WorkflowBytes("feature")

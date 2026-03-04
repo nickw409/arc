@@ -59,7 +59,8 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	}
 
 	// Load workflow
-	wfBytes, err := r.WorkflowBytes(phaseState.WorkflowType)
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	wfBytes, err := resources.ResolveWorkflowBytes(r, phaseState.WorkflowType, planDir)
 	if err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("loading workflow %q: %w", phaseState.WorkflowType, err)}
 	}

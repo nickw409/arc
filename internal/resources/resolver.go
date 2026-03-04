@@ -105,6 +105,15 @@ func (r *Resolver) ListWorkflows() []string {
 	return result
 }
 
+// ResolveWorkflowBytes returns workflow YAML bytes, checking the plan directory first
+// for "custom" workflow types before falling back to the resolver's normal lookup.
+func ResolveWorkflowBytes(r *Resolver, workflowType, planDir string) ([]byte, error) {
+	if workflowType == "custom" {
+		return os.ReadFile(filepath.Join(planDir, "workflow.yaml"))
+	}
+	return r.WorkflowBytes(workflowType)
+}
+
 // ListBlocks returns all block names (without .yaml extension).
 // Disk names from all search dirs appear first; embedded names are appended if not already present.
 func (r *Resolver) ListBlocks() []string {

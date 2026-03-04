@@ -23,6 +23,7 @@ import (
 	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
+	"github.com/nwiley/arc/internal/workflow"
 )
 
 // runJob tracks a running orchestrator invocation.
@@ -63,8 +64,10 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("arc_plan",
 		mcp.WithDescription("Create a new plan with phase scaffolding. Creates the plan directory, plan.json, and phase directories with plan.md files."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name for the plan (used as directory name)")),
-		mcp.WithString("workflow_type", mcp.Required(), mcp.Description("Workflow type: feature, bugfix, investigation, refactor, performance, audit, direct")),
+		mcp.WithString("workflow_type", mcp.Description("Workflow type: feature, bugfix, investigation, refactor, performance, audit, direct. Defaults to 'custom' when workflow is provided.")),
 		mcp.WithArray("phases", mcp.Required(), mcp.WithStringItems(), mcp.Description("Ordered list of phase names")),
+		mcp.WithString("workflow", mcp.Description("Custom workflow YAML (pipeline format). When provided, workflow_type defaults to 'custom'.")),
+		mcp.WithString("save_workflow_as", mcp.Description("Optional name to save the workflow for reuse in future plans.")),
 	), h.handlePlan)
 
 	s.AddTool(mcp.NewTool("arc_run",
@@ -182,6 +185,8 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 	args := req.GetArguments()
 	name, _ := args["name"].(string)
 	workflowType, _ := args["workflow_type"].(string)
+	inlineWorkflow, _ := args["workflow"].(string)
+	saveWorkflowAs, _ := args["save_workflow_as"].(string)
 
 	var phases []string
 	if rawPhases, ok := args["phases"].([]any); ok {
@@ -195,9 +200,6 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 	if name == "" {
 		return mcp.NewToolResultError("name is required"), nil
 	}
-	if workflowType == "" {
-		return mcp.NewToolResultError("workflow_type is required"), nil
-	}
 	if len(phases) == 0 {
 		return mcp.NewToolResultError("at least one phase is required"), nil
 	}
@@ -205,12 +207,41 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 	homeDir, _ := os.UserHomeDir()
 	resolver := resources.NewResolver(h.projectDir, homeDir)
 
+	var customWorkflow []byte
+	if inlineWorkflow != "" {
+		customWorkflow = []byte(inlineWorkflow)
+
+		// Validate the YAML parses correctly before creating the plan
+		if _, err := workflow.LoadBytesWithBlockLoader(customWorkflow, resolver.BlockBytes); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid workflow YAML: %v", err)), nil
+		}
+
+		// Default workflow_type to "custom" when inline workflow is provided
+		if workflowType == "" {
+			workflowType = "custom"
+		}
+
+		// Save workflow for reuse if requested
+		if saveWorkflowAs != "" {
+			wfDir := filepath.Join(h.projectDir, ".arc", "workflows")
+			if err := os.MkdirAll(wfDir, 0755); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("creating workflows dir: %v", err)), nil
+			}
+			if err := os.WriteFile(filepath.Join(wfDir, saveWorkflowAs+".yaml"), customWorkflow, 0644); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("saving workflow: %v", err)), nil
+			}
+		}
+	} else if workflowType == "" {
+		return mcp.NewToolResultError("workflow_type is required when workflow is not provided"), nil
+	}
+
 	meta, err := plan.Create(plan.CreateOptions{
-		PlansDir:     h.plansDir(),
-		Name:         name,
-		Phases:       phases,
-		WorkflowType: workflowType,
-		Resolver:     resolver,
+		PlansDir:       h.plansDir(),
+		Name:           name,
+		Phases:         phases,
+		WorkflowType:   workflowType,
+		CustomWorkflow: customWorkflow,
+		Resolver:       resolver,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

@@ -54,7 +54,8 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 	}
 
 	// Load workflow
-	wfBytes, err := r.WorkflowBytes(phaseState.WorkflowType)
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	wfBytes, err := resources.ResolveWorkflowBytes(r, phaseState.WorkflowType, planDir)
 	if err != nil {
 		return fmt.Errorf("loading workflow: %w", err)
 	}

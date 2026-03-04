@@ -747,6 +747,100 @@ func TestCreatePlanNilResolverUsesEmbedded(t *testing.T) {
 	}
 }
 
+func TestCreatePlanCustomWorkflowTypeSkipsValidation(t *testing.T) {
+	dir := t.TempDir()
+
+	workflowYAML := []byte(`name: inline
+version: 1
+description: Inline workflow
+entry_state: impl
+terminal_states: [complete, blocked]
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    description: Done
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Blocked
+    prompt: prompts/common/blocked.md
+`)
+
+	meta, err := Create(CreateOptions{
+		PlansDir:       dir,
+		Name:           "custom-plan",
+		Phases:         []string{"impl"},
+		WorkflowType:   "custom",
+		CustomWorkflow: workflowYAML,
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+	if meta.WorkflowType != "custom" {
+		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "custom")
+	}
+
+	// workflow.yaml should be written
+	data, err := os.ReadFile(filepath.Join(dir, "custom-plan", "workflow.yaml"))
+	if err != nil {
+		t.Fatalf("workflow.yaml should exist: %v", err)
+	}
+	if !bytes.Equal(data, workflowYAML) {
+		t.Error("workflow.yaml content mismatch")
+	}
+
+	// state.json should have "custom" workflow type
+	stateData, err := os.ReadFile(filepath.Join(dir, "custom-plan", "phases", "impl", "state.json"))
+	if err != nil {
+		t.Fatalf("ReadFile state.json: %v", err)
+	}
+	var state arc.PhaseState
+	if err := json.Unmarshal(stateData, &state); err != nil {
+		t.Fatalf("Unmarshal state.json: %v", err)
+	}
+	if state.WorkflowType != "custom" {
+		t.Errorf("state.WorkflowType = %q, want %q", state.WorkflowType, "custom")
+	}
+}
+
+func TestCreatePlanCustomWorkflowDefaultsType(t *testing.T) {
+	dir := t.TempDir()
+
+	workflowYAML := []byte(`name: inline
+version: 1
+description: Inline workflow
+entry_state: impl
+terminal_states: [complete, blocked]
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    description: Done
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Blocked
+    prompt: prompts/common/blocked.md
+`)
+
+	// WorkflowType left empty — should default to "custom" when CustomWorkflow is provided
+	meta, err := Create(CreateOptions{
+		PlansDir:       dir,
+		Name:           "auto-custom",
+		Phases:         []string{"impl"},
+		CustomWorkflow: workflowYAML,
+	})
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+	if meta.WorkflowType != "custom" {
+		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "custom")
+	}
+}
+
 func TestCreatePlanUnknownWorkflowTypeError(t *testing.T) {
 	dir := t.TempDir()
 
