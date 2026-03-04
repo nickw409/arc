@@ -171,6 +171,14 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 			})
 		}
 
+		// Defensive: check if state transitioned to terminal during the run.
+		// This catches cases where RunState succeeded in transitioning but also
+		// returned an error (e.g., verdict extraction failed on a retry after
+		// the state was already updated by a prior successful attempt).
+		if ps, readErr := sf.Read(); readErr == nil && machine.IsTerminal(ps.CurrentState) {
+			return nil
+		}
+
 		if result.Err != nil {
 			if result.Action == arc.ActionRetry && !opts.ChatMode {
 				// One retry for session-level crash (process crash, non-zero exit)
@@ -191,7 +199,12 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 					})
 				}
 			}
+			// Check terminal again after retry — state may have been updated
+			// by a prior successful RunState call even though the retry failed.
 			if result.Err != nil {
+				if ps, readErr := sf.Read(); readErr == nil && machine.IsTerminal(ps.CurrentState) {
+					return nil
+				}
 				reason := result.Err.Error()
 				sf.Update(func(s *arc.PhaseState) error {
 					s.PhaseStatus = "blocked"
