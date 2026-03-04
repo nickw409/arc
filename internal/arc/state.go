@@ -76,9 +76,10 @@ type BlockedInfo struct {
 }
 
 type Dispute struct {
-	TestName   string  `json:"test_name"`
-	Reason     string  `json:"reason"`
-	Resolution *string `json:"resolution"`
+	TestName         string  `json:"test_name"`
+	Reason           string  `json:"reason"`
+	Resolution       *string `json:"resolution"`
+	ResolutionReason string  `json:"resolution_reason,omitempty"`
 }
 
 type VerdictEntry struct {

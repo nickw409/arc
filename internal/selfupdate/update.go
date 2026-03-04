@@ -103,12 +103,12 @@ func fetchUpdate(currentVersion, baseURL, goos, goarch string) (binData []byte, 
 		return nil, "", fmt.Errorf("checksums.txt not found in release %s", rel.TagName)
 	}
 
-	checksumData, err := downloadAsset(checksumAsset)
+	checksumData, err := downloadAsset(checksumAsset, limitMetadata)
 	if err != nil {
 		return nil, "", fmt.Errorf("downloading checksums: %w", err)
 	}
 
-	assetData, err := downloadAsset(tarAsset)
+	assetData, err := downloadAsset(tarAsset, limitBinary)
 	if err != nil {
 		return nil, "", fmt.Errorf("downloading asset: %w", err)
 	}
@@ -226,33 +226,38 @@ func extractBinary(tarGzData []byte) ([]byte, error) {
 	return nil, fmt.Errorf("arc binary not found in archive")
 }
 
+const (
+	limitBinary   = 100 * 1024 * 1024 // 100 MB for binary/tar assets
+	limitMetadata = 1 * 1024 * 1024   // 1 MB for JSON and checksum files
+)
+
 // downloadAsset downloads a release asset. For private repos (when a token is
 // available), it uses the GitHub API URL with Accept: application/octet-stream.
 // For public repos it uses the browser download URL directly.
-func downloadAsset(a *asset) ([]byte, error) {
+func downloadAsset(a *asset, limit int64) ([]byte, error) {
 	token := githubToken()
 	if token != "" && a.APIURL != "" {
 		if !isGitHubHost(a.APIURL) {
 			return nil, fmt.Errorf("refusing to send token to non-GitHub URL: %s", a.APIURL)
 		}
-		return authedGetBytes(a.APIURL, token, "application/octet-stream")
+		return authedGetBytes(a.APIURL, token, "application/octet-stream", limit)
 	}
-	return unauthGet(a.BrowserDownloadURL)
+	return unauthGet(a.BrowserDownloadURL, limit)
 }
 
 func downloadBytes(rawURL string) ([]byte, error) {
 	token := githubToken()
 	if token != "" && isGitHubHost(rawURL) {
-		return authedGetBytes(rawURL, token, "")
+		return authedGetBytes(rawURL, token, "", limitMetadata)
 	}
-	return unauthGet(rawURL)
+	return unauthGet(rawURL, limitMetadata)
 }
 
 // authedGetBytes performs an authenticated GET. The token is only sent if the
 // URL host is validated by the caller. A custom HTTP client is used that
 // refuses to follow redirects, preventing the token from leaking to
 // unexpected hosts via redirect chains.
-func authedGetBytes(rawURL, token, accept string) ([]byte, error) {
+func authedGetBytes(rawURL, token, accept string, limit int64) ([]byte, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -282,17 +287,17 @@ func authedGetBytes(rawURL, token, accept string) ([]byte, error) {
 		if loc == "" {
 			return nil, fmt.Errorf("redirect with no Location header from %s", rawURL)
 		}
-		return unauthGet(loc)
+		return unauthGet(loc, limit)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s returned %d", rawURL, resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
 // unauthGet performs an unauthenticated GET request.
-func unauthGet(rawURL string) ([]byte, error) {
+func unauthGet(rawURL string, limit int64) ([]byte, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, err
@@ -302,7 +307,7 @@ func unauthGet(rawURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s returned %d", rawURL, resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
 // isGitHubHost returns true if the URL points to a github.com host over HTTPS.

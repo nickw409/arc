@@ -57,7 +57,7 @@ func checkArtifact(phaseDir, artifact string) error {
 	if err != nil {
 		return fmt.Errorf("required artifact: invalid phase dir: %w", err)
 	}
-	if !strings.HasPrefix(resolved, absPhaseDir) {
+	if !strings.HasPrefix(resolved, absPhaseDir+string(os.PathSeparator)) && resolved != absPhaseDir {
 		return fmt.Errorf("required artifact path traversal: %s", artifact)
 	}
 

@@ -33,16 +33,24 @@ type AgentConfigRaw struct {
 }
 
 // ToAgentConfig converts raw string values to a typed AgentConfig.
-func (r *AgentConfigRaw) ToAgentConfig() *arc.AgentConfig {
+func (r *AgentConfigRaw) ToAgentConfig() (*arc.AgentConfig, error) {
 	if r == nil {
-		return nil
+		return nil, nil
+	}
+	maxTurns, err := parseInt(r.MaxTurns)
+	if err != nil {
+		return nil, fmt.Errorf("agent max_turns: %w", err)
+	}
+	timeout, err := parseInt(r.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("agent timeout: %w", err)
 	}
 	return &arc.AgentConfig{
-		MaxTurns:     parseInt(r.MaxTurns),
+		MaxTurns:     maxTurns,
 		AllowedTools: r.AllowedTools,
-		Timeout:      parseInt(r.Timeout),
+		Timeout:      timeout,
 		Model:        r.Model,
-	}
+	}, nil
 }
 
 // BlockState is a state definition within a block, using string-typed fields
@@ -241,9 +249,17 @@ func substituteParams(s string, params map[string]string) string {
 	})
 }
 
-// parseInt converts a string to int, returning 0 on failure.
-func parseInt(s string) int {
+// parseInt converts a string to int, returning an error for non-empty invalid values.
+// Empty strings return 0 with no error (unset parameter).
+func parseInt(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
 	var n int
-	fmt.Sscanf(strings.TrimSpace(s), "%d", &n)
-	return n
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q: %w", s, err)
+	}
+	return n, nil
 }

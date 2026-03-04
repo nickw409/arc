@@ -61,6 +61,9 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	if opts.TaskDescription == "" {
 		return nil, fmt.Errorf("task description is required")
 	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
 
 	plansDir := filepath.Join(opts.ProjectDir, ".plans", "active")
 
@@ -274,7 +277,7 @@ func reviewStatusForResult(result *DevResult) string {
 	if result.Reviewed {
 		return "approved"
 	}
-	return "approved" // skip-review also counts as approved for orchestrator
+	return "conditional" // skip-review: not reviewed, so mark conditional
 }
 
 func setReviewStatus(planDir, status string) error {
@@ -345,9 +348,21 @@ func GeneratePlanName(description string, plansDir string) string {
 	// Check for conflicts
 	base := name
 	suffix := 2
-	for {
+	for i := 0; ; i++ {
+		if i > 100 {
+			// Safety cap: give up after 100 attempts
+			h := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", description, suffix)))
+			name = fmt.Sprintf("%s-%x", base, h[:3])
+			break
+		}
 		path := filepath.Join(plansDir, name)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		_, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				break
+			}
+			// Non-ENOENT error (e.g. permission denied): stop looping
+			name = fmt.Sprintf("%s-%d", base, suffix)
 			break
 		}
 		name = fmt.Sprintf("%s-%d", base, suffix)

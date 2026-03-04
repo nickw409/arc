@@ -74,9 +74,10 @@ REJECT_DISPUTE: <reason> — if the test is correct and the implementation shoul
 	}
 
 	output := strings.TrimSpace(result.Output)
-	if strings.HasPrefix(strings.ToUpper(output), "APPROVE_DISPUTE") {
-		reason := strings.TrimPrefix(output, "APPROVE_DISPUTE:")
-		reason = strings.TrimPrefix(strings.ToUpper(output), "APPROVE_DISPUTE:")
+	upper := strings.ToUpper(output)
+	if strings.HasPrefix(upper, "APPROVE_DISPUTE") {
+		reason := output[len("APPROVE_DISPUTE"):]
+		reason = strings.TrimPrefix(reason, ":")
 		return &DisputeResolution{Approve: true, Reason: strings.TrimSpace(reason)}, nil
 	}
 

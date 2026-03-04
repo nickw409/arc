@@ -58,7 +58,8 @@ func newValidateCmd() *cobra.Command {
 			printReport(cmd, report)
 
 			if report.Verdict == "fail" {
-				os.Exit(1)
+				cmd.SilenceUsage = true
+				return fmt.Errorf("audit failed: verdict=%s", report.Verdict)
 			}
 			return nil
 		},

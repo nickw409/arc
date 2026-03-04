@@ -185,6 +185,9 @@ func TestRejectDispute(t *testing.T) {
 	if len(got.LastClearedDisputes) != 1 {
 		t.Fatalf("len(LastClearedDisputes) = %d, want 1", len(got.LastClearedDisputes))
 	}
+	if got.LastClearedDisputes[0].ResolutionReason != "test is correct" {
+		t.Fatalf("LastClearedDisputes[0].ResolutionReason = %q, want %q", got.LastClearedDisputes[0].ResolutionReason, "test is correct")
+	}
 }
 
 func TestRejectDisputeEmptyDisputes(t *testing.T) {
@@ -233,6 +236,9 @@ func TestApproveDispute(t *testing.T) {
 	}
 	if *got.Disputes[0].Resolution != "approved" {
 		t.Fatalf("Disputes[0].Resolution = %q, want %q", *got.Disputes[0].Resolution, "approved")
+	}
+	if got.Disputes[0].ResolutionReason != "fix the test" {
+		t.Fatalf("Disputes[0].ResolutionReason = %q, want %q", got.Disputes[0].ResolutionReason, "fix the test")
 	}
 }
 

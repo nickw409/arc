@@ -68,7 +68,9 @@ func runTestsAction(ctx context.Context, params map[string]string, actx ActionCo
 	output, err := cmd.CombinedOutput()
 
 	if saveTo, ok := params["save_to"]; ok && saveTo != "" {
-		_ = os.WriteFile(filepath.Join(actx.PhaseDir, saveTo), output, 0644)
+		if writeErr := os.WriteFile(filepath.Join(actx.PhaseDir, saveTo), output, 0644); writeErr != nil {
+			return fmt.Errorf("writing test output to %s: %w", saveTo, writeErr)
+		}
 	}
 
 	return err

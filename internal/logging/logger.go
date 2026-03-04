@@ -22,6 +22,11 @@ func NewFileLogger(path string) (*slog.Logger, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("creating log file: %w", err)

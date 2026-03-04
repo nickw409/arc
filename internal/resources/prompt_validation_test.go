@@ -20,7 +20,10 @@ type workflowStateRef struct {
 // allPromptPaths returns all embedded .md prompt paths via the exported ListPrompts.
 func allPromptPaths(t *testing.T) []string {
 	t.Helper()
-	paths := resources.ListPrompts()
+	paths, err := resources.ListPrompts()
+	if err != nil {
+		t.Fatalf("ListPrompts failed: %v", err)
+	}
 	if len(paths) == 0 {
 		t.Fatal("no prompt files found in embedded resources")
 	}

@@ -162,14 +162,14 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 				}); commitErr != nil {
 					opts.Logger.Warn("pre-merge commit failed", "error", commitErr)
 				} else if hash != "" {
-					fmt.Printf("Committed uncommitted worktree changes: %s\n", hash[:7])
+					fmt.Printf("Committed uncommitted worktree changes: %s\n", shortHash(hash))
 				}
 
 				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
 					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
 				} else {
-					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, hash[:7])
+					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, shortHash(hash))
 					worktree.Remove(sharedWorktree)
 				}
 			}
@@ -241,14 +241,14 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 				}); commitErr != nil {
 					opts.Logger.Warn("pre-merge commit failed", "error", commitErr)
 				} else if hash != "" {
-					fmt.Printf("Committed uncommitted worktree changes: %s\n", hash[:7])
+					fmt.Printf("Committed uncommitted worktree changes: %s\n", shortHash(hash))
 				}
 
 				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
 					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
 				} else {
-					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, hash[:7])
+					fmt.Printf("Merged worktree branch %s: %s\n", sharedWorktree.Branch, shortHash(hash))
 					worktree.Remove(sharedWorktree)
 				}
 			}
@@ -306,6 +306,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		// When StopOnFailure is set, use a child context so we can cancel
 		// sibling phases in the same batch on first failure.
 		batchCtx, batchCancel := context.WithCancel(ctx)
+		defer batchCancel()
 
 		for _, phase := range toRun {
 			running[phase] = true
@@ -382,6 +383,14 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 			return buildResult("failed", failedPhase, fatalErr.Error()), fatalErr
 		}
 	}
+}
+
+// shortHash returns the first 7 characters of a hash, or the full string if shorter.
+func shortHash(hash string) string {
+	if len(hash) >= 7 {
+		return hash[:7]
+	}
+	return hash
 }
 
 func loadAllPhaseStates(planDir string, phases []string) map[string]*arc.PhaseState {

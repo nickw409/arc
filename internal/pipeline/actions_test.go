@@ -277,3 +277,56 @@ func TestRunActionCommitNoSigning(t *testing.T) {
 	err := RunAction(context.Background(), "commit", map[string]string{"message": "test"}, actx)
 	_ = err
 }
+
+// TestRunTestsActionSaveToWriteError verifies that if the save_to destination
+// cannot be written (e.g. parent directory is read-only), runTestsAction returns
+// an error rather than silently discarding it.
+func TestRunTestsActionSaveToWriteError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — cannot test read-only directory permission enforcement")
+	}
+
+	arcHome := t.TempDir()
+	phaseDir := t.TempDir()
+
+	// Create a runner script that exits 0 (so the exec error is nil and save_to is reached).
+	scriptDir := filepath.Join(arcHome, "scripts")
+	if err := os.MkdirAll(scriptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(scriptDir, "run-phase-tests.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho 'test output'\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a read-only subdirectory inside phaseDir that will be the save_to target's parent.
+	roDir := filepath.Join(phaseDir, "readonly")
+	if err := os.MkdirAll(roDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(roDir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0755) })
+
+	state := arc.NewPhaseState("plan", "phase", "feature")
+	state.TestFiles = []string{"tests/foo_test.go"}
+
+	actx := ActionContext{
+		PhaseDir: phaseDir,
+		Config:   &config.Config{Runner: "go-test"},
+		State:    state,
+		ArcHome:  arcHome,
+	}
+
+	// save_to points into the read-only directory — write must fail.
+	err := RunAction(context.Background(), "run_tests", map[string]string{
+		"save_to": "readonly/results.txt",
+	}, actx)
+	if err == nil {
+		t.Fatal("expected error when save_to destination is not writable")
+	}
+	if !strings.Contains(err.Error(), "writing test output") {
+		t.Fatalf("expected error about 'writing test output', got: %v", err)
+	}
+}

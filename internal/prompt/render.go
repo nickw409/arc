@@ -13,6 +13,18 @@ import (
 	"github.com/nwiley/arc/internal/resources"
 )
 
+// Package-level compiled regexes for preprocessHandlebars.
+var (
+	partialRe      = regexp.MustCompile(`(?m)^\s*\{\{>\s+([^}]+?)\s*\}\}\s*$\n?`)
+	pipeDefaultRe  = regexp.MustCompile(`\{\{(\w+)\.(\w+)\s*\|\s*default:\s*"([^"]*)"\}\}`)
+	dotAccessRe    = regexp.MustCompile(`\{\{(\w+)\.(\w+)\}\}`)
+	ifDotRe        = regexp.MustCompile(`\{\{#if\s+(\w+)\.(\w+)\}\}`)
+	unlessDotRe    = regexp.MustCompile(`\{\{#unless\s+(\w+)\.(\w+)\}\}`)
+	ifBareRe       = regexp.MustCompile(`\{\{#if\s+(\w+)\}\}`)
+	unlessBareRe   = regexp.MustCompile(`\{\{#unless\s+(\w+)\}\}`)
+	bareIdentRe    = regexp.MustCompile(`\{\{(\w+)\}\}`)
+)
+
 // TemplateContext contains all variables available during prompt rendering.
 type TemplateContext struct {
 	Phase          string
@@ -42,10 +54,13 @@ func Render(promptPath string, ctx TemplateContext) (string, error) {
 }
 
 // preprocessHandlebars converts Handlebars-style syntax to Go template syntax.
-func preprocessHandlebars(s string) string {
+func preprocessHandlebars(s string) (string, error) {
 	// Inline partial includes {{> path/to/file.md}} by loading from embedded resources.
-	partialRe := regexp.MustCompile(`(?m)^\s*\{\{>\s+([^}]+?)\s*\}\}\s*$\n?`)
+	var partialErr error
 	s = partialRe.ReplaceAllStringFunc(s, func(match string) string {
+		if partialErr != nil {
+			return ""
+		}
 		parts := partialRe.FindStringSubmatch(match)
 		if len(parts) < 2 {
 			return ""
@@ -53,28 +68,26 @@ func preprocessHandlebars(s string) string {
 		partialPath := parts[1]
 		content, err := resources.PromptBytes(partialPath)
 		if err != nil {
-			// If partial not found, remove the line silently (backwards compat)
+			partialErr = fmt.Errorf("partial include %q not found: %w", partialPath, err)
 			return ""
 		}
 		return string(content)
 	})
+	if partialErr != nil {
+		return "", partialErr
+	}
 
 	// Handle {{X.Y | default: "Z"}} pipe syntax with default values.
-	// Convert to: {{index .X "Y"}}  (drop the default, index will handle missing keys)
-	pipeDefaultRe := regexp.MustCompile(`\{\{(\w+)\.(\w+)\s*\|\s*default:\s*"([^"]*)"\}\}`)
 	s = pipeDefaultRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := pipeDefaultRe.FindStringSubmatch(match)
 		mapName := parts[1]
 		key := parts[2]
 		defaultVal := parts[3]
-		// Use a custom "defaultIndex" call: tries the map, falls back to default
 		capName := capitalize(mapName)
 		return fmt.Sprintf(`{{defaultIndex .%s "%s" "%s"}}`, capName, key, defaultVal)
 	})
 
 	// Handle {{X.Y}} dot-access without pipes.
-	// Convert to: {{safeGet .X "Y"}} — lenient lookup returning "" for nil/missing.
-	dotAccessRe := regexp.MustCompile(`\{\{(\w+)\.(\w+)\}\}`)
 	s = dotAccessRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := dotAccessRe.FindStringSubmatch(match)
 		mapName := parts[1]
@@ -84,7 +97,6 @@ func preprocessHandlebars(s string) string {
 	})
 
 	// {{#if X.Y}} -> {{if hasKey .X "Y"}} for map field access in conditionals
-	ifDotRe := regexp.MustCompile(`\{\{#if\s+(\w+)\.(\w+)\}\}`)
 	s = ifDotRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := ifDotRe.FindStringSubmatch(match)
 		mapName := parts[1]
@@ -94,7 +106,6 @@ func preprocessHandlebars(s string) string {
 	})
 
 	// {{#unless X.Y}} -> {{if not (hasKey .X "Y")}}
-	unlessDotRe := regexp.MustCompile(`\{\{#unless\s+(\w+)\.(\w+)\}\}`)
 	s = unlessDotRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := unlessDotRe.FindStringSubmatch(match)
 		mapName := parts[1]
@@ -104,31 +115,30 @@ func preprocessHandlebars(s string) string {
 	})
 
 	// {{#if X}} -> {{if .X}} (where X is a bare identifier)
-	s = regexp.MustCompile(`\{\{#if\s+(\w+)\}\}`).ReplaceAllString(s, "{{if .$1}}")
+	s = ifBareRe.ReplaceAllString(s, "{{if .$1}}")
 
 	// {{#unless X}} -> {{if not .X}}
-	s = regexp.MustCompile(`\{\{#unless\s+(\w+)\}\}`).ReplaceAllString(s, "{{if not .$1}}")
+	s = unlessBareRe.ReplaceAllString(s, "{{if not .$1}}")
 
 	// {{/if}} and {{/unless}} -> {{end}}
 	s = strings.ReplaceAll(s, "{{/if}}", "{{end}}")
 	s = strings.ReplaceAll(s, "{{/unless}}", "{{end}}")
 
 	// Bare {{identifier}} -> {{.identifier}} for all non-keywords
-	bareRe := regexp.MustCompile(`\{\{(\w+)\}\}`)
 	goKeywords := map[string]bool{
 		"if": true, "else": true, "end": true, "range": true,
 		"with": true, "block": true, "define": true, "template": true,
 		"nil": true, "not": true, "and": true, "or": true,
 	}
-	s = bareRe.ReplaceAllStringFunc(s, func(match string) string {
-		inner := bareRe.FindStringSubmatch(match)[1]
+	s = bareIdentRe.ReplaceAllStringFunc(s, func(match string) string {
+		inner := bareIdentRe.FindStringSubmatch(match)[1]
 		if goKeywords[inner] {
 			return match
 		}
 		return fmt.Sprintf("{{.%s}}", inner)
 	})
 
-	return s
+	return s, nil
 }
 
 // capitalize returns a string with its first letter uppercased.
@@ -277,7 +287,10 @@ func RenderString(tmplStr string, ctx TemplateContext) (string, error) {
 		}
 	}
 
-	processed := preprocessHandlebars(tmplStr)
+	processed, err := preprocessHandlebars(tmplStr)
+	if err != nil {
+		return "", err
+	}
 
 	funcMap := template.FuncMap{
 		"index":        safeIndex,
@@ -302,7 +315,16 @@ func RenderString(tmplStr string, ctx TemplateContext) (string, error) {
 
 // ValidateTemplate parses a template and executes against placeholder context.
 func ValidateTemplate(tmplStr string) error {
-	t, err := template.New("validate").Parse(tmplStr)
+	processed, err := preprocessHandlebars(tmplStr)
+	if err != nil {
+		return err
+	}
+	t, err := template.New("validate").Funcs(template.FuncMap{
+		"index":        safeIndex,
+		"safeGet":      safeGet,
+		"defaultIndex": defaultIndex,
+		"hasKey":       hasKey,
+	}).Parse(processed)
 	if err != nil {
 		return err
 	}

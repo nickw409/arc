@@ -3,7 +3,6 @@ package block
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/nwiley/arc/internal/arc"
@@ -65,7 +64,10 @@ func ComposeSequential(blocks []ResolvedBlock) (*arc.Workflow, error) {
 		}
 
 		for _, bs := range resolved.States {
-			sc := blockStateToConfig(bs, prefix, rb.Params)
+			sc, err := blockStateToConfig(bs, prefix, rb.Params)
+			if err != nil {
+				return nil, err
+			}
 
 			// Wire exit references ($exit_name) to next block or terminal
 			if sc.Transition.Branches != nil {
@@ -235,7 +237,10 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 			prefix := rb.Name
 
 			for _, bs := range rb.Block.States {
-				sc := blockStateToConfig(bs, prefix, rb.Params)
+				sc, err := blockStateToConfig(bs, prefix, rb.Params)
+				if err != nil {
+					return nil, nil, err
+				}
 				if sc.Transition.Branches != nil {
 					for verdict, target := range sc.Transition.Branches {
 						if isExitRef(target) {
@@ -379,7 +384,7 @@ func ComposePipeline(steps []PipelineStep, blockDefs map[string]*Block) (*arc.Wo
 }
 
 // blockStateToConfig converts a BlockState to an arc.StateConfig with namespaced name.
-func blockStateToConfig(bs BlockState, prefix string, params map[string]string) arc.StateConfig {
+func blockStateToConfig(bs BlockState, prefix string, params map[string]string) (arc.StateConfig, error) {
 	// Copy params to prevent aliasing — each state gets its own map.
 	var paramsCopy map[string]string
 	if params != nil {
@@ -388,18 +393,28 @@ func blockStateToConfig(bs BlockState, prefix string, params map[string]string) 
 			paramsCopy[k] = v
 		}
 	}
+	agentCfg, err := bs.Agent.ToAgentConfig()
+	if err != nil {
+		return arc.StateConfig{}, fmt.Errorf("state %s.%s: %w", prefix, bs.Name, err)
+	}
 	sc := arc.StateConfig{
 		Name:        prefix + "." + bs.Name,
 		Description: bs.Description,
 		Prompt:      bs.Prompt,
 		Verdicts:    bs.Verdicts,
-		Agent:       bs.Agent.ToAgentConfig(),
+		Agent:       agentCfg,
 		Params:      paramsCopy,
 	}
 
 	if bs.Constraints != nil {
-		maxIter := parseInt(bs.Constraints.MaxIterations)
-		maxStateIter := parseInt(bs.Constraints.MaxStateIterations)
+		maxIter, err := parseInt(bs.Constraints.MaxIterations)
+		if err != nil {
+			return arc.StateConfig{}, fmt.Errorf("state %s.%s constraints max_iterations: %w", prefix, bs.Name, err)
+		}
+		maxStateIter, err := parseInt(bs.Constraints.MaxStateIterations)
+		if err != nil {
+			return arc.StateConfig{}, fmt.Errorf("state %s.%s constraints max_state_iterations: %w", prefix, bs.Name, err)
+		}
 		if maxIter > 0 || maxStateIter > 0 || bs.Constraints.OnMaxIterations != "" {
 			sc.Constraints = &arc.ConstraintConfig{
 				MaxIterations:      maxIter,
@@ -417,7 +432,7 @@ func blockStateToConfig(bs BlockState, prefix string, params map[string]string) 
 		sc.Transition = arc.Transition{Branches: branches}
 	}
 
-	return sc
+	return sc, nil
 }
 
 // isExitRef returns true if a target is an exit reference (starts with "$").
@@ -511,10 +526,10 @@ func mergeBlockAgentConfigs(blocks []ResolvedBlock) *arc.AgentConfig {
 		for _, bs := range rb.Block.States {
 			if bs.Name == rb.Block.Entry && bs.Agent != nil {
 				ac := bs.Agent
-				if mt := parseInt(ac.MaxTurns); mt > maxTurns {
+				if mt, err := parseInt(ac.MaxTurns); err == nil && mt > maxTurns {
 					maxTurns = mt
 				}
-				if to := parseInt(ac.Timeout); to > timeout {
+				if to, err := parseInt(ac.Timeout); err == nil && to > timeout {
 					timeout = to
 				}
 				for _, t := range ac.AllowedTools {
@@ -545,8 +560,3 @@ func mergeBlockAgentConfigs(blocks []ResolvedBlock) *arc.AgentConfig {
 	}
 }
 
-// intFromString converts a string to int, ignoring errors.
-func intFromString(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
-}

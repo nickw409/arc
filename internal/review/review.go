@@ -71,7 +71,9 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 	planMDPath := filepath.Join(planDir, "phases", opts.Phase, "plan.md")
 	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
 	reviewsDir := filepath.Join(planDir, "reviews")
-	os.MkdirAll(reviewsDir, 0755)
+	if err := os.MkdirAll(reviewsDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating reviews directory: %w", err)
+	}
 
 	result := &ReviewResult{
 		Verdicts: make(map[string]AdversaryResult),
@@ -132,7 +134,9 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 			}
 			hasNonCached = true
 			outPath := filepath.Join(reviewsDir, opts.Phase+"_"+v.Name+".md")
-			os.WriteFile(outPath, []byte(v.Output), 0644)
+			if err := os.WriteFile(outPath, []byte(v.Output), 0644); err != nil {
+				opts.Logger.Warn("failed to write adversary output file", "path", outPath, "error", err)
+			}
 			history.Phases[opts.Phase][v.Name] = historyEntry{
 				Hash:      hash,
 				Verdict:   v.Verdict,
@@ -143,7 +147,9 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		if hasNonCached {
 			history.Iterations[opts.Phase]++
 		}
-		SaveHistory(histPath, history)
+		if err := SaveHistory(histPath, history); err != nil {
+			opts.Logger.Warn("failed to save adversary history", "error", err)
+		}
 
 		status := determineReviewStatus(verdicts)
 		currentIteration := history.Iterations[opts.Phase]
@@ -188,7 +194,9 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		if len(merged) > 0 {
 			planMD, applied = ApplySuggestions(planMD, merged)
 			if applied > 0 {
-				os.WriteFile(planMDPath, []byte(planMD), 0644)
+				if err := os.WriteFile(planMDPath, []byte(planMD), 0644); err != nil {
+					return nil, fmt.Errorf("writing updated plan.md for phase %s: %w", opts.Phase, err)
+				}
 			}
 		}
 

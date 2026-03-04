@@ -38,7 +38,11 @@ func TestQABlockStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("expected max_turns param")
 	}
-	if parseInt(param.Default) <= 0 {
+	val, err := parseInt(param.Default)
+	if err != nil {
+		t.Fatalf("parseInt failed: %v", err)
+	}
+	if val <= 0 {
 		t.Errorf("max_turns default must be positive, got %q", param.Default)
 	}
 
@@ -94,7 +98,11 @@ func TestQAReviewBlockStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("expected max_turns param")
 	}
-	if parseInt(param.Default) <= 0 {
+	val, err := parseInt(param.Default)
+	if err != nil {
+		t.Fatalf("parseInt failed: %v", err)
+	}
+	if val <= 0 {
 		t.Errorf("max_turns default must be positive, got %q", param.Default)
 	}
 

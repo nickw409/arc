@@ -111,24 +111,30 @@ func findWorktreeDir(projectDir, branch string) string {
 
 // Remove cleans up the worktree directory and prunes git worktree metadata.
 func Remove(wt *Worktree) error {
+	var removeErr error
+
 	// Remove the worktree
 	cmd := exec.Command("git", "worktree", "remove", "--force", wt.Dir)
 	cmd.Dir = wt.ProjectDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// Try manual cleanup if the command fails
-		os.RemoveAll(wt.Dir)
+		removeErr = fmt.Errorf("git worktree remove: %s: %w", strings.TrimSpace(string(out)), err)
+		// Fall back to manual cleanup
+		if fsErr := os.RemoveAll(wt.Dir); fsErr != nil && removeErr != nil {
+			removeErr = fmt.Errorf("git worktree remove and os.RemoveAll both failed: git: %w; fs: %v", removeErr, fsErr)
+		} else if fsErr == nil {
+			removeErr = nil
+		}
 		pruneCmd := exec.Command("git", "worktree", "prune")
 		pruneCmd.Dir = wt.ProjectDir
 		pruneCmd.Run()
-		_ = out
 	}
 
-	// Delete the branch
-	cmd = exec.Command("git", "branch", "-D", wt.Branch)
-	cmd.Dir = wt.ProjectDir
-	cmd.Run() // best-effort; branch may already be deleted
+	// Delete the branch (best-effort; branch may already be deleted)
+	branchCmd := exec.Command("git", "branch", "-D", wt.Branch)
+	branchCmd.Dir = wt.ProjectDir
+	branchCmd.Run()
 
-	return nil
+	return removeErr
 }
 
 // CleanupPlan removes all worktrees associated with a plan.

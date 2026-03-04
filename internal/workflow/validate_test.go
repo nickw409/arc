@@ -280,6 +280,24 @@ func TestValidateExtraBranchKey(t *testing.T) {
 	}
 }
 
+func TestValidateNilWorkflow(t *testing.T) {
+	// Validate(nil) should return an error and not panic.
+	errs := Validate(nil)
+	if len(errs) == 0 {
+		t.Fatal("Validate(nil) should return at least one error")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "nil") || strings.Contains(e.Error(), "workflow") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Validate(nil) error should mention 'workflow' or 'nil', got: %v", errs)
+	}
+}
+
 func TestValidateEntryNotFound(t *testing.T) {
 	w := &arc.Workflow{
 		Name:           "entry-missing",

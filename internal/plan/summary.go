@@ -5,12 +5,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
 )
+
+// commitHashRe matches valid git commit hashes (4–40 hex chars).
+var commitHashRe = regexp.MustCompile(`^[0-9a-f]{4,40}$`)
 
 // SummaryOptions configures summary generation.
 type SummaryOptions struct {
@@ -215,6 +219,9 @@ func CollectChangedFiles(projectDir string, commits []string) ([]string, error) 
 	for _, hash := range commits {
 		if hash == "" {
 			continue
+		}
+		if !commitHashRe.MatchString(hash) {
+			continue // skip invalid commit hashes
 		}
 
 		cmd := exec.Command("git", "log", "--name-only", "--format=", hash, "-n", "1")

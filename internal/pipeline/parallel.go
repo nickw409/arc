@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
-
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
@@ -16,6 +16,9 @@ import (
 	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/state"
 )
+
+// validBranchName matches branch names composed of alphanumerics, hyphens, and underscores.
+var validBranchName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // RunParallelOptions configures a parallel execution run.
 type RunParallelOptions struct {
@@ -48,6 +51,13 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 	branchNames := make([]string, len(cfg.Branches))
 	for i, b := range cfg.Branches {
 		branchNames[i] = b.Name
+	}
+
+	// Validate branch names before launching goroutines.
+	for _, b := range cfg.Branches {
+		if !validBranchName.MatchString(b.Name) {
+			return "", arc.Usage{}, fmt.Errorf("invalid branch name %q", b.Name)
+		}
 	}
 
 	if err := state.StartParallel(opts.StateFile, resultsDir, branchNames); err != nil {
@@ -129,9 +139,13 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 
 			// Write log and exit code
 			if spawnResult != nil {
-				os.WriteFile(filepath.Join(resultsDir, b.Name+".log"), []byte(spawnResult.Output), 0644)
+				if writeErr := os.WriteFile(filepath.Join(resultsDir, b.Name+".log"), []byte(spawnResult.Output), 0644); writeErr != nil {
+					slog.Warn("failed to write branch output", "branch", b.Name, "error", writeErr)
+				}
 			}
-			os.WriteFile(filepath.Join(resultsDir, b.Name+".exit"), []byte(fmt.Sprintf("%d", exitCode)), 0644)
+			if writeErr := os.WriteFile(filepath.Join(resultsDir, b.Name+".exit"), []byte(fmt.Sprintf("%d", exitCode)), 0644); writeErr != nil {
+				slog.Warn("failed to write branch output", "branch", b.Name, "error", writeErr)
+			}
 
 			status := "complete"
 			if exitCode != 0 {

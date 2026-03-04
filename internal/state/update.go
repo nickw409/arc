@@ -31,6 +31,9 @@ func FileDispute(sf *StateFile, testName, reason string) error {
 // and moves cleared disputes to last_cleared_disputes for audit.
 func RejectDispute(sf *StateFile, reason string) error {
 	return sf.Update(func(s *arc.PhaseState) error {
+		for i := range s.Disputes {
+			s.Disputes[i].ResolutionReason = reason
+		}
 		s.LastClearedDisputes = s.Disputes
 		s.Disputes = []arc.Dispute{}
 		s.PhaseStatus = "implementing"
@@ -44,6 +47,7 @@ func ApproveDispute(sf *StateFile, reason string) error {
 		approved := "approved"
 		for i := range s.Disputes {
 			s.Disputes[i].Resolution = &approved
+			s.Disputes[i].ResolutionReason = reason
 		}
 		return nil
 	})

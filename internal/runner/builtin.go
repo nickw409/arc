@@ -186,11 +186,6 @@ func deduplicateSubtests(names []string) []string {
 	if len(names) <= 1 {
 		return names
 	}
-	// Build set for quick lookup
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
-	}
 	var result []string
 	for _, n := range names {
 		// Keep this name only if no other name has it as a prefix (parent)

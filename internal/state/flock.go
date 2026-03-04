@@ -10,7 +10,7 @@ import (
 
 // FlockUpdate acquires an exclusive filesystem-level lock, reads state,
 // applies fn, writes state, and releases the lock.
-func FlockUpdate(path string, fn func(state *arc.PhaseState) error) error {
+func FlockUpdate(path string, fn func(state *arc.PhaseState) error) (retErr error) {
 	lockPath := path + ".lock"
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
@@ -21,7 +21,11 @@ func FlockUpdate(path string, fn func(state *arc.PhaseState) error) error {
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("acquiring flock: %w", err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if unlockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); unlockErr != nil && retErr == nil {
+			retErr = fmt.Errorf("releasing flock: %w", unlockErr)
+		}
+	}()
 
 	state, err := readState(path)
 	if err != nil {

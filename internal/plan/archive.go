@@ -21,6 +21,9 @@ type ArchiveOptions struct {
 
 // Archive moves a plan from active to archive after validating all phases are terminal.
 func Archive(opts ArchiveOptions) error {
+	if err := validateName(opts.PlanName); err != nil {
+		return fmt.Errorf("plan name: %w", err)
+	}
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
 
 	if _, err := os.Stat(planDir); os.IsNotExist(err) {

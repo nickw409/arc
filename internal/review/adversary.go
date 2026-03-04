@@ -222,9 +222,15 @@ func LoadHistory(path string) *historyFile {
 }
 
 // SaveHistory writes the adversary history file.
-func SaveHistory(path string, history *historyFile) {
-	data, _ := json.MarshalIndent(history, "", "  ")
-	os.WriteFile(path, data, 0644)
+func SaveHistory(path string, history *historyFile) error {
+	data, err := json.MarshalIndent(history, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling adversary history: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing adversary history %s: %w", path, err)
+	}
+	return nil
 }
 
 func newHistoryFile() *historyFile {

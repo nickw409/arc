@@ -26,8 +26,14 @@ func newPlanCmd() *cobra.Command {
 				workflowType = "feature"
 			}
 
-			projectRoot, _ := os.Getwd()
-			homeDir, _ := os.UserHomeDir()
+			projectRoot, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
 			resolver := resources.NewResolver(projectRoot, homeDir)
 
 			meta, err := plan.Create(plan.CreateOptions{

@@ -105,6 +105,9 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 	// nested-session check when arc is invoked from within Claude Code.
 	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 
@@ -302,6 +305,9 @@ func buildStreamResult(ctx context.Context, timeoutCtx context.Context, waitErr 
 	if output.result != nil {
 		result.Output = output.result.Result
 		result.Usage = usageFromStreamResult(output.result)
+		if output.result.IsError {
+			result.ExitCode = 1
+		}
 	} else {
 		// No result message — fallback to raw lines
 		raw := strings.Join(output.rawLines, "\n")

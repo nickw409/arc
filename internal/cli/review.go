@@ -31,13 +31,7 @@ func newReviewCmd() *cobra.Command {
 				model = defaultReviewModel
 			}
 
-			arcHome := os.Getenv("ARC_HOME")
-			if arcHome == "" {
-				ex, err := os.Executable()
-				if err == nil {
-					arcHome = filepath.Dir(filepath.Dir(ex))
-				}
-			}
+			arcHome := resolveArcHome()
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,

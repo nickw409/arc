@@ -89,11 +89,13 @@ func runDirectPlanLoop(ctx context.Context, opts LaunchOptions, planDir string, 
 			} else if sessionSummary != "" {
 				reason = fmt.Sprintf("session ended without completing phase (output: %s)", sessionSummary)
 			}
-			_ = sf.Update(func(s *arc.PhaseState) error {
+			if err := sf.Update(func(s *arc.PhaseState) error {
 				s.PhaseStatus = "blocked"
 				s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
 				return nil
-			})
+			}); err != nil {
+				opts.Logger.Warn("failed to persist blocked state", "error", err)
+			}
 			blockedPhases = append(blockedPhases, phaseName)
 		}
 	}

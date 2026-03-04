@@ -37,7 +37,11 @@ var phaseErrorKindNames = [...]string{
 
 // Error formats as "[phase/state] kind: message" or "[phase/state] kind: message: cause".
 func (e *PhaseError) Error() string {
-	s := fmt.Sprintf("[%s/%s] %s: %s", e.Phase, e.State, phaseErrorKindNames[e.Kind], e.Message)
+	kindName := "unknown"
+	if int(e.Kind) >= 0 && int(e.Kind) < len(phaseErrorKindNames) {
+		kindName = phaseErrorKindNames[e.Kind]
+	}
+	s := fmt.Sprintf("[%s/%s] %s: %s", e.Phase, e.State, kindName, e.Message)
 	if e.Cause != nil {
 		s += ": " + e.Cause.Error()
 	}

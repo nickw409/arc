@@ -16,6 +16,9 @@ func ReadPlan(planDir string) (*arc.PlanMeta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading plan file %s: %w", path, err)
 	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("plan file %s is empty", path)
+	}
 	var meta arc.PlanMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parsing plan file %s: %w", path, err)

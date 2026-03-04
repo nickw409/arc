@@ -45,13 +45,7 @@ func newDevCmd() *cobra.Command {
 			}
 
 			// Resolve ARC_HOME
-			arcHome := os.Getenv("ARC_HOME")
-			if arcHome == "" {
-				ex, err := os.Executable()
-				if err == nil {
-					arcHome = filepath.Dir(filepath.Dir(ex))
-				}
-			}
+			arcHome := resolveArcHome()
 
 			// Set up context with signal handling
 			ctx, cancel := context.WithCancel(context.Background())

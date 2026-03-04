@@ -39,8 +39,27 @@ type DeferOptions struct {
 
 // Split marks the original phase as split and creates sub-phases that replace it.
 func Split(opts SplitOptions) error {
+	if err := validateName(opts.PlanName); err != nil {
+		return fmt.Errorf("plan name: %w", err)
+	}
 	if len(opts.SubNames) < 2 {
 		return fmt.Errorf("split requires at least 2 sub-phase names")
+	}
+
+	// Validate each sub-name
+	for _, sub := range opts.SubNames {
+		if err := validateName(sub); err != nil {
+			return fmt.Errorf("sub-phase name: %w", err)
+		}
+	}
+
+	// Check for duplicates among sub-names
+	subSeen := make(map[string]bool, len(opts.SubNames))
+	for _, sub := range opts.SubNames {
+		if subSeen[sub] {
+			return fmt.Errorf("duplicate sub-phase name %q", sub)
+		}
+		subSeen[sub] = true
 	}
 
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
@@ -48,6 +67,19 @@ func Split(opts SplitOptions) error {
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
 		return fmt.Errorf("reading plan: %w", err)
+	}
+
+	// Check for conflicts with existing phases (excluding the phase being split)
+	existingPhases := make(map[string]bool, len(meta.Phases))
+	for _, p := range meta.Phases {
+		if p != opts.Phase {
+			existingPhases[p] = true
+		}
+	}
+	for _, sub := range opts.SubNames {
+		if existingPhases[sub] {
+			return fmt.Errorf("sub-phase name %q conflicts with an existing phase", sub)
+		}
 	}
 
 	// Validate original phase exists
@@ -165,8 +197,27 @@ func Split(opts SplitOptions) error {
 
 // Insert inserts new phases before or after a reference phase.
 func Insert(opts InsertOptions) error {
+	if err := validateName(opts.PlanName); err != nil {
+		return fmt.Errorf("plan name: %w", err)
+	}
 	if len(opts.NewNames) == 0 {
 		return fmt.Errorf("no new phase names specified")
+	}
+
+	// Validate each new name
+	for _, name := range opts.NewNames {
+		if err := validateName(name); err != nil {
+			return fmt.Errorf("new phase name: %w", err)
+		}
+	}
+
+	// Check for duplicates among new names
+	newSeen := make(map[string]bool, len(opts.NewNames))
+	for _, name := range opts.NewNames {
+		if newSeen[name] {
+			return fmt.Errorf("duplicate new phase name %q", name)
+		}
+		newSeen[name] = true
 	}
 
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
@@ -174,6 +225,17 @@ func Insert(opts InsertOptions) error {
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
 		return fmt.Errorf("reading plan: %w", err)
+	}
+
+	// Check for conflicts with existing phases
+	existingPhases := make(map[string]bool, len(meta.Phases))
+	for _, p := range meta.Phases {
+		existingPhases[p] = true
+	}
+	for _, name := range opts.NewNames {
+		if existingPhases[name] {
+			return fmt.Errorf("new phase name %q conflicts with an existing phase", name)
+		}
 	}
 
 	// Validate ref phase exists

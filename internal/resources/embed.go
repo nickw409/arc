@@ -2,6 +2,7 @@ package resources
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -61,18 +62,21 @@ func ListWorkflows() []string {
 }
 
 // ListPrompts returns all prompt file paths relative to "prompts/" (e.g., "feature/qa.md").
-func ListPrompts() []string {
+func ListPrompts() ([]string, error) {
 	var paths []string
-	fs.WalkDir(promptsFS, "prompts", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := fs.WalkDir(promptsFS, "prompts", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if !d.IsDir() && strings.HasSuffix(path, ".md") {
 			paths = append(paths, strings.TrimPrefix(path, "prompts/"))
 		}
 		return nil
 	})
-	return paths
+	if err != nil {
+		return nil, fmt.Errorf("listing prompts: %w", err)
+	}
+	return paths, nil
 }
 
 // GuideBytes returns the raw markdown for a guide file (e.g., "guide.md").

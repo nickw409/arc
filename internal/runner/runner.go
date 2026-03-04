@@ -59,11 +59,12 @@ func Run(ctx context.Context, opts RunOptions) (*TestResult, error) {
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if err != nil && stdout.Len() == 0 {
-		return nil, fmt.Errorf("runner %q execution failed: %w", opts.Runner, err)
+		return nil, fmt.Errorf("runner %q execution failed: %w\nstderr: %s", opts.Runner, err, stderr.String())
 	}
 	out := stdout.Bytes()
 
@@ -100,6 +101,9 @@ func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout 
 		err    error
 	}
 
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	results := make([]fileResult, len(testFiles))
 	var wg sync.WaitGroup
 
@@ -107,13 +111,16 @@ func RunAll(ctx context.Context, runnerName string, testFiles []string, timeout 
 		wg.Add(1)
 		go func(idx int, testFile string) {
 			defer wg.Done()
-			r, err := Run(ctx, RunOptions{
+			r, err := Run(childCtx, RunOptions{
 				Runner:   runnerName,
 				TestFile: testFile,
 				Timeout:  timeout,
 				ArcHome:  arcHome,
 				Dir:      workDir,
 			})
+			if err != nil {
+				cancel()
+			}
 			results[idx] = fileResult{result: r, err: err}
 		}(i, tf)
 	}

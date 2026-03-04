@@ -83,14 +83,7 @@ func newRunCmd() *cobra.Command {
 			}
 
 			// Resolve ARC_HOME
-			arcHome := os.Getenv("ARC_HOME")
-			if arcHome == "" {
-				// Try to find it relative to the binary
-				ex, err := os.Executable()
-				if err == nil {
-					arcHome = filepath.Dir(filepath.Dir(ex))
-				}
-			}
+			arcHome := resolveArcHome()
 
 			// Set up context with signal handling
 			ctx, cancel := context.WithCancel(context.Background())
@@ -108,7 +101,10 @@ func newRunCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
-			homeDir, _ := os.UserHomeDir()
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
 			resolver := resources.NewResolver(projectRoot, homeDir)
 
 			_, err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{

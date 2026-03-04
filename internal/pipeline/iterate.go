@@ -37,6 +37,7 @@ type IterateOptions struct {
 	WorkingDir   string              // if set, agent runs in this directory (e.g. worktree)
 	ChatMode     bool                // if true, skip workflow-defined escalation rules
 	Resolver     *resources.Resolver // if nil, uses NewResolver("", "") (embedded-only)
+	AgentCommand string              // if non-empty, overrides agentCommandName for this run
 }
 
 // RunState executes the current phase state, running the agent until it produces a verdict.
@@ -279,7 +280,7 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	}
 
 	// Build spawn options, applying per-state agent config if present
-	spawnOpts := buildSpawnOptions(stateConfig, &phaseState, rendered, opts.WorkingDir)
+	spawnOpts := buildSpawnOptions(stateConfig, &phaseState, rendered, opts.WorkingDir, opts.AgentCommand)
 
 	// Log iteration start
 	_ = state.AppendHistory(phaseDir, fmt.Sprintf("%s [%s] iter %d started", timeNow(), phaseState.CurrentState, phaseState.Iteration.Current))
@@ -394,6 +395,10 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 				Timestamp: timeNow(),
 			})
 		}
+		// Persist model override set by switch_model action during after hooks.
+		if phaseState.ModelOverride != "" {
+			s.ModelOverride = phaseState.ModelOverride
+		}
 		return nil
 	}); err != nil {
 		return &arc.IterationResult{Action: arc.ActionAbort, Err: fmt.Errorf("updating state.json: %w", err)}
@@ -427,10 +432,15 @@ var timeNow = func() string {
 // buildSpawnOptions constructs agent.SpawnOptions from state config and defaults.
 // Default MaxTurns=200 and Timeout=3600s allow long-running sessions.
 // Workflow YAML agent config overrides these defaults.
-func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState, prompt string, workingDir string) agent.SpawnOptions {
+// agentCmd overrides agentCommandName when non-empty (avoids package-level race).
+func buildSpawnOptions(stateConfig *arc.StateConfig, phaseState *arc.PhaseState, prompt string, workingDir string, agentCmd string) agent.SpawnOptions {
+	cmdName := agentCmd
+	if cmdName == "" {
+		cmdName = agentCommandName
+	}
 	opts := agent.SpawnOptions{
 		Prompt:      prompt,
-		CommandName: agentCommandName,
+		CommandName: cmdName,
 		Model:       phaseState.ModelOverride,
 		WorkingDir:  workingDir,
 		MaxTurns:    200,

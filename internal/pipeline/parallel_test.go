@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -703,5 +704,116 @@ func TestRunParallelBranchParams(t *testing.T) {
 	}
 	if verdict != "all_complete" {
 		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
+	}
+}
+
+// ── Branch name validation tests ──────────────────────────────────────────────
+
+func TestRunParallelInvalidBranchNameSpaces(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch with spaces", Prompt: "do task"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err == nil {
+		t.Fatal("expected error for branch name with spaces")
+	}
+	if !strings.Contains(err.Error(), "invalid branch name") {
+		t.Fatalf("expected 'invalid branch name' in error, got: %v", err)
+	}
+}
+
+func TestRunParallelInvalidBranchNameSlash(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch/subdir", Prompt: "do task"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err == nil {
+		t.Fatal("expected error for branch name with slash")
+	}
+	if !strings.Contains(err.Error(), "invalid branch name") {
+		t.Fatalf("expected 'invalid branch name' in error, got: %v", err)
+	}
+}
+
+func TestRunParallelInvalidBranchNameDotDot(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "../../etc", Prompt: "do task"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err == nil {
+		t.Fatal("expected error for branch name with path traversal")
+	}
+	if !strings.Contains(err.Error(), "invalid branch name") {
+		t.Fatalf("expected 'invalid branch name' in error, got: %v", err)
+	}
+}
+
+func TestRunParallelValidBranchNames(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{"branch-a"},
+		{"branch_b"},
+		{"BranchC"},
+		{"branch123"},
+		{"123"},
+		{"A_B-C"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			phaseDir, sf := setupParallelTestPlan(t)
+			ps, _ := sf.Read()
+			t.Setenv("MOCK_OUTPUT", "done\n")
+
+			_, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+				PhaseDir:   phaseDir,
+				StateFile:  sf,
+				PhaseState: ps,
+				Config: &arc.ParallelConfig{
+					Branches: []arc.ParallelBranch{
+						{Name: tc.name, Prompt: "do task"},
+					},
+					Strategy: "all",
+				},
+				PlanMD: "# Test Plan",
+			})
+			if err != nil {
+				t.Fatalf("valid branch name %q should not error, got: %v", tc.name, err)
+			}
+		})
 	}
 }

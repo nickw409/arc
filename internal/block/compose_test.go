@@ -266,7 +266,10 @@ func TestBlockStateToConfig_MaxStateIterations(t *testing.T) {
 				Next:        map[string]string{"approved": "$approved", "gaps_found": "$gaps_found"},
 			}
 
-			sc := blockStateToConfig(bs, "test", nil)
+			sc, err := blockStateToConfig(bs, "test", nil)
+			if err != nil {
+				t.Fatalf("blockStateToConfig failed: %v", err)
+			}
 
 			if tt.wantNil {
 				if sc.Constraints != nil {
@@ -552,7 +555,10 @@ func TestBlockStateToConfigPassesParams(t *testing.T) {
 		Prompt: "prompts/adversarial/adversary.md",
 	}
 	params := map[string]string{"focus": "edge cases", "max_turns": "20"}
-	sc := blockStateToConfig(bs, "test", params)
+	sc, err := blockStateToConfig(bs, "test", params)
+	if err != nil {
+		t.Fatalf("blockStateToConfig failed: %v", err)
+	}
 	if sc.Params == nil {
 		t.Fatal("expected non-nil Params")
 	}
@@ -569,7 +575,10 @@ func TestBlockStateToConfigNilParams(t *testing.T) {
 		Name:   "adversary",
 		Prompt: "prompts/adversarial/adversary.md",
 	}
-	sc := blockStateToConfig(bs, "test", nil)
+	sc, err := blockStateToConfig(bs, "test", nil)
+	if err != nil {
+		t.Fatalf("blockStateToConfig failed: %v", err)
+	}
 	if sc.Params != nil {
 		t.Fatalf("expected nil Params, got %v", sc.Params)
 	}

@@ -106,11 +106,7 @@ func RunArchitects(ctx context.Context, opts ArchitectOptions) (*ArchitectOutput
 	allFailed := true
 
 	for _, r := range results {
-		output.Usage.InputTokens += r.usage.InputTokens
-		output.Usage.OutputTokens += r.usage.OutputTokens
-		output.Usage.CacheCreationInputTokens += r.usage.CacheCreationInputTokens
-		output.Usage.CacheReadInputTokens += r.usage.CacheReadInputTokens
-		output.Usage.CostUSD += r.usage.CostUSD
+		output.Usage = output.Usage.Add(r.usage)
 
 		if r.proposal != nil {
 			output.Proposals = append(output.Proposals, *r.proposal)

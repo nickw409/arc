@@ -28,20 +28,20 @@ func newIterateCmd() *cobra.Command {
 				return fmt.Errorf("phase %q not found in plan %q", phaseName, planName)
 			}
 
-			arcHome := os.Getenv("ARC_HOME")
-			if arcHome == "" {
-				ex, err := os.Executable()
-				if err == nil {
-					arcHome = filepath.Dir(filepath.Dir(ex))
-				}
-			}
+			arcHome := resolveArcHome()
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
 
-			projectRoot, _ := os.Getwd()
-			homeDir, _ := os.UserHomeDir()
+			projectRoot, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
 			resolver := resources.NewResolver(projectRoot, homeDir)
 
 			result := pipeline.RunState(context.Background(), logger, pipeline.IterateOptions{

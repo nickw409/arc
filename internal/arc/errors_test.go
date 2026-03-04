@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +78,24 @@ func TestPhaseErrorKindValues(t *testing.T) {
 
 	if len(kinds) != 8 {
 		t.Fatalf("expected 8 kinds, got %d", len(kinds))
+	}
+}
+
+func TestPhaseErrorInvalidKind(t *testing.T) {
+	// A PhaseErrorKind outside the valid range should not panic.
+	err := &PhaseError{
+		Phase:   "p",
+		State:   "s",
+		Kind:    PhaseErrorKind(999),
+		Message: "something went wrong",
+	}
+	// Must not panic.
+	got := err.Error()
+	if got == "" {
+		t.Fatal("Error() returned empty string for invalid kind")
+	}
+	if !strings.Contains(got, "unknown") {
+		t.Fatalf("Error() for invalid kind should contain 'unknown', got: %q", got)
 	}
 }
 

@@ -81,7 +81,7 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 					if hash, mergeErr := worktree.MergeBack(wt); mergeErr != nil {
 						opts.Logger.Warn("worktree merge failed, preserving branch for manual resolution", "branch", wt.Branch, "error", mergeErr)
 					} else {
-						fmt.Printf("[%s] Merged worktree: %s\n", opts.PhaseName, hash[:7])
+						fmt.Printf("[%s] Merged worktree: %s\n", opts.PhaseName, shortHash(hash))
 						worktree.Remove(wt)
 					}
 				}
@@ -117,10 +117,12 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Sync phase status with current state so the monitor reflects what's happening
 		if status := pipeline.MapStateToStatus(phaseState.CurrentState); phaseState.PhaseStatus != status && phaseState.PhaseStatus != "blocked" && phaseState.PhaseStatus != "disputed" {
-			sf.Update(func(s *arc.PhaseState) error {
+			if err := sf.Update(func(s *arc.PhaseState) error {
 				s.PhaseStatus = status
 				return nil
-			})
+			}); err != nil {
+				return fmt.Errorf("persisting state: %w", err)
+			}
 			phaseState.PhaseStatus = status
 		}
 
@@ -139,13 +141,15 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Track per-state visit count (informational; no longer enforces a cap)
 		curState := phaseState.CurrentState
-		sf.Update(func(s *arc.PhaseState) error {
+		if err := sf.Update(func(s *arc.PhaseState) error {
 			if s.StateIterations == nil {
 				s.StateIterations = make(map[string]int)
 			}
 			s.StateIterations[curState]++
 			return nil
-		})
+		}); err != nil {
+			opts.Logger.Warn("failed to persist state iterations", "error", err)
+		}
 
 		fmt.Printf("[%s] running state: %s", opts.PhaseName, phaseState.CurrentState)
 		if phaseState.TestsTotal > 0 {
@@ -166,10 +170,12 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Accumulate usage from this run into phase state
 		if !result.Usage.IsZero() {
-			sf.Update(func(s *arc.PhaseState) error {
+			if err := sf.Update(func(s *arc.PhaseState) error {
 				s.Usage = s.Usage.Add(result.Usage)
 				return nil
-			})
+			}); err != nil {
+				opts.Logger.Warn("failed to persist usage", "error", err)
+			}
 		}
 
 		// Defensive: check if state transitioned to terminal during the run.
@@ -194,10 +200,12 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 					Resolver:   opts.Resolver,
 				})
 				if !result.Usage.IsZero() {
-					sf.Update(func(s *arc.PhaseState) error {
+					if err := sf.Update(func(s *arc.PhaseState) error {
 						s.Usage = s.Usage.Add(result.Usage)
 						return nil
-					})
+					}); err != nil {
+						opts.Logger.Warn("failed to persist usage", "error", err)
+					}
 				}
 			}
 			// Check terminal again after retry — state may have been updated
@@ -207,11 +215,13 @@ func RunPhase(ctx context.Context, opts RunPhaseOptions) error {
 					return nil
 				}
 				reason := result.Err.Error()
-				sf.Update(func(s *arc.PhaseState) error {
+				if err := sf.Update(func(s *arc.PhaseState) error {
 					s.PhaseStatus = "blocked"
 					s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
 					return nil
-				})
+				}); err != nil {
+					return fmt.Errorf("persisting state: %w", err)
+				}
 				return fmt.Errorf("phase blocked: %w", result.Err)
 			}
 		}
@@ -262,11 +272,13 @@ func postIterationActions(ctx context.Context, opts RunPhaseOptions, sf *state.S
 		if err != nil {
 			opts.Logger.Warn("failed to commit implementation", "error", err)
 		} else if hash != "" {
-			fmt.Printf("[%s] Committed: feat(%s): %s [%s]\n", opts.PhaseName, opts.PhaseName, desc, hash[:7])
-			sf.Update(func(s *arc.PhaseState) error {
+			fmt.Printf("[%s] Committed: feat(%s): %s [%s]\n", opts.PhaseName, opts.PhaseName, desc, shortHash(hash))
+			if err := sf.Update(func(s *arc.PhaseState) error {
 				s.LastCommit = hash
 				return nil
-			})
+			}); err != nil {
+				return fmt.Errorf("persisting state: %w", err)
+			}
 		}
 
 	// QA review found gaps
@@ -301,7 +313,7 @@ func adversarialPostActions(ctx context.Context, opts RunPhaseOptions, sf *state
 		}
 		newFiles := discoverNewTestFiles(workDir, phaseState.TestFiles)
 
-		sf.Update(func(s *arc.PhaseState) error {
+		if err := sf.Update(func(s *arc.PhaseState) error {
 			s.AdversaryRound = round
 			if s.AdversaryTests == nil {
 				s.AdversaryTests = make(map[string][]string)
@@ -310,7 +322,9 @@ func adversarialPostActions(ctx context.Context, opts RunPhaseOptions, sf *state
 			s.AdversaryTests[roundKey] = newFiles
 			s.TestFiles = append(s.TestFiles, newFiles...)
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("persisting state: %w", err)
+		}
 
 		if len(newFiles) > 0 {
 			fmt.Printf("[%s] Adversary added %d test files\n", opts.PhaseName, len(newFiles))
@@ -331,7 +345,8 @@ func adversarialPostActions(ctx context.Context, opts RunPhaseOptions, sf *state
 	return nil
 }
 
-// discoverNewTestFiles finds test files in dir that are not already in the existing list.
+// discoverNewTestFiles finds test files in dir (recursively) that are not already in the existing list.
+// Returned paths are relative to dir.
 func discoverNewTestFiles(dir string, existing []string) []string {
 	existingSet := make(map[string]bool, len(existing))
 	for _, f := range existing {
@@ -339,19 +354,25 @@ func discoverNewTestFiles(dir string, existing []string) []string {
 	}
 
 	var newFiles []string
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		if !existingSet[rel] {
+			newFiles = append(newFiles, rel)
+		}
 		return nil
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if strings.HasSuffix(name, "_test.go") && !existingSet[name] {
-			newFiles = append(newFiles, name)
-		}
-	}
+	})
 	return newFiles
 }
 
@@ -482,7 +503,8 @@ func phaseObjective(opts RunPhaseOptions) string {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimLeft(line, "# ")
+		line = strings.TrimLeft(line, "#")
+		line = strings.TrimSpace(line)
 		if len(line) > 72 {
 			line = line[:72]
 		}

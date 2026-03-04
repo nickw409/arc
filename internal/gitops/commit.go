@@ -17,6 +17,10 @@ type CommitOptions struct {
 
 // Commit stages all changes and creates a commit.
 func Commit(opts CommitOptions) (string, error) {
+	if strings.TrimSpace(opts.Message) == "" {
+		return "", fmt.Errorf("commit message cannot be empty")
+	}
+
 	// Check if there are any changes to stage
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = opts.Dir

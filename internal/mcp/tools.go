@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,21 @@ func (h *handlerContext) plansDir() string {
 
 func (h *handlerContext) archiveDir() string {
 	return filepath.Join(h.projectDir, ".plans", "archive")
+}
+
+var validNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]$`)
+
+func validateName(name, label string) error {
+	if name == "" {
+		return fmt.Errorf("%s is required", label)
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("%s too long (max 64 chars)", label)
+	}
+	if !validNameRe.MatchString(name) {
+		return fmt.Errorf("invalid %s %q: must be alphanumeric with hyphens", label, name)
+	}
+	return nil
 }
 
 // registerTools adds all Arc tools to the MCP server.
@@ -197,8 +213,8 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 		}
 	}
 
-	if name == "" {
-		return mcp.NewToolResultError("name is required"), nil
+	if err := validateName(name, "name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if len(phases) == 0 {
 		return mcp.NewToolResultError("at least one phase is required"), nil
@@ -254,8 +270,8 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 	args := req.GetArguments()
 	planName, _ := args["plan_name"].(string)
 
-	if planName == "" {
-		return mcp.NewToolResultError("plan_name is required"), nil
+	if err := validateName(planName, "plan_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	// Verify plan exists and is reviewed
@@ -338,8 +354,11 @@ func (h *handlerContext) handleIterate(ctx context.Context, req mcp.CallToolRequ
 	planName, _ := args["plan_name"].(string)
 	phaseName, _ := args["phase_name"].(string)
 
-	if planName == "" || phaseName == "" {
-		return mcp.NewToolResultError("plan_name and phase_name are required"), nil
+	if err := validateName(planName, "plan_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := validateName(phaseName, "phase_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	// Verify phase exists
@@ -373,8 +392,13 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 	phaseFilter, _ := args["phase"].(string)
 	model, _ := args["model"].(string)
 
-	if planName == "" {
-		return mcp.NewToolResultError("plan_name is required"), nil
+	if err := validateName(planName, "plan_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if phaseFilter != "" {
+		if err := validateName(phaseFilter, "phase"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 	}
 
 	if model == "" {
@@ -507,11 +531,19 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 	phase, _ := args["phase"].(string)
 	action, _ := args["action"].(string)
 
-	if planName == "" || action == "" {
-		return mcp.NewToolResultError("plan_name and action are required"), nil
+	if err := validateName(planName, "plan_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if action == "" {
+		return mcp.NewToolResultError("action is required"), nil
 	}
 	if phase == "" && action != "reset" {
 		return mcp.NewToolResultError("phase is required for this action"), nil
+	}
+	if phase != "" {
+		if err := validateName(phase, "phase"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 	}
 
 	opts := plan.ManageOptions{
@@ -556,8 +588,14 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultText(fmt.Sprintf("Blocked %s/%s: %s", planName, phase, reason)), nil
 
 	case "tests":
-		passing, _ := args["passing"].(float64)
-		total, _ := args["total"].(float64)
+		passing, passingOk := args["passing"].(float64)
+		total, totalOk := args["total"].(float64)
+		if !passingOk || !totalOk {
+			return mcp.NewToolResultError("passing and total must be numeric"), nil
+		}
+		if passing < 0 || total < 0 {
+			return mcp.NewToolResultError("passing and total must be non-negative"), nil
+		}
 		opts.Passing = int(passing)
 		opts.Total = int(total)
 		if err := plan.ManageTests(opts); err != nil {
@@ -588,7 +626,13 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultText(fmt.Sprintf("Updated note for %s/%s", planName, phase)), nil
 
 	case "iteration":
-		n, _ := args["iteration"].(float64)
+		n, nOk := args["iteration"].(float64)
+		if !nOk {
+			return mcp.NewToolResultError("iteration must be numeric"), nil
+		}
+		if n < 0 {
+			return mcp.NewToolResultError("iteration must be non-negative"), nil
+		}
 		opts.Iteration = int(n)
 		if err := plan.ManageIteration(opts); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -693,8 +737,8 @@ func (h *handlerContext) handleArchive(_ context.Context, req mcp.CallToolReques
 	args := req.GetArguments()
 	planName, _ := args["plan_name"].(string)
 
-	if planName == "" {
-		return mcp.NewToolResultError("plan_name is required"), nil
+	if err := validateName(planName, "plan_name"); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	force := false
@@ -720,12 +764,19 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 	args := req.GetArguments()
 	planName, _ := args["plan_name"].(string)
 
+	if planName != "" {
+		if err := validateName(planName, "plan_name"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+	}
+
+	// Copy needed data under lock, then release before doing any I/O.
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	if planName == "" {
-		// List all active jobs.
+		// List all active jobs — no I/O needed, build output under lock.
 		if len(h.jobs) == 0 {
+			h.mu.Unlock()
 			return mcp.NewToolResultText("No active runs."), nil
 		}
 		var out bytes.Buffer
@@ -744,19 +795,19 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 				fmt.Fprintf(&out, "%s: running since %s (%s elapsed)\n", name, job.StartedAt.Format(time.RFC3339), time.Since(job.StartedAt).Truncate(time.Second))
 			}
 		}
+		h.mu.Unlock()
 		return mcp.NewToolResultText(out.String()), nil
 	}
 
 	job, ok := h.jobs[planName]
 	if !ok {
-		// No job found — fall through to regular status.
 		h.mu.Unlock()
+		// No job found — fall through to regular status.
 		var buf bytes.Buffer
 		err := plan.Status(&buf, plan.StatusOptions{
 			PlansDir: h.plansDir(),
 			PlanName: planName,
 		})
-		h.mu.Lock()
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -765,7 +816,7 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 
 	select {
 	case <-job.Done:
-		// Job completed — return result and clean up.
+		// Job completed — copy result data, clean up, then unlock.
 		var out bytes.Buffer
 		fmt.Fprintf(&out, "Run for %q finished after %s.\n", planName, time.Since(job.StartedAt).Truncate(time.Second))
 		if job.Err != nil {
@@ -785,19 +836,20 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 			}
 		}
 		delete(h.jobs, planName)
+		h.mu.Unlock()
 		return mcp.NewToolResultText(out.String()), nil
 	default:
-		// Still running.
-		var out bytes.Buffer
-		fmt.Fprintf(&out, "Run for %q is in progress (started %s, %s elapsed).\n", planName, job.StartedAt.Format(time.RFC3339), time.Since(job.StartedAt).Truncate(time.Second))
-		// Include current phase states.
+		// Still running — copy minimal info, unlock, then do I/O.
+		startedAt := job.StartedAt
 		h.mu.Unlock()
+		var out bytes.Buffer
+		fmt.Fprintf(&out, "Run for %q is in progress (started %s, %s elapsed).\n", planName, startedAt.Format(time.RFC3339), time.Since(startedAt).Truncate(time.Second))
+		// Include current phase states.
 		var statusBuf bytes.Buffer
 		plan.Status(&statusBuf, plan.StatusOptions{
 			PlansDir: h.plansDir(),
 			PlanName: planName,
 		})
-		h.mu.Lock()
 		if statusBuf.Len() > 0 {
 			out.Write(statusBuf.Bytes())
 		}

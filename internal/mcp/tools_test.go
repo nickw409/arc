@@ -786,6 +786,176 @@ func TestHandleRunCancelMissingName(t *testing.T) {
 	}
 }
 
+// --- validateName tests ---
+
+func TestValidateName(t *testing.T) {
+	tests := []struct {
+		name    string
+		label   string
+		wantErr bool
+		errSub  string
+	}{
+		// valid
+		{"my-plan", "plan_name", false, ""},
+		{"ab", "plan_name", false, ""},
+		{"plan1", "plan_name", false, ""},
+		{"a1b2c3", "plan_name", false, ""},
+		{"plan-alpha-beta", "plan_name", false, ""},
+		// empty
+		{"", "plan_name", true, "required"},
+		// too long (65 chars)
+		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", "plan_name", true, "too long"},
+		// path traversal
+		{"../etc", "plan_name", true, "invalid"},
+		{"../evil", "plan_name", true, "invalid"},
+		// starts with digit
+		{"1plan", "plan_name", true, "invalid"},
+		// ends with hyphen
+		{"plan-", "plan_name", true, "invalid"},
+		// starts with hyphen
+		{"-plan", "plan_name", true, "invalid"},
+		// contains slash
+		{"plan/phase", "plan_name", true, "invalid"},
+		// contains dot
+		{"plan.name", "plan_name", true, "invalid"},
+		// single char (valid: single alphanumeric doesn't match pattern which requires len>=2)
+		{"a", "plan_name", true, "invalid"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name+"_"+tc.label, func(t *testing.T) {
+			err := validateName(tc.name, tc.label)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("validateName(%q, %q) expected error, got nil", tc.name, tc.label)
+				}
+				if tc.errSub != "" && !strings.Contains(err.Error(), tc.errSub) {
+					t.Fatalf("validateName(%q, %q) error = %q, want substring %q", tc.name, tc.label, err.Error(), tc.errSub)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("validateName(%q, %q) unexpected error: %v", tc.name, tc.label, err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateNamePathTraversal(t *testing.T) {
+	dangerous := []string{
+		"../etc/passwd",
+		"../../secret",
+		"plan/../other",
+		"plan/../../etc",
+	}
+	for _, name := range dangerous {
+		err := validateName(name, "plan_name")
+		if err == nil {
+			t.Errorf("validateName(%q) should reject path traversal, got nil", name)
+		}
+	}
+}
+
+// --- Manage numeric validation tests ---
+
+func TestHandleManageTestsNonNumeric(t *testing.T) {
+	h, dir := newTestHandler(t)
+	plansDir := filepath.Join(dir, ".plans", "active")
+	plan.Create(plan.CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "test-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "feature",
+	})
+
+	result, err := callTool(context.Background(), h, h.handleManage, map[string]any{
+		"plan_name": "test-plan",
+		"phase":     "impl",
+		"action":    "tests",
+		"passing":   "not-a-number",
+		"total":     "also-not-a-number",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for non-numeric tests args")
+	}
+}
+
+func TestHandleManageTestsNegative(t *testing.T) {
+	h, dir := newTestHandler(t)
+	plansDir := filepath.Join(dir, ".plans", "active")
+	plan.Create(plan.CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "test-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "feature",
+	})
+
+	result, err := callTool(context.Background(), h, h.handleManage, map[string]any{
+		"plan_name": "test-plan",
+		"phase":     "impl",
+		"action":    "tests",
+		"passing":   float64(-1),
+		"total":     float64(10),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for negative passing count")
+	}
+}
+
+func TestHandleManageIterationNonNumeric(t *testing.T) {
+	h, dir := newTestHandler(t)
+	plansDir := filepath.Join(dir, ".plans", "active")
+	plan.Create(plan.CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "test-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "feature",
+	})
+
+	result, err := callTool(context.Background(), h, h.handleManage, map[string]any{
+		"plan_name": "test-plan",
+		"phase":     "impl",
+		"action":    "iteration",
+		"iteration": "not-a-number",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for non-numeric iteration arg")
+	}
+}
+
+func TestHandleManageIterationNegative(t *testing.T) {
+	h, dir := newTestHandler(t)
+	plansDir := filepath.Join(dir, ".plans", "active")
+	plan.Create(plan.CreateOptions{
+		PlansDir:     plansDir,
+		Name:         "test-plan",
+		Phases:       []string{"impl"},
+		WorkflowType: "feature",
+	})
+
+	result, err := callTool(context.Background(), h, h.handleManage, map[string]any{
+		"plan_name": "test-plan",
+		"phase":     "impl",
+		"action":    "iteration",
+		"iteration": float64(-5),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for negative iteration value")
+	}
+}
+
 // --- Run async tests ---
 
 func TestHandleRunAlreadyRunning(t *testing.T) {

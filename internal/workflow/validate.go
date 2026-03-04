@@ -19,6 +19,10 @@ func (e *ValidationError) Error() string {
 
 // Validate checks a workflow for structural errors.
 func Validate(w *arc.Workflow) []error {
+	if w == nil {
+		return []error{&ValidationError{Field: "workflow", Message: "workflow is nil"}}
+	}
+
 	var errs []error
 
 	// 8. empty states list

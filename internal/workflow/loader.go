@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -97,7 +98,7 @@ func LoadBytesWithBlockLoader(data []byte, blockLoader func(string) ([]byte, err
 
 	errs := Validate(w)
 	if len(errs) > 0 {
-		return nil, errs[0]
+		return nil, errors.Join(errs...)
 	}
 
 	return w, nil

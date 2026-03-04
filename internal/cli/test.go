@@ -52,8 +52,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if runnerName == "" && testCommand == "" {
 		runnerName = detectRunner(testFile)
 		if runnerName == "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "no runner configured in .arc.yaml for %s\n", testFile)
-			os.Exit(2)
+			cmd.SilenceUsage = true
+			return fmt.Errorf("no runner configured in .arc.yaml for %s", testFile)
 		}
 	}
 
@@ -69,8 +69,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	result, err := runner.RunBuiltin(context.Background(), opts)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-		os.Exit(2)
+		cmd.SilenceUsage = true
+		return fmt.Errorf("running tests: %w", err)
 	}
 
 	if jsonOutput {
@@ -81,7 +81,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintln(cmd.OutOrStdout(), result.Summary())
 	if result.Failed > 0 {
-		os.Exit(1)
+		cmd.SilenceUsage = true
+		return fmt.Errorf("tests failed: %d failure(s)", result.Failed)
 	}
 	return nil
 }
