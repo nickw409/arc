@@ -15,6 +15,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
+	"github.com/nwiley/arc/internal/gitops"
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/review"
@@ -153,6 +154,17 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		if allComplete {
 			fmt.Println("\nAll phases complete.")
 			if sharedWorktree != nil {
+				commitMsg := fmt.Sprintf("feat(%s): phase work", opts.PlanName)
+				if hash, commitErr := gitops.Commit(gitops.CommitOptions{
+					Message: commitMsg,
+					Dir:     sharedWorktree.Dir,
+					Config:  opts.Config,
+				}); commitErr != nil {
+					opts.Logger.Warn("pre-merge commit failed", "error", commitErr)
+				} else if hash != "" {
+					fmt.Printf("Committed uncommitted worktree changes: %s\n", hash[:7])
+				}
+
 				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
 					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
@@ -218,6 +230,20 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 
 			// Merge shared worktree back before reporting completion
 			if sharedWorktree != nil {
+				// Commit any uncommitted changes in the worktree before merging.
+				// This catches work from phases that were manually marked complete
+				// (via arc manage) without triggering the normal commit path.
+				commitMsg := fmt.Sprintf("feat(%s): phase work", opts.PlanName)
+				if hash, commitErr := gitops.Commit(gitops.CommitOptions{
+					Message: commitMsg,
+					Dir:     sharedWorktree.Dir,
+					Config:  opts.Config,
+				}); commitErr != nil {
+					opts.Logger.Warn("pre-merge commit failed", "error", commitErr)
+				} else if hash != "" {
+					fmt.Printf("Committed uncommitted worktree changes: %s\n", hash[:7])
+				}
+
 				if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 					opts.Logger.Warn("shared worktree merge failed, preserving branch for manual resolution", "branch", sharedWorktree.Branch, "error", mergeErr)
 					return buildResult("failed", "", fmt.Sprintf("worktree merge failed: %v", mergeErr)), fmt.Errorf("worktree merge failed: %w", mergeErr)
