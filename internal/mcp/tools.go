@@ -147,6 +147,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to cancel")),
 	), h.handleRunCancel)
 
+	h.registerGatedTools(s)
 }
 
 // drainJobs cancels all running jobs and waits for them to finish cleanup.
