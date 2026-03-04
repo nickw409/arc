@@ -20,6 +20,20 @@ Tests passing: {{state.tests_passing | default: "0"}} / {{state.tests_total | de
 {{previous_memory}}
 {{/if}}
 
+{{#if params.focus}}
+## Assigned Focus Area
+
+You are one of several parallel agents working on this phase. Your focus area:
+
+**{{params.focus}}**
+
+{{#if params.files}}
+**Your assigned files:** {{params.files}}
+{{/if}}
+
+**CRITICAL: Only modify files within your assigned focus area.** Other agents are working on other parts of the codebase simultaneously. If you modify files outside your scope, you will create merge conflicts. You may read any file for context, but only write to files in your assigned area.
+{{/if}}
+
 ## Instructions
 
 Implement the task described in the specification above. You have full freedom to write both implementation code and your own tests.

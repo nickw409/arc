@@ -102,16 +102,19 @@ Report results to the user. Suggest `arc_archive` to clean up.
 
 ### Custom Workflows
 
-When a task doesn't fit a preset, compose a custom workflow from blocks. This is one of Arc's most powerful features — use it when the preset workflows are a poor fit.
+When a task doesn't fit a preset, compose a custom workflow from blocks. This is one of Arc's most powerful features — **prefer custom workflows over presets when the task involves multiple concerns or when parallel execution would speed things up.**
 
 **Available blocks:**
 
 | Block | What it does | Entry → Exit |
 |-------|-------------|--------------|
-| **impl** | Free-form implementation (code + tests) | impl → done |
-| **qa-loop** | Write tests, review finds gaps, loop until approved | qa → qa_review → approved |
-| **review** | Review implementation, loop on concerns | impl_review → approved |
-| **adversary** | Adversary writes tests to find bugs, self-loops until no bugs found | adversary → done |
+| **act** | Free-form implementation (code + tests). Accepts `focus` and `files` params for partitioned parallel work. | act → done |
+| **tests** | Write tests only (higher max_turns than act) | tests → done |
+| **review** | Review implementation quality, loop on concerns | impl_review → approved/concerns |
+| **test-review** | Review test coverage and quality | qa_review → approved/gaps_found |
+| **adversary** | Write adversarial tests to find bugs | adversary → bugs_found/no_bugs_found |
+| **scout** | Read-only recon — identifies edge cases without modifying code | scout → done |
+| **judge** | Generic branching with custom verdicts (for non-code decisions) | judge → verdict_a/verdict_b |
 
 **Composing a custom workflow:**
 
@@ -120,24 +123,62 @@ A workflow pipeline chains blocks. Each block's exit wires to the next block's e
 ```yaml
 name: research-and-harden
 pipeline:
-  - block: investigate
-  - block: impl
+  - block: scout
+  - block: act
     params: {max_turns: "45"}
   - block: adversary
-    params: {max_rounds: "3"}
 ```
 
 Blocks accept parameters to tune behavior (max turns, max rounds, model). States within blocks are namespaced (e.g., `adversary.adversary`).
 
+**Parallel execution:**
+
+When a phase's work can be partitioned into independent file sets, run multiple act blocks in parallel for faster execution:
+
+```yaml
+pipeline:
+  - parallel:
+      strategy: all
+      blocks:
+        - name: impl-api
+          block: act
+          params:
+            focus: "API handlers and routing"
+            files: "internal/mcp/tools.go, internal/cli/run.go"
+        - name: impl-core
+          block: act
+          params:
+            focus: "Core engine logic"
+            files: "internal/pipeline/iterate.go, internal/orchestrator/phase.go"
+  - block: adversary
+```
+
+The `focus` param describes what the agent should work on. The `files` param lists the specific files it may modify. Each parallel agent can read any file for context but will only write to its assigned files.
+
+**When to parallelize:** When the implementation naturally splits into independent areas touching different files (e.g., "API layer" vs "core engine", "frontend" vs "backend", "package A" vs "package B"). Don't parallelize when the work involves shared files or tightly coupled code.
+
+**Routing:** Use `route` to wire block exits to specific downstream steps:
+
+```yaml
+pipeline:
+  - block: act
+    name: impl
+  - block: adversary
+    route:
+      bugs_found: impl     # loop back to impl on bugs
+      no_bugs_found: complete
+```
+
 **When to use custom workflows:**
-- Task combines concerns that span multiple presets (research + implementation + benchmarking)
+- Task involves multiple concerns (research + implementation + testing)
+- Work can be split across parallel agents for speed
 - You need adversarial testing on only some phases
 - The review/QA structure differs from any preset
-- The user describes a process that doesn't match the standard flows
+- You want scout → adversary (recon before testing)
 
 **When to stick with presets:**
 - Task clearly fits one category (pure feature, pure bugfix, etc.)
-- You're unsure — start with a preset, switch to custom if it doesn't work
+- You're unsure and the task is simple — start with a preset
 
 ## Managing Phases
 

@@ -5,6 +5,8 @@ params:
   timeout: {default: "900"}
   model: {default: ""}
   prompt: {default: "prompts/blocks/act.md"}
+  focus: {default: ""}
+  files: {default: ""}
 entry: act
 exits: [done]
 states:

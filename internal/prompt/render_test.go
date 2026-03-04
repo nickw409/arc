@@ -610,3 +610,84 @@ func TestAdversaryPromptTestExecutionRules(t *testing.T) {
 		t.Fatal("expected rendered output to contain scoped test execution guidance")
 	}
 }
+
+func TestActPromptRendersWithFocus(t *testing.T) {
+	result, err := Render("blocks/act.md", TemplateContext{
+		Phase:     "impl",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"tests_passing": "0", "tests_total": "0"},
+		Params:    map[string]string{"focus": "API handlers", "files": "internal/mcp/tools.go"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Assigned Focus Area") {
+		t.Fatal("expected 'Assigned Focus Area' section with focus param")
+	}
+	if !strings.Contains(result, "API handlers") {
+		t.Fatal("expected focus text in output")
+	}
+	if !strings.Contains(result, "internal/mcp/tools.go") {
+		t.Fatal("expected files text in output")
+	}
+	if !strings.Contains(result, "Only modify files within your assigned focus area") {
+		t.Fatal("expected boundary warning in output")
+	}
+}
+
+func TestActPromptRendersWithoutFocus(t *testing.T) {
+	result, err := Render("blocks/act.md", TemplateContext{
+		Phase:     "impl",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"tests_passing": "0", "tests_total": "0"},
+		Params:    map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Assigned Focus Area") {
+		t.Fatal("expected NO 'Assigned Focus Area' section without focus param")
+	}
+}
+
+func TestActPromptRendersWithNilParams(t *testing.T) {
+	result, err := Render("blocks/act.md", TemplateContext{
+		Phase:     "impl",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"tests_passing": "0", "tests_total": "0"},
+		Params:    nil,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Assigned Focus Area") {
+		t.Fatal("expected NO 'Assigned Focus Area' section with nil params")
+	}
+}
+
+func TestActPromptFocusWithoutFiles(t *testing.T) {
+	result, err := Render("blocks/act.md", TemplateContext{
+		Phase:     "impl",
+		Plan:      "test-plan",
+		Iteration: 1,
+		PlanMD:    "# Test Plan",
+		State:     map[string]string{"tests_passing": "0", "tests_total": "0"},
+		Params:    map[string]string{"focus": "Database layer"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Database layer") {
+		t.Fatal("expected focus text in output")
+	}
+	// files param not set — the "Your assigned files" line should not appear
+	if strings.Contains(result, "Your assigned files") {
+		t.Fatal("expected NO 'Your assigned files' section without files param")
+	}
+}

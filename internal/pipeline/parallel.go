@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"sync"
 
+	"strings"
+
 	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/state"
 )
 
@@ -91,7 +94,19 @@ func RunParallel(ctx context.Context, logger *slog.Logger, opts RunParallelOptio
 				DisputeList:  prompt.FormatDisputeList(opts.PhaseState.Disputes),
 			}
 
-			rendered, err := prompt.RenderString(b.Prompt, tmplCtx)
+			// If the prompt looks like a resource path, load the template content
+		// from embedded resources. This happens when blocks (e.g. act) are used
+		// in parallel pipeline steps — compose.go copies the block's prompt path
+		// into ParallelBranch.Prompt, but RenderString expects template content.
+		promptContent := b.Prompt
+		if strings.HasPrefix(promptContent, "prompts/") {
+			path := strings.TrimPrefix(promptContent, "prompts/")
+			if loaded, loadErr := resources.PromptBytes(path); loadErr == nil {
+				promptContent = string(loaded)
+			}
+		}
+
+		rendered, err := prompt.RenderString(promptContent, tmplCtx)
 			if err != nil {
 				resultsCh <- branchResult{name: b.Name, exitCode: -1, err: err}
 				return

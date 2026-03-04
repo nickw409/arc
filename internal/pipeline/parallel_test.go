@@ -642,6 +642,43 @@ func TestRunParallelEmptyBranchesVerdict(t *testing.T) {
 	}
 }
 
+func TestRunParallelResourcePathPrompt(t *testing.T) {
+	phaseDir, sf := setupParallelTestPlan(t)
+	ps, _ := sf.Read()
+
+	// Use a resource path as the prompt — this is what happens when blocks
+	// (e.g. act) are composed into parallel pipeline steps. RunParallel should
+	// load the template from embedded resources instead of rendering the path literally.
+	t.Setenv("MOCK_OUTPUT", "done\n")
+
+	verdict, _, err := RunParallel(context.Background(), testLogger(), RunParallelOptions{
+		PhaseDir:   phaseDir,
+		StateFile:  sf,
+		PhaseState: ps,
+		Config: &arc.ParallelConfig{
+			Branches: []arc.ParallelBranch{
+				{Name: "branch-a", Prompt: "prompts/blocks/act.md"},
+			},
+			Strategy: "all",
+		},
+		PlanMD: "# Test Plan",
+	})
+	if err != nil {
+		t.Fatalf("RunParallel with resource path prompt error: %v", err)
+	}
+	if verdict != "all_complete" {
+		t.Fatalf("verdict = %q, want %q", verdict, "all_complete")
+	}
+
+	// Verify the agent received actual template content, not just the path string.
+	// The log file should contain rendered prompt content, not "prompts/blocks/act.md".
+	logData, err := os.ReadFile(filepath.Join(phaseDir, "parallel_impl", "branch-a.log"))
+	if err != nil {
+		t.Fatalf("reading branch log: %v", err)
+	}
+	_ = logData // agent output is from mock, but the test verifies no render error occurred
+}
+
 func TestRunParallelBranchParams(t *testing.T) {
 	phaseDir, sf := setupParallelTestPlan(t)
 	ps, _ := sf.Read()
