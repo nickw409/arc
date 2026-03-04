@@ -235,6 +235,12 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	if params == nil {
 		params = map[string]string{}
 	}
+	// Load scout report if present (written by scout states for adversary consumption)
+	var scoutReport string
+	if data, err := os.ReadFile(filepath.Join(phaseDir, "scout-report.md")); err == nil {
+		scoutReport = string(data)
+	}
+
 	tmplCtx := prompt.TemplateContext{
 		Phase:          phaseState.Phase,
 		Plan:           phaseState.Plan,
@@ -250,6 +256,7 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 		DisputeCount:   len(phaseState.Disputes),
 		DisputeList:    prompt.FormatDisputeList(phaseState.Disputes),
 		PreviousMemory: previousMemory,
+		ScoutReport:    scoutReport,
 	}
 
 	rendered, err := prompt.RenderString(string(promptBytes), tmplCtx)
@@ -313,6 +320,14 @@ func RunState(ctx context.Context, logger *slog.Logger, opts IterateOptions) *ar
 	if mem := ExtractMemory(spawnResult.Output); mem != "" {
 		if writeErr := WriteMemory(phaseDir, phaseState.CurrentState, mem); writeErr != nil {
 			logger.Warn("failed to save agent memory", "state", phaseState.CurrentState, "error", writeErr)
+		}
+	}
+
+	// Save scout output for downstream adversary states
+	if strings.HasSuffix(phaseState.CurrentState, ".scout") || phaseState.CurrentState == "scout" {
+		scoutPath := filepath.Join(phaseDir, "scout-report.md")
+		if writeErr := os.WriteFile(scoutPath, []byte(spawnResult.Output), 0644); writeErr != nil {
+			logger.Warn("failed to save scout report", "error", writeErr)
 		}
 	}
 
