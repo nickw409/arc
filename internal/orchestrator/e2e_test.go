@@ -163,8 +163,8 @@ func e2eLogger() *slog.Logger {
 func TestE2EHappyPath(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-happy", []string{"core"}, "feature")
 
-	// Call 0: impl.act (linear, no verdict needed)
-	writeScript(t, scriptDir, 0, "Implementation complete.")
+	// Call 0: impl.act (verdict: done)
+	writeScript(t, scriptDir, 0, "Implementation complete.\n\n## Verdict\ndone")
 	// Calls 1+2: parallel adversary branches (both need no_bugs_found verdicts)
 	writeScript(t, scriptDir, 1, "No bugs found.\n\n## Verdict\nno_bugs_found")
 	writeScript(t, scriptDir, 2, "No bugs found.\n\n## Verdict\nno_bugs_found")
@@ -201,12 +201,15 @@ func TestE2EHappyPath(t *testing.T) {
 	if ps.LastVerdict != "no_bugs_found" {
 		t.Fatalf("expected last_verdict=no_bugs_found, got %q", ps.LastVerdict)
 	}
-	// Exactly 1 verdict: _fork_0→no_bugs_found
-	if len(ps.VerdictsHistory) != 1 {
-		t.Fatalf("expected 1 verdict in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// 2 verdicts: impl.act→done, _fork_0→no_bugs_found
+	if len(ps.VerdictsHistory) != 2 {
+		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "no_bugs_found" || ps.VerdictsHistory[0].State != "_fork_0" {
+	if ps.VerdictsHistory[0].Verdict != "done" || ps.VerdictsHistory[0].State != "impl.act" {
 		t.Fatalf("unexpected first verdict: %+v", ps.VerdictsHistory[0])
+	}
+	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "_fork_0" {
+		t.Fatalf("unexpected second verdict: %+v", ps.VerdictsHistory[1])
 	}
 	// 3 mock calls: impl.act + 2 parallel branches
 	if n := readCallCount(t, scriptDir); n != 3 {
@@ -219,13 +222,13 @@ func TestE2EHappyPath(t *testing.T) {
 func TestE2EBugsFoundLoop(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-gaps", []string{"core"}, "feature")
 
-	// Call 0: impl.act
-	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 0: impl.act (verdict: done)
+	writeScript(t, scriptDir, 0, "Implementation written.\n\n## Verdict\ndone")
 	// Calls 1+2: parallel adversary branches → bugs_found
 	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
 	writeScript(t, scriptDir, 2, "Bugs found.\n\n## Verdict\nbugs_found")
-	// Call 3: impl.act (re-run to fix bugs)
-	writeScript(t, scriptDir, 3, "Bugs fixed.")
+	// Call 3: impl.act (re-run to fix bugs, verdict: done)
+	writeScript(t, scriptDir, 3, "Bugs fixed.\n\n## Verdict\ndone")
 	// _fork_0 is skipped on second visit (run_once)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -256,15 +259,21 @@ func TestE2EBugsFoundLoop(t *testing.T) {
 	if ps.GlobalIterations != 4 {
 		t.Fatalf("expected global_iterations=4, got %d", ps.GlobalIterations)
 	}
-	// 2 verdicts: bugs_found, no_bugs_found (both from _fork_0)
-	if len(ps.VerdictsHistory) != 2 {
-		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// 4 verdicts: done(impl.act), bugs_found(_fork_0), done(impl.act), no_bugs_found(_fork_0 auto-skip)
+	if len(ps.VerdictsHistory) != 4 {
+		t.Fatalf("expected 4 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "bugs_found" || ps.VerdictsHistory[0].State != "_fork_0" {
-		t.Fatalf("expected first verdict bugs_found@_fork_0, got %+v", ps.VerdictsHistory[0])
+	if ps.VerdictsHistory[0].Verdict != "done" || ps.VerdictsHistory[0].State != "impl.act" {
+		t.Fatalf("expected first verdict done@impl.act, got %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "_fork_0" {
-		t.Fatalf("expected second verdict no_bugs_found@_fork_0 (auto-skip), got %+v", ps.VerdictsHistory[1])
+	if ps.VerdictsHistory[1].Verdict != "bugs_found" || ps.VerdictsHistory[1].State != "_fork_0" {
+		t.Fatalf("expected second verdict bugs_found@_fork_0, got %+v", ps.VerdictsHistory[1])
+	}
+	if ps.VerdictsHistory[2].Verdict != "done" || ps.VerdictsHistory[2].State != "impl.act" {
+		t.Fatalf("expected third verdict done@impl.act, got %+v", ps.VerdictsHistory[2])
+	}
+	if ps.VerdictsHistory[3].Verdict != "no_bugs_found" || ps.VerdictsHistory[3].State != "_fork_0" {
+		t.Fatalf("expected fourth verdict no_bugs_found@_fork_0 (auto-skip), got %+v", ps.VerdictsHistory[3])
 	}
 	// run_once: _fork_0 is skipped on second visit, so only 4 actual agent calls
 	// (impl + 2 branches + impl fix).
@@ -279,13 +288,13 @@ func TestE2EBugsFoundLoop(t *testing.T) {
 func TestE2EStateIterationTracking(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-stateiter", []string{"core"}, "feature")
 
-	// Call 0: impl.act
-	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 0: impl.act (verdict: done)
+	writeScript(t, scriptDir, 0, "Implementation written.\n\n## Verdict\ndone")
 	// Calls 1+2: parallel adversary branches → bugs_found
 	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
 	writeScript(t, scriptDir, 2, "Bugs found.\n\n## Verdict\nbugs_found")
-	// Call 3: impl.act (re-run to fix bugs)
-	writeScript(t, scriptDir, 3, "Bugs fixed.")
+	// Call 3: impl.act (re-run to fix bugs, verdict: done)
+	writeScript(t, scriptDir, 3, "Bugs fixed.\n\n## Verdict\ndone")
 	// _fork_0 is skipped on second visit (run_once)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -321,13 +330,13 @@ func TestE2EStateIterationTracking(t *testing.T) {
 func TestE2ERunOnceAdversarySkip(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-concerns", []string{"core"}, "feature")
 
-	// Call 0: impl.act
-	writeScript(t, scriptDir, 0, "First implementation attempt.")
+	// Call 0: impl.act (verdict: done)
+	writeScript(t, scriptDir, 0, "First implementation attempt.\n\n## Verdict\ndone")
 	// Calls 1+2: parallel adversary branches → bugs_found (first and only real adversary run)
 	writeScript(t, scriptDir, 1, "Bugs found.\n\n## Verdict\nbugs_found")
 	writeScript(t, scriptDir, 2, "Bugs found.\n\n## Verdict\nbugs_found")
-	// Call 3: impl.act (fix bugs)
-	writeScript(t, scriptDir, 3, "Fixed the bugs.")
+	// Call 3: impl.act (fix bugs, verdict: done)
+	writeScript(t, scriptDir, 3, "Fixed the bugs.\n\n## Verdict\ndone")
 	// Scripts 4+5 would be _fork_0 again, but run_once skips it.
 	// Write them as bugs_found to prove they are never consulted.
 	writeScript(t, scriptDir, 4, "More bugs.\n\n## Verdict\nbugs_found")
@@ -355,15 +364,21 @@ func TestE2ERunOnceAdversarySkip(t *testing.T) {
 	if ps.Iteration.Current != 4 {
 		t.Fatalf("expected iteration.current=4, got %d", ps.Iteration.Current)
 	}
-	// 2 verdicts: bugs_found (real), no_bugs_found (auto-skip)
-	if len(ps.VerdictsHistory) != 2 {
-		t.Fatalf("expected 2 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
+	// 4 verdicts: done(impl.act), bugs_found(_fork_0), done(impl.act), no_bugs_found(_fork_0 auto-skip)
+	if len(ps.VerdictsHistory) != 4 {
+		t.Fatalf("expected 4 verdicts in history, got %d: %+v", len(ps.VerdictsHistory), ps.VerdictsHistory)
 	}
-	if ps.VerdictsHistory[0].Verdict != "bugs_found" || ps.VerdictsHistory[0].State != "_fork_0" {
-		t.Fatalf("expected first verdict bugs_found@_fork_0, got %+v", ps.VerdictsHistory[0])
+	if ps.VerdictsHistory[0].Verdict != "done" || ps.VerdictsHistory[0].State != "impl.act" {
+		t.Fatalf("expected first verdict done@impl.act, got %+v", ps.VerdictsHistory[0])
 	}
-	if ps.VerdictsHistory[1].Verdict != "no_bugs_found" || ps.VerdictsHistory[1].State != "_fork_0" {
-		t.Fatalf("expected second verdict no_bugs_found@_fork_0 (auto-skip), got %+v", ps.VerdictsHistory[1])
+	if ps.VerdictsHistory[1].Verdict != "bugs_found" || ps.VerdictsHistory[1].State != "_fork_0" {
+		t.Fatalf("expected second verdict bugs_found@_fork_0, got %+v", ps.VerdictsHistory[1])
+	}
+	if ps.VerdictsHistory[2].Verdict != "done" || ps.VerdictsHistory[2].State != "impl.act" {
+		t.Fatalf("expected third verdict done@impl.act, got %+v", ps.VerdictsHistory[2])
+	}
+	if ps.VerdictsHistory[3].Verdict != "no_bugs_found" || ps.VerdictsHistory[3].State != "_fork_0" {
+		t.Fatalf("expected fourth verdict no_bugs_found@_fork_0 (auto-skip), got %+v", ps.VerdictsHistory[3])
 	}
 	// Only 4 actual agent calls — scripts 4+5 are never used.
 	if n := readCallCount(t, scriptDir); n != 4 {
@@ -388,8 +403,8 @@ func TestE2EDisputeApproved(t *testing.T) {
 
 	// Call 0: JudgeDispute → approve
 	writeScript(t, scriptDir, 0, "APPROVE_DISPUTE: test wrong")
-	// Call 1: fix run of impl.act (transitions impl.act → _fork_0)
-	writeScript(t, scriptDir, 1, "Fixed the test.")
+	// Call 1: fix run of impl.act (transitions impl.act → _fork_0, verdict: done)
+	writeScript(t, scriptDir, 1, "Fixed the test.\n\n## Verdict\ndone")
 	// Calls 2+3: _fork_0 parallel branches → no_bugs_found
 	writeScript(t, scriptDir, 2, "No bugs found.\n\n## Verdict\nno_bugs_found")
 	writeScript(t, scriptDir, 3, "No bugs found.\n\n## Verdict\nno_bugs_found")
@@ -444,8 +459,8 @@ func TestE2EDisputeRejected(t *testing.T) {
 
 	// Call 0: JudgeDispute → reject
 	writeScript(t, scriptDir, 0, "REJECT_DISPUTE: impl wrong")
-	// Call 1: impl.act continues (linear → _fork_0)
-	writeScript(t, scriptDir, 1, "Implementation fixed.")
+	// Call 1: impl.act continues (verdict: done → _fork_0)
+	writeScript(t, scriptDir, 1, "Implementation fixed.\n\n## Verdict\ndone")
 	// Calls 2+3: parallel adversary branches → no_bugs_found
 	writeScript(t, scriptDir, 2, "No bugs found.\n\n## Verdict\nno_bugs_found")
 	writeScript(t, scriptDir, 3, "No bugs found.\n\n## Verdict\nno_bugs_found")
@@ -493,12 +508,12 @@ func TestE2EMultiPhase(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-multi", []string{"core", "api"}, "feature")
 
 	// Phase "core": calls 0-2 (happy path: impl.act + 2 parallel branches)
-	writeScript(t, scriptDir, 0, "Core implementation.")
+	writeScript(t, scriptDir, 0, "Core implementation.\n\n## Verdict\ndone")
 	writeScript(t, scriptDir, 1, "No bugs.\n\n## Verdict\nno_bugs_found")
 	writeScript(t, scriptDir, 2, "No bugs.\n\n## Verdict\nno_bugs_found")
 
 	// Phase "api": calls 3-5 (happy path: impl.act + 2 parallel branches)
-	writeScript(t, scriptDir, 3, "API implementation.")
+	writeScript(t, scriptDir, 3, "API implementation.\n\n## Verdict\ndone")
 	writeScript(t, scriptDir, 4, "No bugs.\n\n## Verdict\nno_bugs_found")
 	writeScript(t, scriptDir, 5, "No bugs.\n\n## Verdict\nno_bugs_found")
 
@@ -552,7 +567,7 @@ func TestE2EMultiPhase(t *testing.T) {
 		t.Fatal("completion report missing phase names")
 	}
 
-	// Verify all 6 mock calls were consumed (3 per phase)
+	// Verify all 6 mock calls were consumed (3 per phase: impl.act + 2 adversary branches)
 	if n := readCallCount(t, scriptDir); n != 6 {
 		t.Fatalf("expected 6 mock agent calls, got %d", n)
 	}
@@ -602,8 +617,8 @@ func TestE2EBlockedPhaseReturnsError(t *testing.T) {
 func TestE2EContextCancellation(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-cancel", []string{"core"}, "feature")
 
-	// Call 0: impl.act (this will succeed)
-	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 0: impl.act (this will succeed with verdict: done)
+	writeScript(t, scriptDir, 0, "Implementation written.\n\n## Verdict\ndone")
 	// No further scripts — the phase will try to proceed to check.adversary and
 	// call the mock agent again. With MOCK_SCRIPT_DIR, call_1.txt is missing
 	// so it falls through to MOCK_OUTPUT (empty), yielding empty output which
@@ -637,8 +652,8 @@ func TestE2EContextCancellation(t *testing.T) {
 func TestE2EInvalidVerdictRetries(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-badverdict", []string{"core"}, "feature")
 
-	// Call 0: impl.act (linear, succeeds)
-	writeScript(t, scriptDir, 0, "Implementation written.")
+	// Call 0: impl.act (verdict: done)
+	writeScript(t, scriptDir, 0, "Implementation written.\n\n## Verdict\ndone")
 	// Calls 1+2: first _fork_0 attempt — branches missing verdict → parallel fails → retry
 	writeScript(t, scriptDir, 1, "This review has no verdict section at all.")
 	writeScript(t, scriptDir, 2, "This review also has no verdict section.")
@@ -672,15 +687,17 @@ func TestE2EInvalidVerdictRetries(t *testing.T) {
 }
 
 // TestE2EEmptyOutputRetries verifies that an agent returning empty output
-// still completes (linear states don't need output to transition).
+// triggers a retry, and the phase still completes once a valid verdict is produced.
 func TestE2EEmptyOutputRetries(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-empty", []string{"core"}, "feature")
 
-	// Call 0: impl.act — empty output (linear state succeeds with exit 0)
+	// Call 0: impl.act — empty output (no verdict → retry)
 	writeScript(t, scriptDir, 0, "")
-	// Calls 1+2: _fork_0 parallel branches → no_bugs_found
-	writeScript(t, scriptDir, 1, "No bugs.\n\n## Verdict\nno_bugs_found")
+	// Call 1: impl.act — retry with valid verdict
+	writeScript(t, scriptDir, 1, "Implementation.\n\n## Verdict\ndone")
+	// Calls 2+3: _fork_0 parallel branches → no_bugs_found
 	writeScript(t, scriptDir, 2, "No bugs.\n\n## Verdict\nno_bugs_found")
+	writeScript(t, scriptDir, 3, "No bugs.\n\n## Verdict\nno_bugs_found")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -701,9 +718,9 @@ func TestE2EEmptyOutputRetries(t *testing.T) {
 	if ps.CurrentState != "complete" {
 		t.Fatalf("expected complete, got %q", ps.CurrentState)
 	}
-	// 3 calls: empty impl.act (still transitions), 2 parallel branches
-	if n := readCallCount(t, scriptDir); n != 3 {
-		t.Fatalf("expected 3 mock agent calls, got %d", n)
+	// 4 calls: empty impl.act (retry) + impl.act (done) + 2 parallel branches
+	if n := readCallCount(t, scriptDir); n != 4 {
+		t.Fatalf("expected 4 mock agent calls, got %d", n)
 	}
 }
 
@@ -779,10 +796,12 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 }
 
 // TestE2EParallelPhasesNoDeps verifies that phases with no dependencies
-// run in parallel via Launch(). Two independent "feature" workflow phases
+// run in parallel via Launch(). Two independent "audit" workflow phases
 // should both complete without one waiting on the other.
+// Uses "audit" workflow (adversary → no_bugs_found → complete) so both
+// phases need the same verdict, avoiding nondeterministic script ordering issues.
 func TestE2EParallelPhasesNoDeps(t *testing.T) {
-	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "feature")
+	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "audit")
 
 	// Override plan.json to remove dependencies (setupE2E creates serial deps)
 	planDir := filepath.Join(plansDir, "e2e-parallel")
@@ -799,12 +818,10 @@ func TestE2EParallelPhasesNoDeps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Feature workflow: impl.act → _fork_0(2 parallel branches) → complete
-	// Each phase needs 3 calls. With 2 phases in parallel, ordering is nondeterministic.
-	// Write scripts: linear states accept any output; adversary needs no_bugs_found verdict.
-	// Using no_bugs_found works for both (linear states ignore the verdict section).
-	for i := 0; i < 8; i++ {
-		writeScript(t, scriptDir, i, "Done.\n\n## Verdict\nno_bugs_found")
+	// Audit workflow: adversary → no_bugs_found → complete (1 call per phase).
+	// Both phases need the same verdict, so nondeterministic ordering is fine.
+	for i := 0; i < 4; i++ {
+		writeScript(t, scriptDir, i, "No bugs.\n\n## Verdict\nno_bugs_found")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -864,9 +881,13 @@ func TestE2EStopOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Alpha will succeed normally (feature workflow: 4 calls per phase).
-	for i := 0; i < 8; i++ {
-		writeScript(t, scriptDir, i, "Done.\n\n## Verdict\napproved")
+	// Alpha would run feature workflow but beta fails immediately (invalid workflow).
+	// Scripts are safety net; may not be consumed due to StopOnFailure cancellation.
+	writeScript(t, scriptDir, 0, "Done.\n\n## Verdict\ndone")
+	writeScript(t, scriptDir, 1, "No bugs.\n\n## Verdict\nno_bugs_found")
+	writeScript(t, scriptDir, 2, "No bugs.\n\n## Verdict\nno_bugs_found")
+	for i := 3; i < 8; i++ {
+		writeScript(t, scriptDir, i, "Done.\n\n## Verdict\ndone")
 	}
 
 	// Give beta an invalid workflow type so RunPhase fails hard at

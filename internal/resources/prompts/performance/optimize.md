@@ -58,3 +58,6 @@ When done, write:
 
 ## Memory
 [Key findings, metrics, decisions made. Future runs of this state will see this.]
+
+## Verdict
+done

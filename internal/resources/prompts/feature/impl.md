@@ -62,3 +62,6 @@ When done, also write:
 
 ## Memory
 [What you explored, what worked, what failed, current state of the implementation. Future runs of this state will see this.]
+
+## Verdict
+done

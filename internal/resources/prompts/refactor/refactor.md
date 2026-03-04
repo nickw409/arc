@@ -66,3 +66,6 @@ When done, write:
 
 ## Memory
 [What was refactored, changes made, test results before/after. Future runs of this state will see this.]
+
+## Verdict
+done

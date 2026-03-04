@@ -13,9 +13,10 @@ func makeImplBlock() *Block {
 		Exits: []string{"done"},
 		States: []BlockState{
 			{
-				Name:   "impl",
-				Prompt: "prompts/adversarial/impl.md",
-				Next:   map[string]string{"": "$done"},
+				Name:     "impl",
+				Prompt:   "prompts/adversarial/impl.md",
+				Verdicts: []string{"done"},
+				Next:     map[string]string{"done": "$done"},
 			},
 		},
 	}
@@ -75,7 +76,7 @@ func TestComposeSequential(t *testing.T) {
 	// Verify impl.impl exits to adversary.adversary
 	for _, s := range wf.States {
 		if s.Name == "impl.impl" {
-			next := s.Transition.Branches[""]
+			next := s.Transition.Branches["done"]
 			if next != "adversary.adversary" {
 				t.Fatalf("impl.impl should transition to adversary.adversary, got %q", next)
 			}
@@ -444,7 +445,7 @@ func TestComposePipelineNamedSteps(t *testing.T) {
 	// write-code.impl should wire to fix-bugs.impl (sequential default).
 	for _, s := range wf.States {
 		if s.Name == "write-code.impl" {
-			if next := s.Transition.Branches[""]; next != "fix-bugs.impl" {
+			if next := s.Transition.Branches["done"]; next != "fix-bugs.impl" {
 				t.Errorf("write-code.impl → %q, want fix-bugs.impl", next)
 			}
 		}
@@ -1240,5 +1241,74 @@ func TestValidateCompositionParallelInvalidTransition(t *testing.T) {
 	}
 	if !hasRefErr {
 		t.Fatal("expected validation error for transition to non-existent state")
+	}
+}
+
+func TestComposePipelineParallelActBlocks(t *testing.T) {
+	// Parallel act blocks should produce a fork state with verdicts and valid transitions,
+	// now that act blocks declare verdicts: [done].
+	blockDefs := map[string]*Block{
+		"impl": makeImplBlock(),
+	}
+	steps := []PipelineStep{
+		{
+			Parallel: &ParallelStep{
+				Strategy: "all",
+				Blocks: []ParallelBlockRef{
+					{Name: "api", Block: "impl", Params: map[string]string{"focus": "API handlers"}},
+					{Name: "core", Block: "impl", Params: map[string]string{"focus": "Core logic"}},
+				},
+			},
+			Route: map[string]string{
+				"done": "complete",
+			},
+		},
+	}
+
+	wf, groups, err := ComposePipeline(steps, blockDefs)
+	if err != nil {
+		t.Fatalf("ComposePipeline failed: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 parallel group, got %d", len(groups))
+	}
+
+	var fork *arc.StateConfig
+	for i := range wf.States {
+		if wf.States[i].Name == "_fork_0" {
+			fork = &wf.States[i]
+			break
+		}
+	}
+	if fork == nil {
+		t.Fatal("_fork_0 not found")
+	}
+
+	// Fork should have verdict "done" from the act block entry state.
+	if len(fork.Verdicts) != 1 || fork.Verdicts[0] != "done" {
+		t.Fatalf("expected verdicts=[done], got %v", fork.Verdicts)
+	}
+
+	// Fork transition for "done" should route to complete.
+	target, ok := fork.Transition.Branches["done"]
+	if !ok {
+		t.Fatal("_fork_0 should have transition for 'done'")
+	}
+	if target != "complete" {
+		t.Fatalf("_fork_0 'done' → %q, want 'complete'", target)
+	}
+
+	// Verify parallel config has 2 branches with correct params.
+	if fork.Parallel == nil {
+		t.Fatal("_fork_0 should have ParallelConfig")
+	}
+	if len(fork.Parallel.Branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d", len(fork.Parallel.Branches))
+	}
+	if fork.Parallel.Branches[0].Params["focus"] != "API handlers" {
+		t.Fatalf("branch 0 focus = %q, want 'API handlers'", fork.Parallel.Branches[0].Params["focus"])
+	}
+	if fork.Parallel.Branches[1].Params["focus"] != "Core logic" {
+		t.Fatalf("branch 1 focus = %q, want 'Core logic'", fork.Parallel.Branches[1].Params["focus"])
 	}
 }

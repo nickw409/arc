@@ -1,0 +1,45 @@
+name: code-review
+version: 2
+description: Parallel code review across multiple areas with synthesis
+
+pipeline:
+  - parallel:
+      strategy: all
+      blocks:
+        - name: review-core
+          block: act
+          params:
+            focus: "Review core engine packages: internal/pipeline/, internal/orchestrator/, internal/state/, internal/arc/. Evaluate error handling, race conditions, code clarity, dead code, edge cases, test coverage, security, and API design. Write findings to .plans/active/full-code-review/review-core.md."
+            files: ".plans/active/full-code-review/review-core.md"
+            max_turns: "40"
+            timeout: "1200"
+        - name: review-interface
+          block: act
+          params:
+            focus: "Review interface layer packages: internal/cli/, internal/mcp/, internal/config/, internal/monitor/. Evaluate input validation, error handling, security (command injection, path traversal), code clarity (tools.go is 807 lines), test coverage, UX consistency. Write findings to .plans/active/full-code-review/review-interface.md."
+            files: ".plans/active/full-code-review/review-interface.md"
+            max_turns: "40"
+            timeout: "1200"
+        - name: review-agents
+          block: act
+          params:
+            focus: "Review agent and workflow packages: internal/agent/, internal/runner/, internal/prompt/, internal/resources/, internal/block/, internal/workflow/. Evaluate subprocess management, prompt injection risks, resource loading, block composition, test coverage. Write findings to .plans/active/full-code-review/review-agents.md."
+            files: ".plans/active/full-code-review/review-agents.md"
+            max_turns: "40"
+            timeout: "1200"
+        - name: review-support
+          block: act
+          params:
+            focus: "Review support packages: internal/plan/, internal/review/, internal/gitops/, internal/worktree/, internal/validate/, internal/dev/, internal/selfupdate/, internal/migrate/, internal/project/, internal/logging/, internal/guide/. Evaluate error handling, security, test coverage, dead code. Write findings to .plans/active/full-code-review/review-support.md."
+            files: ".plans/active/full-code-review/review-support.md"
+            max_turns: "40"
+            timeout: "1200"
+  - block: act
+    name: synthesis
+    params:
+      focus: "Read .plans/active/full-code-review/review-core.md, .plans/active/full-code-review/review-interface.md, .plans/active/full-code-review/review-agents.md, and .plans/active/full-code-review/review-support.md. Compile all findings into a single prioritized report at .plans/active/full-code-review/review-final.md. Organize by severity (Critical > High > Medium > Low). Deduplicate cross-cutting concerns. Summarize top 10 actionable findings."
+      files: ".plans/active/full-code-review/review-final.md"
+      max_turns: "20"
+      timeout: "600"
+
+terminal_states: [complete, blocked]

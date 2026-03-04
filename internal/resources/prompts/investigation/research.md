@@ -59,3 +59,6 @@ When done, write:
 
 ## Memory
 [Key findings, files examined, open questions. Future runs of this state will see this.]
+
+## Verdict
+done

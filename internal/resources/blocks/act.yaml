@@ -17,4 +17,6 @@ states:
       max_turns: ${max_turns}
       timeout: ${timeout}
       model: ${model}
-    next: $done
+    verdicts: [done]
+    next:
+      done: $done

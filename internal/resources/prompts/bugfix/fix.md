@@ -57,3 +57,6 @@ When done, write:
 
 ## Memory
 [What fix was applied, which files were changed, test results. Future runs of this state will see this.]
+
+## Verdict
+done

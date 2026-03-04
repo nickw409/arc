@@ -211,15 +211,15 @@ func TestRunStateContextCancelled(t *testing.T) {
 	}
 }
 
-func TestRunStateLinearStateNoVerdicts(t *testing.T) {
-	// "fix.act" in audit workflow is a linear state (next: audit.adversary). No verdict extraction needed.
+func TestRunStateActBlockDoneVerdict(t *testing.T) {
+	// "fix.act" in audit workflow uses act block with verdict: done → audit.adversary.
 	state := arc.NewPhaseState("test-plan", "test-phase", "audit")
 	state.CurrentState = "fix.act"
 	state.PhaseStatus = "fix.act"
 
 	plansDir := setupTestPlan(t, state)
 
-	t.Setenv("MOCK_OUTPUT", "Implementation complete, no verdict needed.\n")
+	t.Setenv("MOCK_OUTPUT", "Implementation complete.\n\n## Verdict\ndone\n")
 
 	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
@@ -233,9 +233,8 @@ func TestRunStateLinearStateNoVerdicts(t *testing.T) {
 	if result.NextState != "audit.adversary" {
 		t.Fatalf("got NextState=%q, want %q", result.NextState, "audit.adversary")
 	}
-	// No verdict for linear states
-	if result.Verdict != "" {
-		t.Fatalf("got Verdict=%q, want empty (linear state)", result.Verdict)
+	if result.Verdict != "done" {
+		t.Fatalf("got Verdict=%q, want %q", result.Verdict, "done")
 	}
 }
 
@@ -495,7 +494,7 @@ func TestRunStateMemoryInjection(t *testing.T) {
 		t.Fatalf("setup: WriteMemory failed: %v", err)
 	}
 
-	t.Setenv("MOCK_OUTPUT", "Work done.\n")
+	t.Setenv("MOCK_OUTPUT", "Work done.\n\n## Verdict\ndone\n")
 
 	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
@@ -696,7 +695,7 @@ func TestRunStateAppendsAgentLifecycleToHistory(t *testing.T) {
 	plansDir := setupTestPlan(t, st)
 	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
 
-	t.Setenv("MOCK_OUTPUT", "Implementation complete.\n")
+	t.Setenv("MOCK_OUTPUT", "Implementation complete.\n\n## Verdict\ndone\n")
 
 	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
@@ -807,7 +806,7 @@ func TestRunStateNoStderrAppendOnZeroExit(t *testing.T) {
 	phaseDir := filepath.Join(plansDir, "test-plan", "phases", "test-phase")
 
 	t.Setenv("MOCK_STDERR", "some warning")
-	t.Setenv("MOCK_OUTPUT", "done\n")
+	t.Setenv("MOCK_OUTPUT", "done\n\n## Verdict\ndone\n")
 
 	result := RunState(context.Background(), testLogger(), IterateOptions{
 		PlanName:  "test-plan",
@@ -851,6 +850,72 @@ func TestRunStateNoStderrAppendWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(history), "stderr:") {
 		t.Fatalf("history.md should NOT contain stderr line when stderr is empty, got:\n%s", string(history))
+	}
+}
+
+func TestRunStateCustomWorkflowFromPlanDir(t *testing.T) {
+	// WorkflowType "custom" should resolve workflow.yaml from the plan directory
+	st := arc.NewPhaseState("test-plan", "test-phase", "custom")
+	st.CurrentState = "complete"
+	st.PhaseStatus = "complete"
+
+	plansDir := setupTestPlan(t, st)
+
+	// Write workflow.yaml to the plan directory
+	wfYAML := `name: custom-inline
+version: 1
+description: Custom inline workflow
+entry_state: impl
+terminal_states: [complete, blocked]
+states:
+  - name: impl
+    description: Implement
+    prompt: prompts/feature/impl.md
+    next: complete
+  - name: complete
+    description: Done
+    prompt: prompts/common/complete.md
+  - name: blocked
+    description: Blocked
+    prompt: prompts/common/blocked.md
+`
+	planDir := filepath.Join(plansDir, "test-plan")
+	if err := os.WriteFile(filepath.Join(planDir, "workflow.yaml"), []byte(wfYAML), 0644); err != nil {
+		t.Fatalf("failed to write workflow.yaml: %v", err)
+	}
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	// Should succeed — terminal state detected after loading custom workflow
+	if result.Action != arc.ActionContinue {
+		t.Fatalf("got Action=%v, want ActionContinue; err=%v", result.Action, result.Err)
+	}
+}
+
+func TestRunStateCustomWorkflowMissingFile(t *testing.T) {
+	// WorkflowType "custom" with no workflow.yaml should fail
+	st := arc.NewPhaseState("test-plan", "test-phase", "custom")
+	st.CurrentState = "impl"
+	st.PhaseStatus = "impl"
+
+	plansDir := setupTestPlan(t, st)
+	// Do NOT write workflow.yaml
+
+	result := RunState(context.Background(), testLogger(), IterateOptions{
+		PlanName:  "test-plan",
+		PhaseName: "test-phase",
+		PlansDir:  plansDir,
+	})
+
+	if result.Action != arc.ActionAbort {
+		t.Fatalf("got Action=%v, want ActionAbort", result.Action)
+	}
+	if result.Err == nil {
+		t.Fatal("expected error for missing workflow.yaml")
 	}
 }
 

@@ -61,3 +61,6 @@ When done, write:
 
 ## Memory
 [What was drafted, key conclusions, areas that need more depth. Future runs of this state will see this.]
+
+## Verdict
+done

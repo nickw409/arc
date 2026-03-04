@@ -281,10 +281,10 @@ terminal_states: [complete, blocked]
 		t.Fatalf("machine entry != 'act.act'")
 	}
 
-	// act.act → adversary.adversary (linear)
-	next, err := m.NextState("act.act", "")
+	// act.act → adversary.adversary (verdict: done)
+	next, err := m.NextState("act.act", "done")
 	if err != nil {
-		t.Fatalf("NextState from impl.impl: %v", err)
+		t.Fatalf("NextState from act.act: %v", err)
 	}
 	if next != "adversary.adversary" {
 		t.Fatalf("expected adversary.adversary from act.act, got %q", next)

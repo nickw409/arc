@@ -64,3 +64,6 @@ When done, write:
 
 ## Memory
 [Root cause summary, files examined, key findings. Future runs of this state will see this.]
+
+## Verdict
+done
