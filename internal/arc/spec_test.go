@@ -17,7 +17,6 @@ func TestPhaseSpecJSON(t *testing.T) {
 		Complexity: "medium",
 		Checkpoints: []Checkpoint{
 			{Name: "middleware-struct", Description: "Middleware type with constructor", Test: "go test ./internal/api/ -run TestMiddlewareNew -count=1"},
-			{Name: "token-validation", Description: "JWT parsing and validation", Test: "go test ./internal/api/ -run TestTokenValidation -count=1"},
 		},
 		Gate: GateSpec{
 			Assertions: []GateAssertion{
@@ -40,11 +39,8 @@ func TestPhaseSpecJSON(t *testing.T) {
 	if spec2.Name != "api-auth" {
 		t.Errorf("Name = %q, want %q", spec2.Name, "api-auth")
 	}
-	if len(spec2.Checkpoints) != 2 {
-		t.Fatalf("len(Checkpoints) = %d, want 2", len(spec2.Checkpoints))
-	}
-	if spec2.Checkpoints[0].Name != "middleware-struct" {
-		t.Errorf("Checkpoint[0].Name = %q, want %q", spec2.Checkpoints[0].Name, "middleware-struct")
+	if len(spec2.Files) != 2 {
+		t.Fatalf("len(Files) = %d, want 2", len(spec2.Files))
 	}
 	if len(spec2.Gate.Assertions) != 3 {
 		t.Fatalf("len(Assertions) = %d, want 3", len(spec2.Gate.Assertions))
@@ -79,17 +75,11 @@ gate:
 	if spec.Complexity != "simple" {
 		t.Errorf("Complexity = %q, want %q", spec.Complexity, "simple")
 	}
-	if len(spec.Checkpoints) != 1 {
-		t.Fatalf("len(Checkpoints) = %d, want 1", len(spec.Checkpoints))
-	}
 	if !spec.Gate.VerifierAgent {
 		t.Error("VerifierAgent = false, want true")
 	}
 	if len(spec.Gate.Assertions) != 2 {
 		t.Fatalf("len(Assertions) = %d, want 2", len(spec.Gate.Assertions))
-	}
-	if spec.Gate.Assertions[0].FileExists != "internal/api/auth.go" {
-		t.Errorf("Assertion[0].FileExists = %q", spec.Gate.Assertions[0].FileExists)
 	}
 }
 

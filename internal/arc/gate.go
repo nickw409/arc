@@ -2,69 +2,81 @@ package arc
 
 import "time"
 
-// GateResult is the outcome of running an arc gate check.
-type GateResult struct {
-	Passed     bool              `json:"passed"`
-	Assertions []AssertionResult `json:"assertions"`
-	TestOutput string            `json:"test_output,omitempty"`
-	RunCount   int               `json:"run_count"`
-	Timestamp  time.Time         `json:"timestamp"`
-}
-
-// AssertionResult is the result of a single gate assertion.
-type AssertionResult struct {
-	Type    string `json:"type"`    // file_exists, grep, test_exists, test_pass
-	Target  string `json:"target"`  // what was checked (file path, pattern, test name)
-	Passed  bool   `json:"passed"`
-	Detail  string `json:"detail,omitempty"` // human-readable explanation on failure
-}
-
-// GateAssertion defines a single verification check in a phase gate.
+// GateAssertion defines a single verifiable condition for a phase gate.
 type GateAssertion struct {
-	FileExists string `json:"file_exists,omitempty" yaml:"file_exists,omitempty"`
-	Grep       string `json:"grep,omitempty" yaml:"grep,omitempty"`
-	TestExists string `json:"test_exists,omitempty" yaml:"test_exists,omitempty"`
+	// Type is the assertion kind: "file_exists", "grep", or "test_exists".
+	Type string `yaml:"type"`
+	// Description is a human-readable label for this assertion.
+	Description string `yaml:"description"`
+	// Target is the file path (for file_exists), pattern (for grep), or
+	// function name (for test_exists).
+	Target string `yaml:"target"`
+	// FileExists checks that the given path exists relative to workdir.
+	FileExists string `yaml:"file_exists,omitempty"`
+	// Grep searches all .go files for the given pattern.
+	Grep string `yaml:"grep,omitempty"`
+	// TestExists searches _test.go files for a function with the given name.
+	TestExists string `yaml:"test_exists,omitempty"`
 }
 
-// Type returns the assertion type string.
-func (a GateAssertion) Type() string {
-	switch {
-	case a.FileExists != "":
-		return "file_exists"
-	case a.Grep != "":
-		return "grep"
-	case a.TestExists != "":
-		return "test_exists"
-	default:
-		return "unknown"
-	}
-}
-
-// Target returns the assertion target value.
-func (a GateAssertion) Target() string {
-	switch {
-	case a.FileExists != "":
-		return a.FileExists
-	case a.Grep != "":
-		return a.Grep
-	case a.TestExists != "":
-		return a.TestExists
-	default:
-		return ""
-	}
-}
-
-// CheckpointStatus tracks the verification state of a single checkpoint.
-type CheckpointStatus struct {
-	Name        string `json:"name"`
+// AssertionResult is the outcome of a single assertion check.
+type AssertionResult struct {
+	// Description is the human-readable label for this assertion.
 	Description string `json:"description"`
-	Status      string `json:"status"` // pass, fail, not_found
-	TestOutput  string `json:"test_output,omitempty"`
+	// Passed is true if the assertion succeeded.
+	Passed bool `json:"passed"`
+	// Detail provides extra context (e.g., matched file path or error message).
+	Detail string `json:"detail,omitempty"`
 }
 
-// GateStatus is the persistent gate state written to gate-status.json.
+// CheckpointStatus is the outcome of a single checkpoint's test command.
+type CheckpointStatus struct {
+	// Name is the checkpoint name.
+	Name string `json:"name"`
+	// Status is "pass", "fail", or "not_run".
+	Status string `json:"status"`
+	// Output is the combined stdout+stderr from the test command.
+	Output string `json:"output,omitempty"`
+}
+
+// GateResult is the complete outcome of a gate run.
+type GateResult struct {
+	// Passed is true only if all assertions and checkpoints passed.
+	Passed bool `json:"passed"`
+	// Assertions holds per-assertion results.
+	Assertions []AssertionResult `json:"assertions"`
+	// Checkpoints holds per-checkpoint test results.
+	Checkpoints []CheckpointStatus `json:"checkpoints"`
+	// ScopedTestPassed is true if the phase's scoped test command succeeded.
+	ScopedTestPassed bool `json:"scoped_test_passed"`
+	// ScopedTestOutput is the combined output from the scoped test command.
+	ScopedTestOutput string `json:"scoped_test_output,omitempty"`
+	// ScopedTestSkipped is true when no scoped test command was configured.
+	ScopedTestSkipped bool `json:"scoped_test_skipped"`
+}
+
+// GateStatus is the persistent state written to gate-status.json.
 type GateStatus struct {
-	LastRun     time.Time                  `json:"last_run"`
-	RunCount    int                        `json:"run_count"`
-	Checkpoints map[string]string          `json:"checkpoints"` // name → pass/fail/not_found
+	// LastRun is the RFC3339 timestamp of the most recent gate execution.
+	LastRun string `json:"last_run"`
+	// RunCount is the number of times the gate has been run this session.
+	RunCount int `json:"run_count"`
+	// Passed mirrors the most recent GateResult.Passed value.
+	Passed bool `json:"passed"`
+	// Checkpoints maps checkpoint name → status string ("pass"/"fail"/"not_found").
+	Checkpoints map[string]string `json:"checkpoints"`
+}
+
+// NewGateStatus creates a GateStatus initialized from a GateResult.
+func NewGateStatus(result *GateResult) *GateStatus {
+	cps := make(map[string]string, len(result.Checkpoints))
+	for _, cp := range result.Checkpoints {
+		cps[cp.Name] = cp.Status
+	}
+	return &GateStatus{
+		LastRun:     time.Now().UTC().Format(time.RFC3339),
+		RunCount:    1,
+		Passed:      result.Passed,
+		Checkpoints: cps,
+	}
 }

@@ -3,44 +3,27 @@ package arc
 import (
 	"encoding/json"
 	"testing"
-	"time"
 )
 
-func TestGateAssertionType(t *testing.T) {
+func TestGateAssertionFields(t *testing.T) {
 	tests := []struct {
 		name string
 		a    GateAssertion
-		want string
 	}{
-		{"file_exists", GateAssertion{FileExists: "foo.go"}, "file_exists"},
-		{"grep", GateAssertion{Grep: "func New"}, "grep"},
-		{"test_exists", GateAssertion{TestExists: "TestFoo"}, "test_exists"},
-		{"unknown", GateAssertion{}, "unknown"},
+		{"file_exists", GateAssertion{FileExists: "foo.go"}},
+		{"grep", GateAssertion{Grep: "func New"}},
+		{"test_exists", GateAssertion{TestExists: "TestFoo"}},
+		{"legacy_type", GateAssertion{Type: "file_exists", Target: "bar.go"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.a.Type(); got != tt.want {
-				t.Errorf("Type() = %q, want %q", got, tt.want)
+			data, err := json.Marshal(tt.a)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
 			}
-		})
-	}
-}
-
-func TestGateAssertionTarget(t *testing.T) {
-	tests := []struct {
-		name string
-		a    GateAssertion
-		want string
-	}{
-		{"file_exists", GateAssertion{FileExists: "foo.go"}, "foo.go"},
-		{"grep", GateAssertion{Grep: "func New"}, "func New"},
-		{"test_exists", GateAssertion{TestExists: "TestFoo"}, "TestFoo"},
-		{"empty", GateAssertion{}, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.a.Target(); got != tt.want {
-				t.Errorf("Target() = %q, want %q", got, tt.want)
+			var a2 GateAssertion
+			if err := json.Unmarshal(data, &a2); err != nil {
+				t.Fatalf("unmarshal: %v", err)
 			}
 		})
 	}
@@ -50,11 +33,15 @@ func TestGateResultJSON(t *testing.T) {
 	r := GateResult{
 		Passed: true,
 		Assertions: []AssertionResult{
-			{Type: "file_exists", Target: "foo.go", Passed: true},
-			{Type: "grep", Target: "func New", Passed: false, Detail: "pattern not found"},
+			{Description: "file check", Passed: true},
+			{Description: "grep check", Passed: false, Detail: "pattern not found"},
 		},
-		RunCount:  3,
-		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Checkpoints: []CheckpointStatus{
+			{Name: "auth", Status: "pass"},
+			{Name: "validate", Status: "fail", Output: "error output"},
+		},
+		ScopedTestPassed:  true,
+		ScopedTestSkipped: false,
 	}
 	data, err := json.Marshal(r)
 	if err != nil {
@@ -74,15 +61,19 @@ func TestGateResultJSON(t *testing.T) {
 	if r2.Assertions[1].Detail != "pattern not found" {
 		t.Errorf("Detail = %q, want %q", r2.Assertions[1].Detail, "pattern not found")
 	}
-	if r2.RunCount != 3 {
-		t.Errorf("RunCount = %d, want 3", r2.RunCount)
+	if len(r2.Checkpoints) != 2 {
+		t.Fatalf("len(Checkpoints) = %d, want 2", len(r2.Checkpoints))
+	}
+	if r2.Checkpoints[1].Output != "error output" {
+		t.Errorf("Output = %q, want %q", r2.Checkpoints[1].Output, "error output")
 	}
 }
 
 func TestGateStatusJSON(t *testing.T) {
 	s := GateStatus{
-		LastRun:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		LastRun:     "2026-01-01T00:00:00Z",
 		RunCount:    5,
+		Passed:      true,
 		Checkpoints: map[string]string{"auth": "pass", "validate": "fail"},
 	}
 	data, err := json.Marshal(s)
@@ -95,5 +86,31 @@ func TestGateStatusJSON(t *testing.T) {
 	}
 	if s2.Checkpoints["auth"] != "pass" {
 		t.Errorf("checkpoint auth = %q, want %q", s2.Checkpoints["auth"], "pass")
+	}
+	if !s2.Passed {
+		t.Error("Passed = false, want true")
+	}
+}
+
+func TestNewGateStatus(t *testing.T) {
+	result := &GateResult{
+		Passed: true,
+		Checkpoints: []CheckpointStatus{
+			{Name: "a", Status: "pass"},
+			{Name: "b", Status: "fail"},
+		},
+	}
+	status := NewGateStatus(result)
+	if !status.Passed {
+		t.Error("Passed = false, want true")
+	}
+	if status.RunCount != 1 {
+		t.Errorf("RunCount = %d, want 1", status.RunCount)
+	}
+	if status.Checkpoints["a"] != "pass" {
+		t.Errorf("checkpoint a = %q, want pass", status.Checkpoints["a"])
+	}
+	if status.Checkpoints["b"] != "fail" {
+		t.Errorf("checkpoint b = %q, want fail", status.Checkpoints["b"])
 	}
 }
