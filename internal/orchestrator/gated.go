@@ -83,6 +83,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	var lastGateResult *arc.GateResult
 	var lastDiff string
 	prevCheckpointsPassed := 0
+	var attemptHistory []AttemptRecord
 
 	for attempt := 1; attempt <= MaxGatedAttempts; attempt++ {
 		if ctx.Err() != nil {
@@ -173,6 +174,15 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Capture diff for retry context
 		lastDiff = captureDiff(workDir)
 
+		// Record attempt for strategic agent context
+		attemptHistory = append(attemptHistory, AttemptRecord{
+			Attempt:           attempt,
+			GateOutput:        formatted,
+			CheckpointsPassed: countCheckpointsPassed(gateResult),
+			CheckpointsTotal:  len(gateResult.Assertions) + len(gateResult.Checkpoints),
+			DiffSummary:       lastDiff,
+		})
+
 		// Classify failure
 		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts, prevCheckpointsPassed)
 		prevCheckpointsPassed = countCheckpointsPassed(gateResult)
@@ -187,8 +197,32 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		case TierGiveUp:
 			// Fall through to mark failed below
 		case TierStrategic:
-			// TODO: tier 3 orchestrator agent intervention (Phase 3D)
-			opts.Logger.Warn("strategic intervention needed (not yet implemented), retrying with feedback")
+			// Tier 3: spawn orchestrator agent for strategic diagnosis
+			fmt.Printf("[%s] No progress after %d attempts — running strategic intervention\n",
+				opts.PhaseName, attempt)
+			decision, stratErr := RunStrategicIntervention(ctx, opts, spec, attemptHistory)
+			if stratErr != nil {
+				opts.Logger.Warn("strategic intervention failed", "error", stratErr)
+				continue // fall back to feedback retry
+			}
+			opts.Logger.Info("strategic decision",
+				"action", decision.Action,
+				"phase", opts.PhaseName,
+			)
+			fmt.Printf("[%s] Strategic decision: %s\n", opts.PhaseName, decision.Action)
+
+			if applyStrategicDecision(decision, spec, gateResult) {
+				// Spec or gate was modified — retry with updated context
+				opts.Logger.Info("applied strategic changes, retrying",
+					"phase", opts.PhaseName,
+					"action", decision.Action,
+				)
+				continue
+			}
+			// Strategic agent said give_up or split_phase (not handled inline)
+			if decision.Action == "give_up" {
+				break
+			}
 			continue
 		default:
 			continue

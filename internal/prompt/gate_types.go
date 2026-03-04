@@ -44,9 +44,18 @@ type OrchestratorData struct {
 
 // AttemptData describes a single failed attempt in the orchestrator prompt.
 type AttemptData struct {
+	Attempt           int
 	GateOutput        string
 	CheckpointsPassed int
 	CheckpointsTotal  int
+	DiffSummary       string
+}
+
+// StrategicData is the template data for the strategic intervention prompt.
+type StrategicData struct {
+	PhaseName   string
+	SpecSummary string
+	History     []AttemptData
 }
 
 // AdversaryData is the template data for the adversary prompt.

@@ -48,8 +48,30 @@ type LaunchResult struct {
 	Usage        arc.Usage
 }
 
-// Launch starts the orchestrator for a plan.
+// IsGatedPlan checks if a plan uses gate-based execution by looking for
+// spec.yaml files in its phase directories. Plans created with structured
+// specs (arc_plan_add_phase) use the gate-based orchestrator; legacy plans
+// with plan.md files use the state machine orchestrator.
+func IsGatedPlan(plansDir, planName string) bool {
+	planDir := filepath.Join(plansDir, planName)
+	meta, err := state.ReadPlan(planDir)
+	if err != nil || len(meta.Phases) == 0 {
+		return false
+	}
+	specPath := filepath.Join(planDir, "phases", meta.Phases[0], "spec.yaml")
+	_, err = os.Stat(specPath)
+	return err == nil
+}
+
+// Launch starts the orchestrator for a plan. It auto-detects whether the plan
+// uses gate-based execution (spec.yaml) or legacy state machine execution
+// (plan.md) and delegates accordingly.
 func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
+	// Auto-detect gate-based plans and delegate
+	if IsGatedPlan(opts.PlansDir, opts.PlanName) {
+		return LaunchGated(ctx, opts)
+	}
+
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
 
 	if err := acquireLock(planDir); err != nil {
