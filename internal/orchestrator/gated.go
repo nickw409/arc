@@ -1,0 +1,327 @@
+package orchestrator
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/nwiley/arc/internal/adapter"
+	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/gate"
+	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/state"
+)
+
+const (
+	// MaxGatedAttempts is the maximum number of agent sessions per phase (1 initial + retries).
+	MaxGatedAttempts = 4
+)
+
+// RunPhaseGated executes a phase using the gate-based verification model.
+//
+// Flow per attempt:
+//  1. Build prompt (impl on first attempt, retry with gate feedback on subsequent)
+//  2. Spawn agent via adapter
+//  3. Run hard gate after agent exits
+//  4. If gate passes → commit and mark complete
+//  5. If gate fails → classify error tier, retry or give up
+//
+// The working directory (worktree) is preserved across retries — agents build
+// on previous attempts rather than starting from scratch.
+func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
+	phaseDir := filepath.Join(opts.PlansDir, opts.PlanName, "phases", opts.PhaseName)
+
+	// State file for tracking progress
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+
+	// Read phase spec
+	spec, err := plan.ReadSpec(opts.PlansDir, opts.PlanName, opts.PhaseName)
+	if err != nil {
+		return fmt.Errorf("reading phase spec: %w", err)
+	}
+
+	// Resolve adapter
+	adapterName := "claude"
+	if opts.Config != nil {
+		adapterName = opts.Config.AgentForRole("impl")
+	}
+	agentAdapter := adapter.Get(adapterName)
+
+	// Determine working directory
+	workDir := opts.WorkingDir
+	if workDir == "" {
+		workDir = opts.ProjectDir
+		if workDir == "" {
+			workDir, _ = os.Getwd()
+		}
+	}
+
+	// Pre-flight check
+	if err := agentAdapter.Preflight(ctx, workDir); err != nil {
+		return fmt.Errorf("adapter preflight failed: %w", err)
+	}
+
+	// Load project context
+	projectCtx := prompt.LoadProjectContext(workDir)
+
+	// Build session config from complexity
+	turnBudget := arc.DefaultTurnBudget(spec.Complexity)
+	sessionCfg := arc.SessionConfig{
+		MaxTurns: turnBudget,
+		Timeout:  time.Duration(turnBudget) * 30 * time.Second,
+	}
+
+	// Gate spec path
+	specPath := filepath.Join(phaseDir, "spec.yaml")
+
+	var lastGateResult *arc.GateResult
+	var lastDiff string
+	prevCheckpointsPassed := 0
+
+	for attempt := 1; attempt <= MaxGatedAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Build prompt
+		var agentPrompt string
+		if attempt == 1 {
+			agentPrompt, err = buildImplPrompt(spec, projectCtx)
+		} else {
+			agentPrompt, err = buildRetryPrompt(spec, projectCtx, attempt, lastGateResult, lastDiff)
+		}
+		if err != nil {
+			return fmt.Errorf("building prompt (attempt %d): %w", attempt, err)
+		}
+
+		// Update state
+		if updateErr := sf.Update(func(s *arc.PhaseState) error {
+			s.PhaseStatus = "implementing"
+			s.Iteration.Current = attempt
+			return nil
+		}); updateErr != nil {
+			opts.Logger.Warn("failed to update state", "error", updateErr)
+		}
+
+		opts.Logger.Info("spawning agent",
+			"phase", opts.PhaseName,
+			"attempt", attempt,
+			"max_attempts", MaxGatedAttempts,
+			"adapter", agentAdapter.Name(),
+		)
+		fmt.Printf("[%s] Attempt %d/%d — spawning %s agent\n",
+			opts.PhaseName, attempt, MaxGatedAttempts, agentAdapter.Name())
+
+		// Spawn agent
+		result, spawnErr := agentAdapter.Spawn(ctx, agentPrompt, workDir, sessionCfg)
+
+		// Accumulate usage
+		if result != nil && !result.Usage.IsZero() {
+			if updateErr := sf.Update(func(s *arc.PhaseState) error {
+				s.Usage = s.Usage.Add(result.Usage)
+				return nil
+			}); updateErr != nil {
+				opts.Logger.Warn("failed to persist usage", "error", updateErr)
+			}
+		}
+
+		// Handle spawn-level failures
+		if spawnErr != nil {
+			tier := classifySpawnError(result, spawnErr)
+			if tier == TierTransient && attempt < MaxGatedAttempts {
+				opts.Logger.Warn("transient spawn error, retrying",
+					"attempt", attempt, "error", spawnErr)
+				continue
+			}
+			// Agent failed hard — still run gate in case it made partial progress
+			opts.Logger.Warn("agent spawn failed, running gate anyway",
+				"attempt", attempt, "error", spawnErr)
+		}
+
+		// Run hard gate
+		fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
+		gateResult, gateErr := gate.Run(specPath, workDir)
+		if gateErr != nil {
+			opts.Logger.Warn("gate execution error", "error", gateErr)
+			if attempt < MaxGatedAttempts {
+				continue
+			}
+			return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
+		}
+
+		// Write gate status to phase dir
+		if writeErr := gate.WriteStatus(phaseDir, gateResult); writeErr != nil {
+			opts.Logger.Warn("failed to write gate status", "error", writeErr)
+		}
+
+		if gateResult.Passed {
+			return gatedPhaseComplete(opts, sf, spec, workDir)
+		}
+
+		// Gate failed — log and prepare for retry
+		lastGateResult = gateResult
+		formatted := gate.Format(gateResult)
+		fmt.Printf("[%s] Gate FAILED (attempt %d/%d):\n%s\n",
+			opts.PhaseName, attempt, MaxGatedAttempts, formatted)
+
+		// Capture diff for retry context
+		lastDiff = captureDiff(workDir)
+
+		// Classify failure
+		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts, prevCheckpointsPassed)
+		prevCheckpointsPassed = countCheckpointsPassed(gateResult)
+
+		opts.Logger.Info("gate failed",
+			"attempt", attempt,
+			"tier", tier,
+			"checkpoints_passed", prevCheckpointsPassed,
+		)
+
+		switch tier {
+		case TierGiveUp:
+			// Fall through to mark failed below
+		case TierStrategic:
+			// TODO: tier 3 orchestrator agent intervention (Phase 3D)
+			opts.Logger.Warn("strategic intervention needed (not yet implemented), retrying with feedback")
+			continue
+		default:
+			continue
+		}
+		break
+	}
+
+	// Exhausted all attempts — mark phase as blocked
+	reason := fmt.Sprintf("gate did not pass after %d attempts", MaxGatedAttempts)
+	if lastGateResult != nil {
+		reason = fmt.Sprintf("gate failed after %d attempts:\n%s", MaxGatedAttempts, gate.Format(lastGateResult))
+	}
+
+	if updateErr := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "blocked"
+		s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+		return nil
+	}); updateErr != nil {
+		return fmt.Errorf("persisting blocked state: %w", updateErr)
+	}
+
+	return fmt.Errorf("phase %s blocked: gate did not pass after %d attempts", opts.PhaseName, MaxGatedAttempts)
+}
+
+// gatedPhaseComplete handles the success path: commit changes and mark phase complete.
+func gatedPhaseComplete(opts RunPhaseOptions, sf *state.StateFile, spec *arc.PhaseSpec, workDir string) error {
+	fmt.Printf("[%s] Gate PASSED\n", opts.PhaseName)
+
+	// Commit changes
+	desc := spec.Spec
+	if desc == "" {
+		desc = spec.Description
+	}
+	if len(desc) > 72 {
+		desc = desc[:72]
+	}
+	desc = strings.ToLower(strings.TrimSpace(desc))
+	if desc == "" {
+		desc = "implement phase"
+	}
+
+	hash, commitErr := commitPhase(opts, "feat", desc, workDir)
+	if commitErr != nil {
+		opts.Logger.Warn("commit failed", "error", commitErr)
+	} else if hash != "" {
+		fmt.Printf("[%s] Committed: %s\n", opts.PhaseName, shortHash(hash))
+		if updateErr := sf.Update(func(s *arc.PhaseState) error {
+			s.LastCommit = hash
+			return nil
+		}); updateErr != nil {
+			opts.Logger.Warn("failed to persist commit hash", "error", updateErr)
+		}
+	}
+
+	// Mark complete
+	if updateErr := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "complete"
+		return nil
+	}); updateErr != nil {
+		return fmt.Errorf("persisting complete state: %w", updateErr)
+	}
+
+	return nil
+}
+
+// buildImplPrompt renders the implementation prompt from the phase spec.
+func buildImplPrompt(spec *arc.PhaseSpec, projectCtx string) (string, error) {
+	checkpoints := make([]prompt.CheckpointData, len(spec.Checkpoints))
+	for i, cp := range spec.Checkpoints {
+		checkpoints[i] = prompt.CheckpointData{
+			Name:        cp.Name,
+			Description: cp.Description,
+			Test:        cp.Test,
+		}
+	}
+
+	data := prompt.ImplData{
+		Spec:           spec.Spec,
+		Files:          spec.Files,
+		Checkpoints:    checkpoints,
+		Plan:           spec.Name, // used in arc gate command
+		Phase:          spec.Name,
+		TestCommand:    spec.Test,
+		ProjectContext: projectCtx,
+	}
+
+	return prompt.RenderGatePrompt("impl", data)
+}
+
+// buildRetryPrompt renders the implementation prompt plus retry context.
+func buildRetryPrompt(spec *arc.PhaseSpec, projectCtx string, attempt int, lastGate *arc.GateResult, diff string) (string, error) {
+	// Start with the full impl prompt
+	implPrompt, err := buildImplPrompt(spec, projectCtx)
+	if err != nil {
+		return "", err
+	}
+
+	// Render retry addendum
+	gateOutput := ""
+	if lastGate != nil {
+		gateOutput = gate.Format(lastGate)
+	}
+
+	retryData := prompt.RetryData{
+		Attempt:     attempt,
+		MaxAttempts: MaxGatedAttempts,
+		GateOutput:  gateOutput,
+		DiffSummary: diff,
+	}
+
+	retryAddendum, err := prompt.RenderGatePrompt("retry", retryData)
+	if err != nil {
+		return "", err
+	}
+
+	return implPrompt + "\n\n" + retryAddendum, nil
+}
+
+// captureDiff runs `git diff` in the given directory and returns the output.
+// Returns empty string on error.
+func captureDiff(dir string) string {
+	cmd := exec.Command("git", "diff", "--stat")
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &bytes.Buffer{}
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	diff := buf.String()
+	// Limit diff size for prompt context
+	if len(diff) > 4096 {
+		diff = diff[:4096] + "\n... (truncated)"
+	}
+	return diff
+}
