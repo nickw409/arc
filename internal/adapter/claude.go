@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/nwiley/arc/internal/agent"
 	"github.com/nwiley/arc/internal/arc"
@@ -44,10 +45,12 @@ func (a *ClaudeAdapter) Spawn(ctx context.Context, prompt string, workdir string
 		TimedOut:       res.TimedOut,
 		InactivityKill: res.InactivityKill,
 		Duration:       res.Duration,
+		PID:            res.PID,
 	}, nil
 }
 
-// Preflight checks that the claude binary exists and is executable.
+// Preflight checks that the claude binary exists, is executable, and is
+// authenticated. It also verifies that workdir is accessible and writable.
 func (a *ClaudeAdapter) Preflight(ctx context.Context, workdir string) error {
 	name := a.commandName()
 
@@ -59,6 +62,20 @@ func (a *ClaudeAdapter) Preflight(ctx context.Context, workdir string) error {
 	cmd := exec.CommandContext(ctx, path, "--version")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("claude binary %q failed preflight check (%w): %s", name, err, string(out))
+	}
+
+	// Verify authentication by running a minimal prompt with a short timeout.
+	authCtx, authCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer authCancel()
+
+	authCmd := exec.CommandContext(authCtx, path, "--print", "test", "--max-turns", "1")
+	if out, err := authCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("claude authentication check failed — ensure you are logged in (%w): %s", err, string(out))
+	}
+
+	// Verify the working directory is accessible and writable.
+	if err := checkWorkdirWritable(workdir); err != nil {
+		return fmt.Errorf("workdir %q is not accessible: %w", workdir, err)
 	}
 
 	return nil

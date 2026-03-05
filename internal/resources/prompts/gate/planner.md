@@ -7,7 +7,7 @@ plan using the `arc plan` CLI commands.
 
 ## Instructions
 1. Read relevant files to understand the codebase structure and conventions
-2. Create a plan: `arc plan create {{.PlanName}}`
+2. Create a plan: `arc plan {{.PlanName}} <phase1> [phase2] ...`
 3. For each unit of work, add a phase:
    `arc plan add-phase {{.PlanName}} <phase-name> --spec "..." --test "..." --complexity simple|medium|complex`
 4. Each phase should:

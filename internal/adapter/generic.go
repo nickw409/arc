@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
@@ -14,6 +17,15 @@ import (
 
 // defaultGenericTimeout is used when no timeout is specified in SessionConfig.
 const defaultGenericTimeout = time.Hour
+
+// genericWatchdogInterval is how often the generic watchdog checks for inactivity.
+// Tests may override this for faster execution.
+var genericWatchdogInterval = 30 * time.Second
+
+// genericInactivityMin is the minimum inactivity timeout applied when the
+// computed value (1/3 of total timeout) would be too small. Tests may lower
+// this to avoid long waits.
+var genericInactivityMin = 2 * time.Minute
 
 // GenericAdapter implements arc.AgentAdapter for arbitrary CLI tools that
 // accept a prompt file and run in a working directory.
@@ -49,6 +61,12 @@ func (a *GenericAdapter) Spawn(ctx context.Context, prompt string, workdir strin
 		timeout = defaultGenericTimeout
 	}
 
+	// Compute inactivity timeout: 1/3 of total timeout, min genericInactivityMin.
+	inactivityLimit := timeout / 3
+	if inactivityLimit < genericInactivityMin {
+		inactivityLimit = genericInactivityMin
+	}
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -56,12 +74,11 @@ func (a *GenericAdapter) Spawn(ctx context.Context, prompt string, workdir strin
 	copy(args, a.Args)
 
 	var tempFile string
-	var promptFilePath string
 
 	switch {
 	case a.PromptFile != "":
 		// Write prompt to workdir/PromptFile; no flag needed.
-		promptFilePath = filepath.Join(workdir, a.PromptFile)
+		promptFilePath := filepath.Join(workdir, a.PromptFile)
 		if err := os.WriteFile(promptFilePath, []byte(prompt), 0600); err != nil {
 			return nil, fmt.Errorf("writing prompt file: %w", err)
 		}
@@ -97,50 +114,172 @@ func (a *GenericAdapter) Spawn(ctx context.Context, prompt string, workdir strin
 	cmd.Env = env
 
 	// Pass prompt via stdin when no file mechanism is configured.
-	var stdinData []byte
 	if a.PromptFile == "" && a.PromptFlag == "" {
-		stdinData = []byte(prompt)
+		cmd.Stdin = bytes.NewReader([]byte(prompt))
 	}
-	cmd.Stdin = bytes.NewReader(stdinData)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Use process group so we can kill all children on watchdog fire.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 
 	start := time.Now()
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// Heartbeat for watchdog — updated on any stdout/stderr byte.
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+
+	// Collect stdout and stderr concurrently, updating the heartbeat on activity.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stdoutPipe.Read(buf)
+			if n > 0 {
+				stdoutBuf.Write(buf[:n])
+				lastActivity.Store(time.Now().UnixNano())
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stderrPipe.Read(buf)
+			if n > 0 {
+				stderrBuf.Write(buf[:n])
+				lastActivity.Store(time.Now().UnixNano())
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}()
+
+	// Watchdog goroutine: kills the process if it produces no output for inactivityLimit.
+	var watchdogFired atomic.Bool
+	watchdogCtx, watchdogCancel := context.WithCancel(ctx)
+	defer watchdogCancel()
+
+	go func() {
+		ticker := time.NewTicker(genericWatchdogInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchdogCtx.Done():
+				return
+			case <-ticker.C:
+				last := time.Unix(0, lastActivity.Load())
+				if time.Since(last) > inactivityLimit {
+					watchdogFired.Store(true)
+					if cmd.Process != nil {
+						_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+					}
+					return
+				}
+			}
+		}
+	}()
+
+	// Wait for readers to drain before calling cmd.Wait().
+	wg.Wait()
+	waitErr := cmd.Wait()
+	watchdogCancel()
 	duration := time.Since(start)
 
 	exitCode := 0
 	timedOut := false
 
-	if err != nil {
+	if waitErr != nil {
+		if watchdogFired.Load() {
+			exitCode = -1
+			if exitErr, ok := waitErr.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			return &arc.AgentResult{
+				ExitCode:       exitCode,
+				Output:         stdoutBuf.String(),
+				Stderr:         stderrBuf.String(),
+				InactivityKill: true,
+				Duration:       duration,
+			}, nil
+		}
 		if timeoutCtx.Err() != nil && ctx.Err() == nil {
 			// Overall timeout fired, not a parent cancellation.
 			timedOut = true
 			exitCode = -1
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
-		} else if exitErr, ok := err.(*exec.ExitError); ok {
+		} else if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return nil, err
+			return nil, waitErr
 		}
 	}
 
 	return &arc.AgentResult{
 		ExitCode: exitCode,
-		Output:   stdout.String(),
-		Stderr:   stderr.String(),
+		Output:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
 		TimedOut: timedOut,
 		Duration: duration,
 	}, nil
 }
 
-// Preflight checks that the command exists in PATH.
+// Preflight checks that the command exists in PATH and that workdir is
+// accessible and writable.
 func (a *GenericAdapter) Preflight(ctx context.Context, workdir string) error {
 	if _, err := exec.LookPath(a.Command); err != nil {
 		return fmt.Errorf("command %q not found in PATH: %w", a.Command, err)
 	}
+
+	if err := checkWorkdirWritable(workdir); err != nil {
+		return fmt.Errorf("workdir %q is not accessible: %w", workdir, err)
+	}
+
+	return nil
+}
+
+// checkWorkdirWritable verifies that dir exists and is writable by attempting
+// to create and immediately remove a temporary file inside it.
+func checkWorkdirWritable(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("stat failed: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory")
+	}
+
+	// Attempt to create a temporary file to confirm write access.
+	tmp, err := os.CreateTemp(dir, ".arc-preflight-*")
+	if err != nil {
+		return fmt.Errorf("directory is not writable: %w", err)
+	}
+	tmp.Close()
+	os.Remove(tmp.Name())
 	return nil
 }

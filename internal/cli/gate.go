@@ -49,7 +49,7 @@ Exit code 0 means all checks passed. Exit code 1 means one or more checks failed
 			phaseDir := filepath.Join(".plans", "active", planName, "phases", phaseName)
 
 			// Run gate.
-			result, err := gate.Run(specPath, workdir)
+			result, err := gate.Run(cmd.Context(), specPath, workdir)
 			if err != nil {
 				return fmt.Errorf("running gate: %w", err)
 			}

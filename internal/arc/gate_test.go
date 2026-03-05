@@ -7,13 +7,33 @@ import (
 
 func TestGateAssertionFields(t *testing.T) {
 	tests := []struct {
-		name string
-		a    GateAssertion
+		name  string
+		a     GateAssertion
+		check func(t *testing.T, a GateAssertion)
 	}{
-		{"file_exists", GateAssertion{FileExists: "foo.go"}},
-		{"grep", GateAssertion{Grep: "func New"}},
-		{"test_exists", GateAssertion{TestExists: "TestFoo"}},
-		{"legacy_type", GateAssertion{Type: "file_exists", Target: "bar.go"}},
+		{"file_exists", GateAssertion{FileExists: "foo.go"}, func(t *testing.T, a GateAssertion) {
+			if a.FileExists != "foo.go" {
+				t.Errorf("FileExists = %q, want %q", a.FileExists, "foo.go")
+			}
+		}},
+		{"grep", GateAssertion{Grep: "func New"}, func(t *testing.T, a GateAssertion) {
+			if a.Grep != "func New" {
+				t.Errorf("Grep = %q, want %q", a.Grep, "func New")
+			}
+		}},
+		{"test_exists", GateAssertion{TestExists: "TestFoo"}, func(t *testing.T, a GateAssertion) {
+			if a.TestExists != "TestFoo" {
+				t.Errorf("TestExists = %q, want %q", a.TestExists, "TestFoo")
+			}
+		}},
+		{"legacy_type", GateAssertion{Type: "file_exists", Target: "bar.go"}, func(t *testing.T, a GateAssertion) {
+			if a.Type != "file_exists" {
+				t.Errorf("Type = %q, want %q", a.Type, "file_exists")
+			}
+			if a.Target != "bar.go" {
+				t.Errorf("Target = %q, want %q", a.Target, "bar.go")
+			}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -25,6 +45,7 @@ func TestGateAssertionFields(t *testing.T) {
 			if err := json.Unmarshal(data, &a2); err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
+			tt.check(t, a2)
 		})
 	}
 }
@@ -92,25 +113,3 @@ func TestGateStatusJSON(t *testing.T) {
 	}
 }
 
-func TestNewGateStatus(t *testing.T) {
-	result := &GateResult{
-		Passed: true,
-		Checkpoints: []CheckpointStatus{
-			{Name: "a", Status: "pass"},
-			{Name: "b", Status: "fail"},
-		},
-	}
-	status := NewGateStatus(result)
-	if !status.Passed {
-		t.Error("Passed = false, want true")
-	}
-	if status.RunCount != 1 {
-		t.Errorf("RunCount = %d, want 1", status.RunCount)
-	}
-	if status.Checkpoints["a"] != "pass" {
-		t.Errorf("checkpoint a = %q, want pass", status.Checkpoints["a"])
-	}
-	if status.Checkpoints["b"] != "fail" {
-		t.Errorf("checkpoint b = %q, want fail", status.Checkpoints["b"])
-	}
-}

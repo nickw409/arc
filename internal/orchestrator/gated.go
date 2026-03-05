@@ -85,17 +85,24 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	prevCheckpointsPassed := 0
 	var attemptHistory []AttemptRecord
 
+	// Structured logger (nil-safe — callers log methods check for nil)
+	pl := opts.PlanLogger
+
 	for attempt := 1; attempt <= MaxGatedAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
+		if pl != nil {
+			pl.PhaseStarted(opts.PhaseName, attempt)
+		}
+
 		// Build prompt
 		var agentPrompt string
 		if attempt == 1 {
-			agentPrompt, err = buildImplPrompt(spec, projectCtx)
+			agentPrompt, err = buildImplPrompt(spec, opts.PlanName, projectCtx)
 		} else {
-			agentPrompt, err = buildRetryPrompt(spec, projectCtx, attempt, lastGateResult, lastDiff)
+			agentPrompt, err = buildRetryPrompt(spec, opts.PlanName, projectCtx, attempt, lastGateResult, lastDiff)
 		}
 		if err != nil {
 			return fmt.Errorf("building prompt (attempt %d): %w", attempt, err)
@@ -120,7 +127,39 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			opts.PhaseName, attempt, MaxGatedAttempts, agentAdapter.Name())
 
 		// Spawn agent
+		if pl != nil {
+			pl.AgentSpawned(opts.PhaseName, attempt,
+				fmt.Sprintf("adapter=%s turns=%d", agentAdapter.Name(), sessionCfg.MaxTurns))
+		}
 		result, spawnErr := agentAdapter.Spawn(ctx, agentPrompt, workDir, sessionCfg)
+
+		// Persist the agent PID from the result so crash recovery can kill stale
+		// processes. Written immediately after spawn returns (process has exited),
+		// so on next startup, the signal-0 probe will find it dead and clear it.
+		if result != nil && result.PID != 0 {
+			if pidErr := sf.Update(func(s *arc.PhaseState) error {
+				s.AgentPID = result.PID
+				return nil
+			}); pidErr != nil {
+				opts.Logger.Warn("failed to persist agent PID", "error", pidErr)
+			}
+		}
+
+		if pl != nil {
+			detail := fmt.Sprintf("exit=%d", 0)
+			if result != nil {
+				detail = fmt.Sprintf("exit=%d duration=%s", result.ExitCode, result.Duration)
+			}
+			pl.AgentExited(opts.PhaseName, attempt, detail)
+		}
+
+		// Clear agent PID now that the subprocess has exited.
+		if clearErr := sf.Update(func(s *arc.PhaseState) error {
+			s.AgentPID = 0
+			return nil
+		}); clearErr != nil {
+			opts.Logger.Warn("failed to clear agent PID", "error", clearErr)
+		}
 
 		// Accumulate usage
 		if result != nil && !result.Usage.IsZero() {
@@ -129,6 +168,22 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 				return nil
 			}); updateErr != nil {
 				opts.Logger.Warn("failed to persist usage", "error", updateErr)
+			}
+		}
+
+		// Check budget after accumulating usage
+		if opts.Config != nil && opts.Config.Budget.MaxCost > 0 {
+			currentState, _ := sf.Read()
+			if currentState != nil && currentState.Usage.CostUSD > 0 {
+				if currentState.Usage.CostUSD >= opts.Config.Budget.MaxCost {
+					return fmt.Errorf("budget exceeded: $%.2f spent, limit $%.2f", currentState.Usage.CostUSD, opts.Config.Budget.MaxCost)
+				}
+				if opts.Config.Budget.WarnCost > 0 && currentState.Usage.CostUSD >= opts.Config.Budget.WarnCost {
+					opts.Logger.Warn("approaching budget limit",
+						"spent", currentState.Usage.CostUSD,
+						"warn_threshold", opts.Config.Budget.WarnCost,
+						"max", opts.Config.Budget.MaxCost)
+				}
 			}
 		}
 
@@ -147,7 +202,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Run hard gate
 		fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
-		gateResult, gateErr := gate.Run(specPath, workDir)
+		gateResult, gateErr := gate.Run(ctx, specPath, workDir)
 		if gateErr != nil {
 			opts.Logger.Warn("gate execution error", "error", gateErr)
 			if attempt < MaxGatedAttempts {
@@ -156,18 +211,28 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
 		}
 
-		// Write gate status to phase dir
+		// Write gate status and increment run count
 		if writeErr := gate.WriteStatus(phaseDir, gateResult); writeErr != nil {
 			opts.Logger.Warn("failed to write gate status", "error", writeErr)
 		}
+		runCount, incErr := gate.IncrementRunCount(phaseDir)
+		if incErr != nil {
+			opts.Logger.Warn("failed to increment gate run count", "error", incErr)
+		}
+		if pl != nil {
+			pl.GateRun(opts.PhaseName, attempt, gateResult.Passed, gate.FormatWithRunCount(gateResult, runCount))
+		}
 
 		if gateResult.Passed {
+			if pl != nil {
+				pl.PhaseCompleted(opts.PhaseName, attempt, "gate passed")
+			}
 			return gatedPhaseComplete(opts, sf, spec, workDir)
 		}
 
 		// Gate failed — log and prepare for retry
 		lastGateResult = gateResult
-		formatted := gate.Format(gateResult)
+		formatted := gate.FormatWithRunCount(gateResult, runCount)
 		fmt.Printf("[%s] Gate FAILED (attempt %d/%d):\n%s\n",
 			opts.PhaseName, attempt, MaxGatedAttempts, formatted)
 
@@ -231,6 +296,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	}
 
 	// Exhausted all attempts — mark phase as blocked
+	if pl != nil {
+		pl.PhaseFailed(opts.PhaseName, MaxGatedAttempts, "exhausted all attempts")
+	}
 	reason := fmt.Sprintf("gate did not pass after %d attempts", MaxGatedAttempts)
 	if lastGateResult != nil {
 		reason = fmt.Sprintf("gate failed after %d attempts:\n%s", MaxGatedAttempts, gate.Format(lastGateResult))
@@ -289,7 +357,8 @@ func gatedPhaseComplete(opts RunPhaseOptions, sf *state.StateFile, spec *arc.Pha
 }
 
 // buildImplPrompt renders the implementation prompt from the phase spec.
-func buildImplPrompt(spec *arc.PhaseSpec, projectCtx string) (string, error) {
+// planName is the plan name used in the arc gate command.
+func buildImplPrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, error) {
 	checkpoints := make([]prompt.CheckpointData, len(spec.Checkpoints))
 	for i, cp := range spec.Checkpoints {
 		checkpoints[i] = prompt.CheckpointData{
@@ -303,7 +372,7 @@ func buildImplPrompt(spec *arc.PhaseSpec, projectCtx string) (string, error) {
 		Spec:           spec.Spec,
 		Files:          spec.Files,
 		Checkpoints:    checkpoints,
-		Plan:           spec.Name, // used in arc gate command
+		Plan:           planName, // used in arc gate command
 		Phase:          spec.Name,
 		TestCommand:    spec.Test,
 		ProjectContext: projectCtx,
@@ -313,9 +382,9 @@ func buildImplPrompt(spec *arc.PhaseSpec, projectCtx string) (string, error) {
 }
 
 // buildRetryPrompt renders the implementation prompt plus retry context.
-func buildRetryPrompt(spec *arc.PhaseSpec, projectCtx string, attempt int, lastGate *arc.GateResult, diff string) (string, error) {
+func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt int, lastGate *arc.GateResult, diff string) (string, error) {
 	// Start with the full impl prompt
-	implPrompt, err := buildImplPrompt(spec, projectCtx)
+	implPrompt, err := buildImplPrompt(spec, planName, projectCtx)
 	if err != nil {
 		return "", err
 	}

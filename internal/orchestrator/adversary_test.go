@@ -105,7 +105,7 @@ func TestRunAdversary_NoChangedFiles(t *testing.T) {
 		Config:     &config.Config{},
 		Logger:     slog.Default(),
 		ProjectDir: workDir,
-	}, workDir)
+	}, workDir, nil)
 	if err != nil {
 		t.Fatalf("RunAdversary: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRunAdversary_NoBugsFound(t *testing.T) {
 		Config:     &config.Config{Agents: config.AgentsConfig{Default: "adv-mock-nobugs"}, TestCommand: "true"},
 		Logger:     slog.Default(),
 		ProjectDir: workDir,
-	}, workDir)
+	}, workDir, nil)
 	if err != nil {
 		t.Fatalf("RunAdversary: %v", err)
 	}
@@ -145,6 +145,59 @@ func TestRunAdversary_NoBugsFound(t *testing.T) {
 	}
 	if len(result.Rounds) != 1 {
 		t.Errorf("expected 1 round, got %d", len(result.Rounds))
+	}
+}
+
+func TestParseFailingTests_Basic(t *testing.T) {
+	output := `=== RUN   TestFoo
+--- FAIL: TestFoo (0.00s)
+=== RUN   TestBar
+--- FAIL: TestBar (0.01s)
+FAIL
+`
+	tests := parseFailingTests(output)
+	if len(tests) != 2 {
+		t.Fatalf("expected 2 failing tests, got %d: %v", len(tests), tests)
+	}
+	found := map[string]bool{}
+	for _, name := range tests {
+		found[name] = true
+	}
+	if !found["TestFoo"] {
+		t.Error("expected TestFoo in failing tests")
+	}
+	if !found["TestBar"] {
+		t.Error("expected TestBar in failing tests")
+	}
+}
+
+func TestParseFailingTests_Deduplication(t *testing.T) {
+	output := `--- FAIL: TestFoo (0.00s)
+--- FAIL: TestFoo (0.00s)
+--- FAIL: TestBar (0.01s)
+`
+	tests := parseFailingTests(output)
+	if len(tests) != 2 {
+		t.Errorf("expected 2 unique tests (deduped), got %d: %v", len(tests), tests)
+	}
+}
+
+func TestParseFailingTests_Empty(t *testing.T) {
+	tests := parseFailingTests("ok  \tgithub.com/example/pkg\t0.001s\n")
+	if len(tests) != 0 {
+		t.Errorf("expected 0 tests from passing output, got %d", len(tests))
+	}
+}
+
+func TestParseFailingTests_SubTests(t *testing.T) {
+	output := `--- FAIL: TestFoo/sub1 (0.00s)
+--- FAIL: TestFoo/sub2 (0.00s)
+--- FAIL: TestBar (0.01s)
+`
+	tests := parseFailingTests(output)
+	// Should capture each as separate failing test names.
+	if len(tests) < 2 {
+		t.Errorf("expected at least 2 failing tests, got %d: %v", len(tests), tests)
 	}
 }
 

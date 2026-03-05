@@ -45,7 +45,7 @@ func newRecipeInstantiateCmd() *cobra.Command {
 	var run bool
 
 	cmd := &cobra.Command{
-		Use:   "recipe <name> [--param key=value]...",
+		Use:   "instantiate <name> [--param key=value]...",
 		Short: "Instantiate a recipe and create a plan",
 		Long: `Load the named recipe from .arc/recipes/, substitute parameters, and create
 a plan under .plans/active/. Use --param key=value (repeatable) to supply
@@ -171,27 +171,53 @@ func newRecipeListCmd() *cobra.Command {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
+			// Load project-local recipes (may not exist).
 			dir := recipesDir(projectRoot)
-			recipes, err := recipe.LoadAll(dir)
-			if err != nil && len(recipes) == 0 {
-				// If directory doesn't exist or no recipes loaded at all, report clearly.
-				if os.IsNotExist(err) {
-					fmt.Println("No recipes directory found (.arc/recipes/)")
-					return nil
-				}
-				return err
-			}
+			localRecipes, _ := recipe.LoadAll(dir)
 
-			if len(recipes) == 0 {
-				fmt.Println("No recipes found in .arc/recipes/")
+			// Track names already shown so we don't duplicate built-ins that
+			// have been overridden locally.
+			seen := make(map[string]bool, len(localRecipes))
+
+			// Load built-in recipes.
+			builtIns, _ := recipe.LoadAllBuiltIn()
+
+			total := len(localRecipes) + len(builtIns)
+			if total == 0 {
+				fmt.Println("No recipes found.")
 				return nil
 			}
 
-			for _, r := range recipes {
-				if r.Description != "" {
-					fmt.Printf("  %-20s  %s\n", r.Name, r.Description)
-				} else {
-					fmt.Printf("  %s\n", r.Name)
+			if len(localRecipes) > 0 {
+				fmt.Println("Project recipes (.arc/recipes/):")
+				for _, r := range localRecipes {
+					seen[r.Name] = true
+					if r.Description != "" {
+						fmt.Printf("  %-24s  %s\n", r.Name, r.Description)
+					} else {
+						fmt.Printf("  %s\n", r.Name)
+					}
+				}
+			}
+
+			// Print built-ins that aren't overridden locally.
+			var shownBuiltIns []*recipe.Recipe
+			for _, r := range builtIns {
+				if !seen[r.Name] {
+					shownBuiltIns = append(shownBuiltIns, r)
+				}
+			}
+			if len(shownBuiltIns) > 0 {
+				if len(localRecipes) > 0 {
+					fmt.Println()
+				}
+				fmt.Println("Built-in recipes:")
+				for _, r := range shownBuiltIns {
+					if r.Description != "" {
+						fmt.Printf("  %-24s  %s [built-in]\n", r.Name, r.Description)
+					} else {
+						fmt.Printf("  %-24s  [built-in]\n", r.Name)
+					}
 				}
 			}
 			return nil
@@ -255,8 +281,9 @@ func newRecipeShowCmd() *cobra.Command {
 
 // findRecipe looks for a recipe named name in dir, trying both <name>.yaml
 // and <name>.yml extensions, and also a file whose decoded Name field matches.
+// If not found in the project directory, falls back to built-in recipes.
 func findRecipe(dir, name string) (*recipe.Recipe, error) {
-	// Try direct filename matches first.
+	// Try direct filename matches in project directory first.
 	for _, ext := range []string{".yaml", ".yml"} {
 		path := filepath.Join(dir, name+ext)
 		if _, err := os.Stat(path); err == nil {
@@ -264,20 +291,30 @@ func findRecipe(dir, name string) (*recipe.Recipe, error) {
 		}
 	}
 
-	// Fall back: load all recipes and find by name field.
-	recipes, err := recipe.LoadAll(dir)
-	if err != nil && len(recipes) == 0 {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("recipe %q not found (no .arc/recipes/ directory)", name)
+	// Fall back: load all project recipes and find by name field.
+	localRecipes, err := recipe.LoadAll(dir)
+	if err == nil || len(localRecipes) > 0 {
+		for _, r := range localRecipes {
+			if r.Name == name {
+				return r, nil
+			}
 		}
-		return nil, fmt.Errorf("loading recipes: %w", err)
 	}
-	for _, r := range recipes {
+
+	// Fall back to built-in embedded recipes.
+	if r, err := recipe.LoadBuiltIn(name); err == nil {
+		return r, nil
+	}
+
+	// Check all built-ins by Name field (in case name field differs from filename).
+	builtIns, _ := recipe.LoadAllBuiltIn()
+	for _, r := range builtIns {
 		if r.Name == name {
 			return r, nil
 		}
 	}
-	return nil, fmt.Errorf("recipe %q not found in .arc/recipes/", name)
+
+	return nil, fmt.Errorf("recipe %q not found (checked .arc/recipes/ and built-ins)", name)
 }
 
 // parseParams converts a slice of "key=value" strings to a map.

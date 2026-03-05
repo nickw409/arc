@@ -12,13 +12,15 @@ import (
 
 // Event type constants for PhaseEvent.
 const (
-	EventPhaseStarted   = "PhaseStarted"
-	EventPhaseCompleted = "PhaseCompleted"
-	EventPhaseFailed    = "PhaseFailed"
-	EventGateRun        = "GateRun"
-	EventAgentSpawned   = "AgentSpawned"
-	EventAgentExited    = "AgentExited"
-	EventRetryTriggered = "RetryTriggered"
+	EventPhaseStarted        = "PhaseStarted"
+	EventPhaseCompleted      = "PhaseCompleted"
+	EventPhaseFailed         = "PhaseFailed"
+	EventGateRun             = "GateRun"
+	EventAgentSpawned        = "AgentSpawned"
+	EventAgentExited         = "AgentExited"
+	EventRetryTriggered      = "RetryTriggered"
+	EventAdversaryStarted    = "AdversaryStarted"
+	EventAdversaryCompleted  = "AdversaryCompleted"
 )
 
 // PhaseEvent is a structured log entry for orchestrator and phase activity.
@@ -177,6 +179,38 @@ func (pl *PlanLogger) RetryTriggered(phase string, attempt int, detail string) {
 		Event:     EventRetryTriggered,
 		Detail:    detail,
 	})
+}
+
+// AdversaryStarted logs an AdversaryStarted event to orchestrator.jsonl and adversary.jsonl.
+func (pl *PlanLogger) AdversaryStarted(round int, detail string) {
+	event := PhaseEvent{
+		Timestamp: time.Now().UTC(),
+		Level:     "INFO",
+		Component: "adversary",
+		Attempt:   round,
+		Event:     EventAdversaryStarted,
+		Detail:    detail,
+	}
+	pl.write("orchestrator.jsonl", event)
+	pl.write("adversary.jsonl", event)
+}
+
+// AdversaryCompleted logs an AdversaryCompleted event to orchestrator.jsonl and adversary.jsonl.
+func (pl *PlanLogger) AdversaryCompleted(round int, bugsFound int, detail string) {
+	level := "INFO"
+	if bugsFound > 0 {
+		level = "WARN"
+	}
+	event := PhaseEvent{
+		Timestamp: time.Now().UTC(),
+		Level:     level,
+		Component: "adversary",
+		Attempt:   round,
+		Event:     EventAdversaryCompleted,
+		Detail:    detail,
+	}
+	pl.write("orchestrator.jsonl", event)
+	pl.write("adversary.jsonl", event)
 }
 
 // write appends a JSON line to the named log file under logsDir.

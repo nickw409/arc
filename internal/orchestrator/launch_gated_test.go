@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -339,7 +340,405 @@ func TestLaunchGated_Timeout(t *testing.T) {
 // registerMockAdapter is defined in gated_test.go — reuse it here via the same package.
 // Adapter registry operations are safe because tests run sequentially within a package.
 
-func init() {
-	// Ensure mock adapters are cleaned up between test runs.
-	// The registerMockAdapter function in gated_test.go handles this via t.Cleanup.
+func TestIdentifyConflictingPhase_FileMatch(t *testing.T) {
+	plansDir := setupGatedPlan(t,
+		[]string{"phase-a", "phase-b"},
+		nil,
+		map[string]*arc.PhaseSpec{
+			"phase-a": {Files: []string{"internal/foo.go", "internal/bar.go"}},
+			"phase-b": {Files: []string{"internal/baz.go"}},
+		},
+	)
+
+	meta := &arc.PlanMeta{
+		Name:   "test-plan",
+		Phases: []string{"phase-a", "phase-b"},
+	}
+	opts := LaunchOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		Logger:   slog.Default(),
+	}
+
+	// Error mentions a file from phase-a.
+	err := fmt.Errorf("merge conflict: internal/foo.go: content conflict")
+	phase := identifyConflictingPhase(opts, meta, err)
+	if phase != "phase-a" {
+		t.Errorf("expected phase-a, got %q", phase)
+	}
 }
+
+func TestIdentifyConflictingPhase_NoMatch_SinglePhase(t *testing.T) {
+	plansDir := setupGatedPlan(t,
+		[]string{"phase-a"},
+		nil,
+		map[string]*arc.PhaseSpec{
+			"phase-a": {Files: []string{"internal/foo.go"}},
+		},
+	)
+
+	meta := &arc.PlanMeta{
+		Name:   "test-plan",
+		Phases: []string{"phase-a"},
+	}
+	opts := LaunchOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		Logger:   slog.Default(),
+	}
+
+	// Error has no file match — should still return the only phase.
+	err := fmt.Errorf("merge conflict with unrelated message")
+	phase := identifyConflictingPhase(opts, meta, err)
+	if phase != "phase-a" {
+		t.Errorf("expected phase-a (single phase fallback), got %q", phase)
+	}
+}
+
+func TestIdentifyConflictingPhase_NoMatch_MultiPhase(t *testing.T) {
+	plansDir := setupGatedPlan(t,
+		[]string{"phase-a", "phase-b"},
+		nil,
+		nil,
+	)
+
+	meta := &arc.PlanMeta{
+		Name:   "test-plan",
+		Phases: []string{"phase-a", "phase-b"},
+	}
+	opts := LaunchOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+		Logger:   slog.Default(),
+	}
+
+	// Error has no file match and there are multiple phases — should return "".
+	err := fmt.Errorf("merge conflict with no files mentioned")
+	phase := identifyConflictingPhase(opts, meta, err)
+	if phase != "" {
+		t.Errorf("expected empty string (cannot identify), got %q", phase)
+	}
+}
+
+func TestRouteRegressionFailure_NoFailingTests(t *testing.T) {
+	// Output has no FAIL lines — routeRegressionFailure should be a no-op.
+	plansDir := setupGatedPlan(t, []string{"phase-a"}, nil, nil)
+	meta := &arc.PlanMeta{Name: "test-plan", Phases: []string{"phase-a"}}
+	workDir := t.TempDir()
+
+	err := routeRegressionFailure(context.Background(), LaunchOptions{
+		PlanName:   "test-plan",
+		PlansDir:   plansDir,
+		Logger:     slog.Default(),
+		ProjectDir: workDir,
+	}, meta, nil, "ok  \tgithub.com/example/pkg\t0.001s\n", workDir)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestBuildFileToPhaseMap_Basic(t *testing.T) {
+	plansDir := setupGatedPlan(t,
+		[]string{"phase-a", "phase-b"},
+		nil,
+		map[string]*arc.PhaseSpec{
+			"phase-a": {Files: []string{"internal/foo.go", "internal/bar.go"}},
+			"phase-b": {Files: []string{"internal/baz.go"}},
+		},
+	)
+
+	meta := &arc.PlanMeta{
+		Name:   "test-plan",
+		Phases: []string{"phase-a", "phase-b"},
+	}
+	opts := LaunchOptions{
+		PlanName: "test-plan",
+		PlansDir: plansDir,
+	}
+
+	m := buildFileToPhaseMap(opts, meta)
+
+	if m["internal/foo.go"] != "phase-a" {
+		t.Errorf("internal/foo.go: expected phase-a, got %q", m["internal/foo.go"])
+	}
+	if m["internal/bar.go"] != "phase-a" {
+		t.Errorf("internal/bar.go: expected phase-a, got %q", m["internal/bar.go"])
+	}
+	if m["internal/baz.go"] != "phase-b" {
+		t.Errorf("internal/baz.go: expected phase-b, got %q", m["internal/baz.go"])
+	}
+}
+
+// --- Partial status tests ---
+
+// TestBuildResult_PartialStatus verifies that buildResult returns "partial"
+// when some phases complete and others are blocked/deferred.
+func TestBuildResult_PartialStatus(t *testing.T) {
+	// phase-a and phase-b are independent; phase-b will never create its file
+	// so its gate fails and it ends up blocked. phase-a succeeds.
+	plansDir := setupGatedPlan(t,
+		[]string{"phase-a", "phase-b"},
+		nil, // independent
+		nil,
+	)
+	workDir := t.TempDir()
+
+	callCount := 0
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+		},
+		workFn: func(_ string) {
+			callCount++
+			// Only create phase-a.go so phase-a passes, phase-b stays blocked.
+			os.WriteFile(filepath.Join(workDir, "phase-a.go"), []byte("package a\n"), 0o644)
+		},
+	}
+	registerMockAdapter(t, "partial-status-mock", mock)
+
+	result, _ := LaunchGated(context.Background(), LaunchOptions{
+		PlanName:      "test-plan",
+		PlansDir:      plansDir,
+		Config:        &config.Config{Agents: config.AgentsConfig{Default: "partial-status-mock"}},
+		Logger:        slog.Default(),
+		ProjectDir:    workDir,
+		StopOnFailure: false,
+	})
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// phase-a should be complete; phase-b should be blocked.
+	if result.PhaseSummary["phase-a"] != "complete" {
+		t.Errorf("phase-a: got %q, want complete", result.PhaseSummary["phase-a"])
+	}
+	if result.PhaseSummary["phase-b"] != "blocked" {
+		t.Errorf("phase-b: got %q, want blocked", result.PhaseSummary["phase-b"])
+	}
+
+	// Overall status must be "partial", not "complete".
+	if result.Status != "partial" {
+		t.Errorf("status: got %q, want partial", result.Status)
+	}
+}
+
+// TestBuildResult_AllComplete verifies that "complete" is preserved when all phases succeed.
+func TestBuildResult_AllComplete(t *testing.T) {
+	plansDir := setupGatedPlan(t, []string{"phase-a"}, nil, nil)
+	workDir := t.TempDir()
+
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{{ExitCode: 0, Duration: time.Second}},
+		workFn: func(_ string) {
+			os.WriteFile(filepath.Join(workDir, "phase-a.go"), []byte("package a\n"), 0o644)
+		},
+	}
+	registerMockAdapter(t, "all-complete-mock", mock)
+
+	result, err := LaunchGated(context.Background(), LaunchOptions{
+		PlanName:   "test-plan",
+		PlansDir:   plansDir,
+		Config:     &config.Config{Agents: config.AgentsConfig{Default: "all-complete-mock"}},
+		Logger:     slog.Default(),
+		ProjectDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("LaunchGated: %v", err)
+	}
+	if result.Status != "complete" {
+		t.Errorf("status: got %q, want complete", result.Status)
+	}
+}
+
+// TestPlanMeta_AdversaryBugsField confirms the AdversaryBugs field round-trips via JSON.
+func TestPlanMeta_AdversaryBugsField(t *testing.T) {
+	meta := &arc.PlanMeta{
+		Name:   "my-plan",
+		Status: "complete",
+		Phases: []string{"impl"},
+		AdversaryBugs: map[string][]string{
+			"impl": {"TestFoo", "TestBar"},
+		},
+	}
+
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	var decoded arc.PlanMeta
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	bugs := decoded.AdversaryBugs["impl"]
+	if len(bugs) != 2 {
+		t.Fatalf("AdversaryBugs[impl]: got %v, want 2 items", bugs)
+	}
+	if bugs[0] != "TestFoo" || bugs[1] != "TestBar" {
+		t.Errorf("AdversaryBugs[impl]: got %v, want [TestFoo TestBar]", bugs)
+	}
+}
+
+// TestPlanMeta_AdversaryBugsOmitempty verifies that the field is absent from JSON
+// when nil (omitempty).
+func TestPlanMeta_AdversaryBugsOmitempty(t *testing.T) {
+	meta := &arc.PlanMeta{
+		Name:   "my-plan",
+		Status: "complete",
+	}
+
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	if _, present := raw["adversary_bugs"]; present {
+		t.Error("adversary_bugs key should be absent when field is nil (omitempty)")
+	}
+}
+
+// TestAgentPIDField verifies that AgentPID round-trips through JSON correctly.
+func TestAgentPIDField(t *testing.T) {
+	ps := arc.NewPhaseState("my-plan", "impl", "feature")
+	ps.AgentPID = 12345
+
+	data, err := json.Marshal(ps)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	var decoded arc.PhaseState
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.AgentPID != 12345 {
+		t.Errorf("AgentPID: got %d, want 12345", decoded.AgentPID)
+	}
+}
+
+// TestAgentPIDOmitempty verifies that AgentPID=0 is absent from JSON (omitempty).
+func TestAgentPIDOmitempty(t *testing.T) {
+	ps := arc.NewPhaseState("my-plan", "impl", "feature")
+	// AgentPID defaults to 0
+
+	data, err := json.Marshal(ps)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	if _, present := raw["agent_pid"]; present {
+		t.Error("agent_pid key should be absent when 0 (omitempty)")
+	}
+}
+
+// TestKillStaleAgents_DeadProcess verifies that killStaleAgents clears the PID
+// when the recorded process is no longer alive.
+func TestKillStaleAgents_DeadProcess(t *testing.T) {
+	plansDir := setupGatedPlan(t, []string{"impl"}, nil, nil)
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Write a state file with a PID that is guaranteed to be dead.
+	// PID 1 is always alive (init), but we can use a PID from a process we
+	// know is dead. Use the current process's PID + 99999 which very likely
+	// does not exist.
+	phaseDir := filepath.Join(planDir, "phases", "impl")
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+
+	// Write a very large PID that is almost certainly not a running process.
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.AgentPID = 2000000 // beyond typical PID max on Linux
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	logger := slog.Default()
+	killStaleAgents(planDir, LaunchOptions{Logger: logger})
+
+	// After killStaleAgents, AgentPID should be cleared.
+	ps, err := sf.Read()
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+	if ps.AgentPID != 0 {
+		t.Errorf("AgentPID: got %d, want 0 (should be cleared for dead process)", ps.AgentPID)
+	}
+}
+
+// TestKillStaleAgents_NoPIDPhases verifies that killStaleAgents is a no-op
+// when no phases have a non-zero AgentPID.
+func TestKillStaleAgents_NoPIDPhases(t *testing.T) {
+	plansDir := setupGatedPlan(t, []string{"impl"}, nil, nil)
+	planDir := filepath.Join(plansDir, "test-plan")
+
+	// Default state has AgentPID=0, so no killing should happen.
+	logger := slog.Default()
+	// Should not panic or error.
+	killStaleAgents(planDir, LaunchOptions{Logger: logger})
+
+	phaseDir := filepath.Join(planDir, "phases", "impl")
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+	ps, err := sf.Read()
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+	if ps.AgentPID != 0 {
+		t.Errorf("AgentPID: got %d, want 0", ps.AgentPID)
+	}
+}
+
+// TestLaunchGated_ConfigPathSetsUpSIGHUP verifies that LaunchGated runs successfully
+// when ConfigPath is set (the SIGHUP goroutine should start without error).
+func TestLaunchGated_ConfigPathWiring(t *testing.T) {
+	plansDir := setupGatedPlan(t, []string{"phase-a"}, nil, nil)
+	workDir := t.TempDir()
+
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{{ExitCode: 0, Duration: time.Second}},
+		workFn: func(_ string) {
+			os.WriteFile(filepath.Join(workDir, "phase-a.go"), []byte("package a\n"), 0o644)
+		},
+	}
+	registerMockAdapter(t, "sighup-wiring-mock", mock)
+
+	// Write a temporary .arc.yaml for the config path.
+	arcYaml := filepath.Join(t.TempDir(), ".arc.yaml")
+	if err := os.WriteFile(arcYaml, []byte("language: go\nrunner: go-test\n"), 0644); err != nil {
+		t.Fatalf("write .arc.yaml: %v", err)
+	}
+
+	result, err := LaunchGated(context.Background(), LaunchOptions{
+		PlanName:   "test-plan",
+		PlansDir:   plansDir,
+		Config:     &config.Config{Agents: config.AgentsConfig{Default: "sighup-wiring-mock"}},
+		ConfigPath: arcYaml,
+		Logger:     slog.Default(),
+		ProjectDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("LaunchGated with ConfigPath: %v", err)
+	}
+	if result.Status != "complete" {
+		t.Errorf("status: got %q, want complete", result.Status)
+	}
+}
+

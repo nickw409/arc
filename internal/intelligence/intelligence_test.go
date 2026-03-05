@@ -1,6 +1,7 @@
 package intelligence
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,493 +10,764 @@ import (
 	"time"
 )
 
-// --- helpers ---
-
-func tempDir(t *testing.T) string {
-	t.Helper()
-	return t.TempDir()
-}
-
-func mustLoad(t *testing.T, dir string) *ProjectData {
-	t.Helper()
-	d, err := Load(dir)
+func TestOpen_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
 	if err != nil {
-		t.Fatalf("Load error: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
-	return d
+	if s == nil {
+		t.Fatal("expected non-nil store")
+	}
+	if s.data.TestCommands == nil {
+		t.Error("TestCommands map should be initialized")
+	}
+	if s.data.FlakyTests == nil {
+		t.Error("FlakyTests map should be initialized")
+	}
 }
 
-func mustSave(t *testing.T, dir string, d *ProjectData) {
-	t.Helper()
-	if err := Save(dir, d); err != nil {
-		t.Fatalf("Save error: %v", err)
+func TestOpen_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	arcDir := filepath.Join(dir, ".arc")
+	if err := os.MkdirAll(arcDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-}
 
-// --- Load ---
+	d := &Data{
+		TestCommands: map[string]string{"pkg/foo": "go test ./pkg/foo/"},
+		FlakyTests: map[string]FlakyEntry{
+			"TestFoo": {FailCount: 2, PassCount: 3, LastSeen: time.Now().UTC()},
+		},
+		CostHistory: []CostEntry{
+			{PlanName: "my-plan", Complexity: "medium", CostUSD: 0.5, Turns: 10},
+		},
+	}
+	data, _ := json.MarshalIndent(d, "", "  ")
+	if err := os.WriteFile(filepath.Join(arcDir, "project.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
 
-func TestLoadNonExistentReturnsEmpty(t *testing.T) {
-	dir := tempDir(t)
-	d, err := Load(dir)
+	s, err := Open(dir)
 	if err != nil {
-		t.Fatalf("expected no error for missing file, got: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
-	if d == nil {
-		t.Fatal("expected non-nil ProjectData")
+
+	if cmd := s.TestCommandFor("pkg/foo"); cmd != "go test ./pkg/foo/" {
+		t.Errorf("TestCommandFor: got %q, want %q", cmd, "go test ./pkg/foo/")
 	}
-	if d.TestCommands == nil {
-		t.Error("TestCommands map should be non-nil")
+	if !s.IsFlaky("TestFoo") {
+		t.Error("TestFoo should be flaky")
 	}
-	if d.FlakyTests == nil {
-		t.Error("FlakyTests map should be non-nil")
-	}
-	if d.CostHistory == nil {
-		t.Error("CostHistory map should be non-nil")
-	}
-	if len(d.FileCoupling) != 0 {
-		t.Errorf("FileCoupling should be empty, got %d entries", len(d.FileCoupling))
-	}
-	if len(d.FailurePatterns) != 0 {
-		t.Errorf("FailurePatterns should be empty, got %d entries", len(d.FailurePatterns))
+	if len(s.data.CostHistory) != 1 {
+		t.Errorf("cost history: got %d entries, want 1", len(s.data.CostHistory))
 	}
 }
 
-func TestLoadCorruptJSON(t *testing.T) {
-	dir := tempDir(t)
-	arcPath := filepath.Join(dir, arcDir)
-	if err := os.MkdirAll(arcPath, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
+func TestOpen_CorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	arcDir := filepath.Join(dir, ".arc")
+	if err := os.MkdirAll(arcDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(arcPath, dataFile), []byte("{invalid"), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	if err := os.WriteFile(filepath.Join(arcDir, "project.json"), []byte("not json{{{"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	_, err := Load(dir)
-	if err == nil {
-		t.Fatal("expected error for corrupt JSON, got nil")
-	}
-}
 
-// --- Save / Load round-trip ---
-
-func TestSaveLoadRoundtrip(t *testing.T) {
-	dir := tempDir(t)
-	d := mustLoad(t, dir)
-
-	RecordTestCommand(d, "github.com/example/pkg", "go test ./internal/pkg/")
-	RecordFlakyTest(d, "TestFoo", "github.com/example/pkg")
-	RecordFileCoupling(d, []string{"a.go", "b.go"})
-	RecordCost(d, "medium", 0.42)
-	RecordFailurePattern(d, "undefined:", "add import")
-
-	mustSave(t, dir, d)
-
-	d2 := mustLoad(t, dir)
-
-	if cmd := d2.TestCommands["github.com/example/pkg"]; cmd != "go test ./internal/pkg/" {
-		t.Errorf("TestCommands round-trip: got %q, want %q", cmd, "go test ./internal/pkg/")
-	}
-	if rec, ok := d2.FlakyTests["TestFoo"]; !ok || rec.Occurrences != 1 {
-		t.Errorf("FlakyTests round-trip: got %+v", rec)
-	}
-	if len(d2.FileCoupling) != 1 || d2.FileCoupling[0].CoChanges != 1 {
-		t.Errorf("FileCoupling round-trip: got %+v", d2.FileCoupling)
-	}
-	if s := d2.CostHistory["medium"]; s.Count != 1 || s.AvgCost != 0.42 {
-		t.Errorf("CostHistory round-trip: got %+v", s)
-	}
-	if len(d2.FailurePatterns) != 1 || d2.FailurePatterns[0].Pattern != "undefined:" {
-		t.Errorf("FailurePatterns round-trip: got %+v", d2.FailurePatterns)
-	}
-}
-
-func TestSaveCreatesArcDir(t *testing.T) {
-	dir := tempDir(t)
-	d := empty()
-	mustSave(t, dir, d)
-
-	if _, err := os.Stat(filepath.Join(dir, arcDir, dataFile)); err != nil {
-		t.Fatalf("expected file to exist after Save: %v", err)
-	}
-}
-
-func TestSaveAtomicNoTempLeftover(t *testing.T) {
-	dir := tempDir(t)
-	d := empty()
-	mustSave(t, dir, d)
-
-	entries, err := os.ReadDir(filepath.Join(dir, arcDir))
+	s, err := Open(dir)
 	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+		t.Fatalf("Open with corrupt file: %v", err)
 	}
-	for _, e := range entries {
-		if e.Name() != dataFile {
-			t.Errorf("unexpected file left in .arc/: %s", e.Name())
+	// Should start fresh.
+	if s.data.TestCommands == nil {
+		t.Error("TestCommands should be initialized after corrupt file")
+	}
+}
+
+func TestRecordTestCommand_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordTestCommand("internal/foo", "go test ./internal/foo/")
+	s.RecordTestCommand("internal/bar", "go test -run TestBar ./internal/bar/")
+
+	if got := s.TestCommandFor("internal/foo"); got != "go test ./internal/foo/" {
+		t.Errorf("got %q, want %q", got, "go test ./internal/foo/")
+	}
+	if got := s.TestCommandFor("internal/bar"); got != "go test -run TestBar ./internal/bar/" {
+		t.Errorf("got %q, want %q", got, "go test -run TestBar ./internal/bar/")
+	}
+	if got := s.TestCommandFor("nonexistent"); got != "" {
+		t.Errorf("nonexistent package: got %q, want empty", got)
+	}
+}
+
+func TestRecordTestCommand_Overwrite(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordTestCommand("pkg", "old command")
+	s.RecordTestCommand("pkg", "new command")
+
+	if got := s.TestCommandFor("pkg"); got != "new command" {
+		t.Errorf("got %q, want %q", got, "new command")
+	}
+}
+
+func TestFlakyTest_NeitherFlaky(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	if s.IsFlaky("TestUnknown") {
+		t.Error("unknown test should not be flaky")
+	}
+}
+
+func TestFlakyTest_OnlyFailures(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFlakyTest("TestConsistentFail", false)
+	s.RecordFlakyTest("TestConsistentFail", false)
+
+	if s.IsFlaky("TestConsistentFail") {
+		t.Error("test with only failures should not be flaky")
+	}
+}
+
+func TestFlakyTest_OnlyPasses(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFlakyTest("TestAlwaysPass", true)
+	s.RecordFlakyTest("TestAlwaysPass", true)
+
+	if s.IsFlaky("TestAlwaysPass") {
+		t.Error("test with only passes should not be flaky")
+	}
+}
+
+func TestFlakyTest_MixedResults(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFlakyTest("TestFlaky", true)
+	s.RecordFlakyTest("TestFlaky", false)
+
+	if !s.IsFlaky("TestFlaky") {
+		t.Error("test with both passes and failures should be flaky")
+	}
+}
+
+func TestRecordCost_HistoryPruning(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	// Record 105 entries.
+	for i := 0; i < 105; i++ {
+		s.RecordCost("plan", "medium", float64(i)*0.01, i)
+	}
+
+	if len(s.data.CostHistory) != 100 {
+		t.Errorf("cost history: got %d entries, want 100", len(s.data.CostHistory))
+	}
+
+	// The oldest 5 should have been pruned; last entry should be index 104.
+	last := s.data.CostHistory[99]
+	if last.Turns != 104 {
+		t.Errorf("last entry turns: got %d, want 104", last.Turns)
+	}
+}
+
+func TestRecordCost_Fields(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordCost("my-plan", "complex", 1.23, 42)
+
+	if len(s.data.CostHistory) != 1 {
+		t.Fatalf("expected 1 cost entry, got %d", len(s.data.CostHistory))
+	}
+	e := s.data.CostHistory[0]
+	if e.PlanName != "my-plan" {
+		t.Errorf("PlanName: got %q, want %q", e.PlanName, "my-plan")
+	}
+	if e.Complexity != "complex" {
+		t.Errorf("Complexity: got %q, want %q", e.Complexity, "complex")
+	}
+	if e.CostUSD != 1.23 {
+		t.Errorf("CostUSD: got %f, want 1.23", e.CostUSD)
+	}
+	if e.Turns != 42 {
+		t.Errorf("Turns: got %d, want 42", e.Turns)
+	}
+	if e.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestRecordFileCoupling_NewEntry(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFileCoupling([]string{"a.go", "b.go"})
+
+	if len(s.data.FileCoupling) != 1 {
+		t.Fatalf("expected 1 coupling entry, got %d", len(s.data.FileCoupling))
+	}
+	e := s.data.FileCoupling[0]
+	if e.Count != 1 {
+		t.Errorf("count: got %d, want 1", e.Count)
+	}
+}
+
+func TestRecordFileCoupling_Increments(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFileCoupling([]string{"a.go", "b.go"})
+	s.RecordFileCoupling([]string{"b.go", "a.go"}) // same files, different order
+
+	if len(s.data.FileCoupling) != 1 {
+		t.Fatalf("expected 1 coupling entry (normalized), got %d", len(s.data.FileCoupling))
+	}
+	if s.data.FileCoupling[0].Count != 2 {
+		t.Errorf("count: got %d, want 2", s.data.FileCoupling[0].Count)
+	}
+}
+
+func TestRecordFileCoupling_TooFewFiles(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFileCoupling([]string{"a.go"}) // only 1 file — should be ignored
+	s.RecordFileCoupling(nil)              // nil — should be ignored
+	s.RecordFileCoupling([]string{})       // empty — should be ignored
+
+	if len(s.data.FileCoupling) != 0 {
+		t.Errorf("expected 0 coupling entries, got %d", len(s.data.FileCoupling))
+	}
+}
+
+func TestRecordFileCoupling_MultipleSets(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFileCoupling([]string{"a.go", "b.go"})
+	s.RecordFileCoupling([]string{"c.go", "d.go"})
+	s.RecordFileCoupling([]string{"a.go", "b.go"})
+
+	if len(s.data.FileCoupling) != 2 {
+		t.Fatalf("expected 2 coupling entries, got %d", len(s.data.FileCoupling))
+	}
+}
+
+func TestSave_Persistence(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordTestCommand("pkg/baz", "go test ./pkg/baz/")
+	s.RecordFlakyTest("TestRace", true)
+	s.RecordFlakyTest("TestRace", false)
+	s.RecordCost("plan-x", "simple", 0.1, 5)
+	s.RecordFileCoupling([]string{"x.go", "y.go"})
+
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Re-open and verify data persisted.
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("re-Open: %v", err)
+	}
+
+	if cmd := s2.TestCommandFor("pkg/baz"); cmd != "go test ./pkg/baz/" {
+		t.Errorf("TestCommandFor after reload: got %q", cmd)
+	}
+	if !s2.IsFlaky("TestRace") {
+		t.Error("TestRace should still be flaky after reload")
+	}
+	if len(s2.data.CostHistory) != 1 {
+		t.Errorf("cost history after reload: got %d entries", len(s2.data.CostHistory))
+	}
+	if len(s2.data.FileCoupling) != 1 {
+		t.Errorf("file coupling after reload: got %d entries", len(s2.data.FileCoupling))
+	}
+	if s2.data.LastUpdated.IsZero() {
+		t.Error("LastUpdated should be set after Save")
+	}
+}
+
+func TestSave_CreatesArcDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// Do not pre-create .arc — Save should create it.
+	s, _ := Open(dir)
+	s.RecordTestCommand("pkg", "go test ./pkg/")
+
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	path := filepath.Join(dir, ".arc", "project.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("project.json not created: %v", err)
+	}
+}
+
+func TestFilterFlakyTests_NilStore(t *testing.T) {
+	// With a nil store, all tests should pass through unfiltered.
+	failing := []string{"TestA", "TestB"}
+	result := FilterFlakyTests(nil, failing)
+	if len(result) != 2 {
+		t.Errorf("nil store: expected 2 tests, got %d", len(result))
+	}
+}
+
+func TestFilterFlakyTests_RemovesFlaky(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	// TestFlaky has both passes and failures — it's flaky.
+	s.RecordFlakyTest("TestFlaky", true)
+	s.RecordFlakyTest("TestFlaky", false)
+
+	// TestReal only has failures — not flaky.
+	s.RecordFlakyTest("TestReal", false)
+	s.RecordFlakyTest("TestReal", false)
+
+	failing := []string{"TestFlaky", "TestReal", "TestUnknown"}
+	result := FilterFlakyTests(s, failing)
+
+	// TestFlaky should be removed; TestReal and TestUnknown should remain.
+	if len(result) != 2 {
+		t.Errorf("expected 2 non-flaky tests, got %d: %v", len(result), result)
+	}
+	for _, name := range result {
+		if name == "TestFlaky" {
+			t.Error("TestFlaky should have been filtered out")
 		}
 	}
 }
 
-func TestSaveUpdatesVersion(t *testing.T) {
-	dir := tempDir(t)
-	d := empty()
-	d.Version = 0
-	mustSave(t, dir, d)
+func TestFilterFlakyTests_EmptyInput(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-	d2 := mustLoad(t, dir)
-	if d2.Version != version {
-		t.Errorf("Version = %d, want %d", d2.Version, version)
+	result := FilterFlakyTests(s, nil)
+	if result == nil {
+		// nil is acceptable for empty input — just check length is 0.
+		return
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0 tests, got %d", len(result))
 	}
 }
 
-// --- TestCommands ---
+func TestFilterFlakyTests_AllKnownFlaky(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestRecordAndQueryTestCommand(t *testing.T) {
-	d := empty()
-	RecordTestCommand(d, "github.com/foo/bar", "go test ./...")
-	if got := SuggestedTestCommand(d, "github.com/foo/bar"); got != "go test ./..." {
-		t.Errorf("SuggestedTestCommand = %q, want %q", got, "go test ./...")
+	s.RecordFlakyTest("TestA", true)
+	s.RecordFlakyTest("TestA", false)
+	s.RecordFlakyTest("TestB", true)
+	s.RecordFlakyTest("TestB", false)
+
+	result := FilterFlakyTests(s, []string{"TestA", "TestB"})
+	if len(result) != 0 {
+		t.Errorf("expected 0 non-flaky tests, got %d: %v", len(result), result)
 	}
 }
 
-func TestSuggestedTestCommandUnknown(t *testing.T) {
-	d := empty()
-	if got := SuggestedTestCommand(d, "github.com/unknown"); got != "" {
-		t.Errorf("SuggestedTestCommand for unknown pkg = %q, want empty", got)
+// ---- FailurePattern tests ----
+
+func TestRecordFailurePattern_NewEntry(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: NewFactory", "add import for the factory package")
+
+	if len(s.data.FailurePatterns) != 1 {
+		t.Fatalf("expected 1 failure pattern, got %d", len(s.data.FailurePatterns))
+	}
+	fp := s.data.FailurePatterns[0]
+	if fp.Error != "undefined: NewFactory" {
+		t.Errorf("Error: got %q, want %q", fp.Error, "undefined: NewFactory")
+	}
+	if fp.Fix != "add import for the factory package" {
+		t.Errorf("Fix: got %q, want %q", fp.Fix, "add import for the factory package")
+	}
+	if fp.Count != 1 {
+		t.Errorf("Count: got %d, want 1", fp.Count)
+	}
+	if fp.LastSeen == "" {
+		t.Error("LastSeen should not be empty")
 	}
 }
 
-func TestRecordTestCommandOverwrites(t *testing.T) {
-	d := empty()
-	RecordTestCommand(d, "pkg", "old-cmd")
-	RecordTestCommand(d, "pkg", "new-cmd")
-	if got := SuggestedTestCommand(d, "pkg"); got != "new-cmd" {
-		t.Errorf("SuggestedTestCommand = %q, want %q", got, "new-cmd")
+func TestRecordFailurePattern_IncrementExisting(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: NewFactory", "add import for the factory package")
+	s.RecordFailurePattern("undefined: NewFactory", "add import for the factory package")
+
+	if len(s.data.FailurePatterns) != 1 {
+		t.Fatalf("expected 1 failure pattern (deduplicated), got %d", len(s.data.FailurePatterns))
+	}
+	if s.data.FailurePatterns[0].Count != 2 {
+		t.Errorf("Count: got %d, want 2", s.data.FailurePatterns[0].Count)
 	}
 }
 
-// --- FlakyTests ---
+func TestRecordFailurePattern_SubstringMatch(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestRecordFlakyTestIncrements(t *testing.T) {
-	d := empty()
-	RecordFlakyTest(d, "TestBar", "pkg")
-	RecordFlakyTest(d, "TestBar", "pkg")
-	if rec := d.FlakyTests["TestBar"]; rec.Occurrences != 2 {
-		t.Errorf("Occurrences = %d, want 2", rec.Occurrences)
+	// Record a short pattern.
+	s.RecordFailurePattern("undefined: NewFactory", "add import for factory")
+
+	// Record with a longer string that contains the existing error as a substring.
+	s.RecordFailurePattern("build error: undefined: NewFactory at line 42", "add import for factory")
+
+	// Should increment the existing entry rather than create a new one.
+	if len(s.data.FailurePatterns) != 1 {
+		t.Fatalf("expected 1 failure pattern (substring match), got %d", len(s.data.FailurePatterns))
+	}
+	if s.data.FailurePatterns[0].Count != 2 {
+		t.Errorf("Count: got %d, want 2", s.data.FailurePatterns[0].Count)
 	}
 }
 
-func TestIsFlakyBelowThreshold(t *testing.T) {
-	d := empty()
-	RecordFlakyTest(d, "TestFlaky", "pkg")
-	RecordFlakyTest(d, "TestFlaky", "pkg")
-	if IsFlaky(d, "TestFlaky") {
-		t.Error("IsFlaky should be false below threshold (2 occurrences)")
+func TestRecordFailurePattern_MultipleDistinct(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: NewFactory", "add factory import")
+	s.RecordFailurePattern("cannot use string as int", "fix type mismatch")
+	s.RecordFailurePattern("imported and not used", "remove unused import")
+
+	if len(s.data.FailurePatterns) != 3 {
+		t.Errorf("expected 3 failure patterns, got %d", len(s.data.FailurePatterns))
 	}
 }
 
-func TestIsFlakyAtThreshold(t *testing.T) {
-	d := empty()
-	for i := 0; i < FlakyThreshold; i++ {
-		RecordFlakyTest(d, "TestFlaky", "pkg")
+func TestRecordFailurePattern_Cap50(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	// Add 55 distinct patterns. Use UUIDs-like strings to avoid substring collisions.
+	for i := 100; i < 155; i++ {
+		s.RecordFailurePattern(fmt.Sprintf("unique_err_xyz_%d_abc", i), fmt.Sprintf("fix for %d", i))
 	}
-	if !IsFlaky(d, "TestFlaky") {
-		t.Errorf("IsFlaky should be true at threshold (%d occurrences)", FlakyThreshold)
+
+	if len(s.data.FailurePatterns) != 50 {
+		t.Errorf("expected 50 failure patterns (capped), got %d", len(s.data.FailurePatterns))
 	}
 }
 
-func TestIsFlakyUnknownTest(t *testing.T) {
-	d := empty()
-	if IsFlaky(d, "TestNeverSeen") {
-		t.Error("IsFlaky should be false for unknown test")
+func TestFindFixForError_Match(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: NewFactory", "add import for the factory package")
+	s.RecordFailurePattern("cannot use string as int", "fix type mismatch at call site")
+
+	errorOutput := `./main.go:10:5: undefined: NewFactory
+./main.go:10:5: too many errors`
+
+	fix := s.FindFixForError(errorOutput)
+	if fix != "add import for the factory package" {
+		t.Errorf("FindFixForError: got %q, want %q", fix, "add import for the factory package")
 	}
 }
 
-func TestRecordFlakyTestUpdatesPackage(t *testing.T) {
-	d := empty()
-	RecordFlakyTest(d, "TestBaz", "pkgA")
-	if rec := d.FlakyTests["TestBaz"]; rec.Package != "pkgA" {
-		t.Errorf("Package = %q, want %q", rec.Package, "pkgA")
+func TestFindFixForError_NoMatch(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: NewFactory", "add factory import")
+
+	fix := s.FindFixForError("compilation failed: syntax error near }")
+	if fix != "" {
+		t.Errorf("FindFixForError: expected empty string, got %q", fix)
 	}
 }
 
-// --- FileCoupling ---
+func TestFindFixForError_EmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestRecordFileCouplingDeduplicates(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{"a.go", "b.go"})
-	RecordFileCoupling(d, []string{"b.go", "a.go"}) // reversed order
-	if len(d.FileCoupling) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(d.FileCoupling))
-	}
-	if d.FileCoupling[0].CoChanges != 2 {
-		t.Errorf("CoChanges = %d, want 2", d.FileCoupling[0].CoChanges)
+	fix := s.FindFixForError("undefined: SomeFunc")
+	if fix != "" {
+		t.Errorf("FindFixForError on empty store: expected empty string, got %q", fix)
 	}
 }
 
-func TestRecordFileCouplingDistinctSets(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{"a.go", "b.go"})
-	RecordFileCoupling(d, []string{"c.go", "d.go"})
-	if len(d.FileCoupling) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(d.FileCoupling))
+func TestFailurePattern_LastSeenIsRFC3339(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("some error", "some fix")
+	lastSeen := s.data.FailurePatterns[0].LastSeen
+
+	if lastSeen == "" {
+		t.Fatal("LastSeen should not be empty")
+	}
+	// Verify it is a valid RFC3339 timestamp.
+	if _, err := time.Parse(time.RFC3339, lastSeen); err != nil {
+		t.Errorf("LastSeen is not a valid RFC3339 timestamp: %q, error: %v", lastSeen, err)
 	}
 }
 
-func TestRecordFileCouplingIgnoresSingleFile(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{"only.go"})
-	if len(d.FileCoupling) != 0 {
-		t.Errorf("expected no entries for single-file set, got %d", len(d.FileCoupling))
+func TestFailurePattern_Persistence(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordFailurePattern("undefined: Foo", "import pkg/foo")
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	s2, _ := Open(dir)
+	if len(s2.data.FailurePatterns) != 1 {
+		t.Fatalf("expected 1 failure pattern after reload, got %d", len(s2.data.FailurePatterns))
+	}
+	if s2.data.FailurePatterns[0].Error != "undefined: Foo" {
+		t.Errorf("Error after reload: got %q", s2.data.FailurePatterns[0].Error)
 	}
 }
 
-func TestRecordFileCouplingIgnoresEmpty(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{})
-	if len(d.FileCoupling) != 0 {
-		t.Errorf("expected no entries for empty set, got %d", len(d.FileCoupling))
+// ---- ConventionPattern tests ----
+
+func TestRecordConvention_NewEntry(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("file_structure", "Test files alongside source (*_test.go)")
+
+	if len(s.data.ConventionPatterns) != 1 {
+		t.Fatalf("expected 1 convention, got %d", len(s.data.ConventionPatterns))
+	}
+	cp := s.data.ConventionPatterns[0]
+	if cp.Type != "file_structure" {
+		t.Errorf("Type: got %q, want %q", cp.Type, "file_structure")
+	}
+	if cp.Pattern != "Test files alongside source (*_test.go)" {
+		t.Errorf("Pattern: got %q", cp.Pattern)
+	}
+	if cp.Confidence != 30 {
+		t.Errorf("Confidence: got %d, want 30", cp.Confidence)
+	}
+	if cp.Observations != 1 {
+		t.Errorf("Observations: got %d, want 1", cp.Observations)
 	}
 }
 
-func TestRecordFileCouplingThreeFiles(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{"z.go", "a.go", "m.go"})
-	if len(d.FileCoupling) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(d.FileCoupling))
+func TestRecordConvention_IncrementExisting(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("test_naming", "Test functions use TestXxx naming")
+	s.RecordConvention("test_naming", "Test functions use TestXxx naming")
+	s.RecordConvention("test_naming", "Test functions use TestXxx naming")
+
+	if len(s.data.ConventionPatterns) != 1 {
+		t.Fatalf("expected 1 convention (deduplicated), got %d", len(s.data.ConventionPatterns))
 	}
-	// Files should be stored sorted.
-	entry := d.FileCoupling[0]
-	if entry.Files[0] != "a.go" || entry.Files[1] != "m.go" || entry.Files[2] != "z.go" {
-		t.Errorf("files not sorted: %v", entry.Files)
+	cp := s.data.ConventionPatterns[0]
+	if cp.Observations != 3 {
+		t.Errorf("Observations: got %d, want 3", cp.Observations)
+	}
+	// Confidence starts at 30 and increases by 10 per additional observation.
+	// After 3 records: 30 + 10 + 10 = 50.
+	if cp.Confidence != 50 {
+		t.Errorf("Confidence: got %d, want 50", cp.Confidence)
 	}
 }
 
-// --- CostHistory ---
+func TestRecordConvention_ConfidenceCappedAt100(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestRecordCostSingleEntry(t *testing.T) {
-	d := empty()
-	RecordCost(d, "high", 1.50)
-	s := d.CostHistory["high"]
-	if s.Count != 1 {
-		t.Errorf("Count = %d, want 1", s.Count)
+	// 8 additional observations after the first gives: 30 + 8*10 = 110, should cap at 100.
+	for i := 0; i < 9; i++ {
+		s.RecordConvention("file_structure", "Test files alongside source (*_test.go)")
 	}
-	if s.TotalCost != 1.50 {
-		t.Errorf("TotalCost = %f, want 1.50", s.TotalCost)
-	}
-	if s.AvgCost != 1.50 {
-		t.Errorf("AvgCost = %f, want 1.50", s.AvgCost)
-	}
-	if s.MinCost != 1.50 || s.MaxCost != 1.50 {
-		t.Errorf("Min/Max = %f/%f, want 1.50/1.50", s.MinCost, s.MaxCost)
+
+	if s.data.ConventionPatterns[0].Confidence != 100 {
+		t.Errorf("Confidence: got %d, want 100 (capped)", s.data.ConventionPatterns[0].Confidence)
 	}
 }
 
-func TestRecordCostMultipleEntries(t *testing.T) {
-	d := empty()
-	RecordCost(d, "low", 0.10)
-	RecordCost(d, "low", 0.30)
-	RecordCost(d, "low", 0.20)
-	s := d.CostHistory["low"]
-	if s.Count != 3 {
-		t.Errorf("Count = %d, want 3", s.Count)
-	}
-	if got := s.TotalCost; got < 0.599 || got > 0.601 {
-		t.Errorf("TotalCost = %f, want ~0.60", got)
-	}
-	if got := s.AvgCost; got < 0.199 || got > 0.201 {
-		t.Errorf("AvgCost = %f, want ~0.20", got)
-	}
-	if s.MinCost != 0.10 {
-		t.Errorf("MinCost = %f, want 0.10", s.MinCost)
-	}
-	if s.MaxCost != 0.30 {
-		t.Errorf("MaxCost = %f, want 0.30", s.MaxCost)
+func TestRecordConvention_DifferentTypeSamePattern(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("file_structure", "same pattern")
+	s.RecordConvention("test_naming", "same pattern")
+
+	if len(s.data.ConventionPatterns) != 2 {
+		t.Errorf("expected 2 conventions (different types), got %d", len(s.data.ConventionPatterns))
 	}
 }
 
-func TestEstimateCostNoHistory(t *testing.T) {
-	d := empty()
-	if got := EstimateCost(d, "unknown"); got != 0 {
-		t.Errorf("EstimateCost with no history = %f, want 0", got)
+func TestRecordConvention_SameTypeDifferentPattern(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("file_structure", "pattern A")
+	s.RecordConvention("file_structure", "pattern B")
+
+	if len(s.data.ConventionPatterns) != 2 {
+		t.Errorf("expected 2 conventions (different patterns), got %d", len(s.data.ConventionPatterns))
 	}
 }
 
-func TestEstimateCostReturnsAvg(t *testing.T) {
-	d := empty()
-	RecordCost(d, "medium", 1.00)
-	RecordCost(d, "medium", 3.00)
-	if got := EstimateCost(d, "medium"); got != 2.00 {
-		t.Errorf("EstimateCost = %f, want 2.00", got)
+func TestRecordConvention_Cap30(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	for i := 0; i < 35; i++ {
+		s.RecordConvention("test_naming", fmt.Sprintf("convention pattern %d", i))
+	}
+
+	if len(s.data.ConventionPatterns) != 30 {
+		t.Errorf("expected 30 conventions (capped), got %d", len(s.data.ConventionPatterns))
 	}
 }
 
-// --- FailurePatterns ---
+func TestGetConventions_FiltersByType(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestRecordFailurePatternNew(t *testing.T) {
-	d := empty()
-	RecordFailurePattern(d, "undefined:", "add import")
-	if len(d.FailurePatterns) != 1 {
-		t.Fatalf("expected 1 pattern, got %d", len(d.FailurePatterns))
-	}
-	fp := d.FailurePatterns[0]
-	if fp.Pattern != "undefined:" || fp.Fix != "add import" || fp.Occurrences != 1 {
-		t.Errorf("unexpected pattern entry: %+v", fp)
-	}
-}
+	s.RecordConvention("file_structure", "Test files alongside source")
+	s.RecordConvention("test_naming", "TestXxx naming")
+	s.RecordConvention("file_structure", "One package per directory")
 
-func TestRecordFailurePatternIncrement(t *testing.T) {
-	d := empty()
-	RecordFailurePattern(d, "undefined:", "add import")
-	RecordFailurePattern(d, "undefined:", "add import")
-	if len(d.FailurePatterns) != 1 {
-		t.Fatalf("expected 1 pattern after dedup, got %d", len(d.FailurePatterns))
+	conventions := s.GetConventions("file_structure")
+	if len(conventions) != 2 {
+		t.Fatalf("expected 2 file_structure conventions, got %d", len(conventions))
 	}
-	if d.FailurePatterns[0].Occurrences != 2 {
-		t.Errorf("Occurrences = %d, want 2", d.FailurePatterns[0].Occurrences)
+	for _, c := range conventions {
+		if c.Type != "file_structure" {
+			t.Errorf("GetConventions returned wrong type: %q", c.Type)
+		}
 	}
 }
 
-func TestRecordFailurePatternDistinctFix(t *testing.T) {
-	d := empty()
-	RecordFailurePattern(d, "undefined:", "add import")
-	RecordFailurePattern(d, "undefined:", "different fix")
-	if len(d.FailurePatterns) != 2 {
-		t.Errorf("expected 2 patterns for same error with different fix, got %d", len(d.FailurePatterns))
+func TestGetConventions_SortedByConfidenceDesc(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("file_structure", "pattern A")
+	// Bump pattern A confidence to 50.
+	s.RecordConvention("file_structure", "pattern A")
+	s.RecordConvention("file_structure", "pattern A")
+
+	s.RecordConvention("file_structure", "pattern B")
+	// pattern B has confidence 30, pattern A has confidence 50.
+
+	conventions := s.GetConventions("file_structure")
+	if len(conventions) < 2 {
+		t.Fatalf("expected at least 2 conventions, got %d", len(conventions))
+	}
+	if conventions[0].Confidence < conventions[1].Confidence {
+		t.Errorf("not sorted descending: [0]=%d [1]=%d", conventions[0].Confidence, conventions[1].Confidence)
 	}
 }
 
-func TestRecordFailurePatternDistinctPattern(t *testing.T) {
-	d := empty()
-	RecordFailurePattern(d, "error A", "fix A")
-	RecordFailurePattern(d, "error B", "fix B")
-	if len(d.FailurePatterns) != 2 {
-		t.Errorf("expected 2 distinct patterns, got %d", len(d.FailurePatterns))
+func TestGetConventions_EmptyType(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordConvention("file_structure", "some pattern")
+
+	result := s.GetConventions("nonexistent_type")
+	if len(result) != 0 {
+		t.Errorf("expected 0 conventions for unknown type, got %d", len(result))
 	}
 }
 
-// --- Prune ---
+func TestGetAllConventions_SortedByConfidenceDesc(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestPruneRemovesOldFlakyTests(t *testing.T) {
-	d := empty()
-	RecordFlakyTest(d, "TestOld", "pkg")
-	// Backdate the entry.
-	rec := d.FlakyTests["TestOld"]
-	rec.LastSeen = time.Now().UTC().Add(-48 * time.Hour)
-	d.FlakyTests["TestOld"] = rec
-	RecordFlakyTest(d, "TestNew", "pkg")
+	s.RecordConvention("file_structure", "pattern A") // confidence 30
+	s.RecordConvention("test_naming", "TestXxx")      // confidence 30
+	// Bump test_naming to 40.
+	s.RecordConvention("test_naming", "TestXxx")
 
-	Prune(d, 24*time.Hour)
-
-	if _, ok := d.FlakyTests["TestOld"]; ok {
-		t.Error("old flaky test should have been pruned")
+	all := s.GetAllConventions()
+	if len(all) != 2 {
+		t.Fatalf("expected 2 total conventions, got %d", len(all))
 	}
-	if _, ok := d.FlakyTests["TestNew"]; !ok {
-		t.Error("new flaky test should not have been pruned")
+	if all[0].Confidence < all[1].Confidence {
+		t.Errorf("not sorted descending: [0]=%d [1]=%d", all[0].Confidence, all[1].Confidence)
 	}
-}
-
-func TestPruneRemovesOldCoupling(t *testing.T) {
-	d := empty()
-	RecordFileCoupling(d, []string{"old1.go", "old2.go"})
-	d.FileCoupling[0].LastSeen = time.Now().UTC().Add(-48 * time.Hour)
-	RecordFileCoupling(d, []string{"new1.go", "new2.go"})
-
-	Prune(d, 24*time.Hour)
-
-	if len(d.FileCoupling) != 1 {
-		t.Fatalf("expected 1 coupling entry after prune, got %d", len(d.FileCoupling))
-	}
-	if d.FileCoupling[0].Files[0] != "new1.go" {
-		t.Errorf("wrong entry retained: %v", d.FileCoupling[0].Files)
+	if all[0].Pattern != "TestXxx" {
+		t.Errorf("expected highest-confidence pattern first, got %q", all[0].Pattern)
 	}
 }
 
-func TestPruneRemovesOldFailurePatterns(t *testing.T) {
-	d := empty()
-	RecordFailurePattern(d, "old error", "old fix")
-	d.FailurePatterns[0].LastSeen = time.Now().UTC().Add(-48 * time.Hour)
-	RecordFailurePattern(d, "new error", "new fix")
+func TestGetAllConventions_Empty(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-	Prune(d, 24*time.Hour)
-
-	if len(d.FailurePatterns) != 1 {
-		t.Fatalf("expected 1 failure pattern after prune, got %d", len(d.FailurePatterns))
-	}
-	if d.FailurePatterns[0].Pattern != "new error" {
-		t.Errorf("wrong pattern retained: %s", d.FailurePatterns[0].Pattern)
+	all := s.GetAllConventions()
+	if len(all) != 0 {
+		t.Errorf("expected 0 conventions, got %d", len(all))
 	}
 }
 
-func TestPruneKeepsAllWhenNothingExpired(t *testing.T) {
-	d := empty()
-	RecordFlakyTest(d, "TestRecent", "pkg")
-	RecordFileCoupling(d, []string{"a.go", "b.go"})
-	RecordFailurePattern(d, "err", "fix")
+func TestConventionPattern_Persistence(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-	Prune(d, 24*time.Hour)
+	s.RecordConvention("file_structure", "Test files alongside source (*_test.go)")
+	s.RecordConvention("file_structure", "Test files alongside source (*_test.go)")
 
-	if len(d.FlakyTests) != 1 {
-		t.Errorf("FlakyTests: expected 1, got %d", len(d.FlakyTests))
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
-	if len(d.FileCoupling) != 1 {
-		t.Errorf("FileCoupling: expected 1, got %d", len(d.FileCoupling))
-	}
-	if len(d.FailurePatterns) != 1 {
-		t.Errorf("FailurePatterns: expected 1, got %d", len(d.FailurePatterns))
-	}
-}
 
-func TestPruneDoesNotTouchTestCommandsOrCostHistory(t *testing.T) {
-	d := empty()
-	RecordTestCommand(d, "pkg", "go test ./...")
-	RecordCost(d, "low", 0.10)
-
-	Prune(d, 0) // zero duration prunes everything time-based
-
-	if len(d.TestCommands) != 1 {
-		t.Errorf("Prune should not touch TestCommands; got %d", len(d.TestCommands))
+	s2, _ := Open(dir)
+	conventions := s2.GetConventions("file_structure")
+	if len(conventions) != 1 {
+		t.Fatalf("expected 1 convention after reload, got %d", len(conventions))
 	}
-	if len(d.CostHistory) != 1 {
-		t.Errorf("Prune should not touch CostHistory; got %d", len(d.CostHistory))
+	if conventions[0].Observations != 2 {
+		t.Errorf("Observations after reload: got %d, want 2", conventions[0].Observations)
+	}
+	if conventions[0].Confidence != 40 {
+		t.Errorf("Confidence after reload: got %d, want 40", conventions[0].Confidence)
 	}
 }
 
-// --- Concurrent safety ---
+func TestConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
 
-func TestConcurrentRecordOperations(t *testing.T) {
-	// The package does not promise goroutine-safety on a single *ProjectData
-	// without external synchronisation; callers are expected to serialise
-	// writes (e.g. load → mutate → save). This test verifies that concurrent
-	// Save calls to different project directories don't interfere.
-	const workers = 10
 	var wg sync.WaitGroup
-	errs := make(chan error, workers)
+	n := 50
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			dir := t.TempDir()
-			d := empty()
-			RecordTestCommand(d, "pkg", "go test ./...")
-			RecordCost(d, "low", 0.10)
-			if err := Save(dir, d); err != nil {
-				errs <- err
-				return
-			}
-			d2, err := Load(dir)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if SuggestedTestCommand(d2, "pkg") != "go test ./..." {
-				errs <- fmt.Errorf("round-trip mismatch in goroutine")
-			}
-		}()
+			s.RecordTestCommand("pkg", "go test .")
+			s.TestCommandFor("pkg")
+			s.RecordFlakyTest("TestConcurrent", i%2 == 0)
+			s.IsFlaky("TestConcurrent")
+			s.RecordCost("plan", "medium", 0.01, 1)
+			s.RecordFileCoupling([]string{"a.go", "b.go"})
+		}(i)
 	}
+
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Errorf("concurrent error: %v", err)
+
+	// Basic sanity: cost history should have n entries (or 100 if pruned).
+	if len(s.data.CostHistory) > 100 {
+		t.Errorf("cost history exceeded max: %d", len(s.data.CostHistory))
 	}
 }
-

@@ -558,7 +558,7 @@ func TestBuildImplPrompt(t *testing.T) {
 		},
 	}
 
-	result, err := buildImplPrompt(spec, "Go 1.24 project")
+	result, err := buildImplPrompt(spec, "test-plan", "Go 1.24 project")
 	if err != nil {
 		t.Fatalf("buildImplPrompt: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestBuildRetryPrompt(t *testing.T) {
 		},
 	}
 
-	result, err := buildRetryPrompt(spec, "", 2, gateResult, "M internal/foo.go")
+	result, err := buildRetryPrompt(spec, "test-plan", "", 2, gateResult, "M internal/foo.go")
 	if err != nil {
 		t.Fatalf("buildRetryPrompt: %v", err)
 	}

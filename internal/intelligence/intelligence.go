@@ -6,274 +6,354 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 )
 
-const (
-	arcDir   = ".arc"
-	dataFile = "project.json"
-	version  = 1
-
-	// FlakyThreshold is the minimum number of occurrences before a test is
-	// considered flaky.
-	FlakyThreshold = 3
-)
-
-// ProjectData holds accumulated project intelligence.
-type ProjectData struct {
-	Version         int                    `json:"version"`
-	Updated         time.Time              `json:"updated"`
-	TestCommands    map[string]string      `json:"test_commands"`    // package path → test command
-	FlakyTests      map[string]FlakyRecord `json:"flaky_tests"`     // test name → flaky info
-	FileCoupling    []CouplingEntry        `json:"file_coupling"`   // frequently co-changed files
-	CostHistory     map[string]CostStats   `json:"cost_history"`    // complexity → cost stats
-	FailurePatterns []FailurePattern       `json:"failure_patterns"` // error → fix mapping
+// Store is the project intelligence database, stored at .arc/project.json.
+type Store struct {
+	mu   sync.Mutex
+	path string
+	data *Data
 }
 
-// FlakyRecord tracks a test that intermittently fails.
-type FlakyRecord struct {
-	TestName    string    `json:"test_name"`
-	Package     string    `json:"package"`
-	Occurrences int       `json:"occurrences"`
-	LastSeen    time.Time `json:"last_seen"`
+// Data is the serializable intelligence data.
+type Data struct {
+	TestCommands      map[string]string     `json:"test_commands,omitempty"`      // package → working test command
+	FlakyTests        map[string]FlakyEntry `json:"flaky_tests,omitempty"`        // test name → flaky info
+	FileCoupling      []CouplingEntry       `json:"file_coupling,omitempty"`      // frequently co-changed files
+	CostHistory       []CostEntry           `json:"cost_history,omitempty"`       // historical cost per complexity
+	FailurePatterns   []FailurePattern      `json:"failure_patterns,omitempty"`   // error → fix mappings
+	ConventionPatterns []ConventionPattern  `json:"convention_patterns,omitempty"` // observed project conventions
+	LastUpdated       time.Time             `json:"last_updated"`
+}
+
+// FailurePattern records a known error and its fix for future guidance.
+type FailurePattern struct {
+	Error    string `json:"error"`     // e.g. "undefined: NewFactory"
+	Fix      string `json:"fix"`       // e.g. "add import for the factory package"
+	Count    int    `json:"count"`     // how many times this pattern was seen
+	LastSeen string `json:"last_seen"` // RFC3339 timestamp
+}
+
+// ConventionPattern records an observed project convention.
+type ConventionPattern struct {
+	Type         string `json:"type"`         // e.g. "test_naming", "file_structure", "import_style"
+	Pattern      string `json:"pattern"`      // e.g. "Test files alongside source (*_test.go)"
+	Confidence   int    `json:"confidence"`   // 0-100, increases with observations
+	Observations int    `json:"observations"` // how many times observed
+}
+
+// FlakyEntry tracks pass/fail counts for a test to detect flakiness.
+type FlakyEntry struct {
+	FailCount int       `json:"fail_count"`
+	PassCount int       `json:"pass_count"`
+	LastSeen  time.Time `json:"last_seen"`
 }
 
 // CouplingEntry records files that are frequently changed together.
 type CouplingEntry struct {
-	Files     []string  `json:"files"`
-	CoChanges int       `json:"co_changes"`
-	LastSeen  time.Time `json:"last_seen"`
+	Files []string `json:"files"`
+	Count int      `json:"count"` // how many times changed together
 }
 
-// CostStats holds cost statistics for a complexity tier.
-type CostStats struct {
-	Count     int     `json:"count"`
-	TotalCost float64 `json:"total_cost"`
-	AvgCost   float64 `json:"avg_cost"`
-	MinCost   float64 `json:"min_cost"`
-	MaxCost   float64 `json:"max_cost"`
+// CostEntry records the cost of a single plan execution.
+type CostEntry struct {
+	PlanName   string    `json:"plan_name"`
+	Complexity string    `json:"complexity"`
+	CostUSD    float64   `json:"cost_usd"`
+	Turns      int       `json:"turns"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
-// FailurePattern records a known error string and the fix that resolved it.
-type FailurePattern struct {
-	Pattern     string    `json:"pattern"`     // error substring to match
-	Fix         string    `json:"fix"`         // what fixed it
-	Occurrences int       `json:"occurrences"`
-	LastSeen    time.Time `json:"last_seen"`
-}
+// Open loads or creates the intelligence store at the given project root.
+// The store is located at <projectRoot>/.arc/project.json.
+func Open(projectRoot string) (*Store, error) {
+	path := filepath.Join(projectRoot, ".arc", "project.json")
+	s := &Store{path: path}
 
-// Load reads project intelligence from <projectDir>/.arc/project.json.
-// Returns an empty, initialised ProjectData when the file does not exist.
-func Load(projectDir string) (*ProjectData, error) {
-	path := dataPath(projectDir)
-	raw, err := os.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return empty(), nil
+		// File doesn't exist — start fresh.
+		s.data = &Data{
+			TestCommands: make(map[string]string),
+			FlakyTests:   make(map[string]FlakyEntry),
 		}
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return s, nil
 	}
-	var d ProjectData
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+
+	var d Data
+	if err := json.Unmarshal(data, &d); err != nil {
+		// Corrupt file — start fresh.
+		s.data = &Data{
+			TestCommands: make(map[string]string),
+			FlakyTests:   make(map[string]FlakyEntry),
+		}
+		return s, nil
 	}
-	// Ensure maps are non-nil after unmarshal.
 	if d.TestCommands == nil {
 		d.TestCommands = make(map[string]string)
 	}
 	if d.FlakyTests == nil {
-		d.FlakyTests = make(map[string]FlakyRecord)
+		d.FlakyTests = make(map[string]FlakyEntry)
 	}
-	if d.CostHistory == nil {
-		d.CostHistory = make(map[string]CostStats)
-	}
-	return &d, nil
+	s.data = &d
+	return s, nil
 }
 
-// Save atomically writes data to <projectDir>/.arc/project.json.
-func Save(projectDir string, data *ProjectData) error {
-	dir := filepath.Join(projectDir, arcDir)
+// Save writes the intelligence data to disk atomically.
+func (s *Store) Save() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.data.LastUpdated = time.Now().UTC()
+
+	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
+		return fmt.Errorf("creating .arc directory: %w", err)
 	}
-	data.Updated = time.Now().UTC()
-	data.Version = version
 
-	raw, err := json.MarshalIndent(data, "", "  ")
+	data, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling project data: %w", err)
+		return fmt.Errorf("marshaling intelligence data: %w", err)
 	}
-
-	tmp, err := os.CreateTemp(dir, "project.json.*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-	dest := dataPath(projectDir)
-	if err := os.Rename(tmpPath, dest); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
-	}
-	return nil
+	return os.WriteFile(s.path, data, 0644)
 }
 
-// RecordTestCommand records that cmd is the working test command for pkg.
-func RecordTestCommand(data *ProjectData, pkg, cmd string) {
-	data.TestCommands[pkg] = cmd
+// RecordTestCommand stores a working test command for a package.
+func (s *Store) RecordTestCommand(pkg, cmd string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.TestCommands[pkg] = cmd
 }
 
-// RecordFlakyTest increments the flaky occurrence counter for testName in pkg.
-func RecordFlakyTest(data *ProjectData, testName, pkg string) {
-	rec := data.FlakyTests[testName]
-	rec.TestName = testName
-	rec.Package = pkg
-	rec.Occurrences++
-	rec.LastSeen = time.Now().UTC()
-	data.FlakyTests[testName] = rec
+// TestCommandFor returns the known test command for a package, or empty string.
+func (s *Store) TestCommandFor(pkg string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.TestCommands[pkg]
 }
 
-// RecordFileCoupling records that the given files were changed together.
-// If an identical file set already exists, its counter is incremented.
-// files must contain at least two entries; single-file sets are ignored.
-func RecordFileCoupling(data *ProjectData, files []string) {
+// RecordFlakyTest records a test result that may indicate flakiness.
+func (s *Store) RecordFlakyTest(testName string, passed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.data.FlakyTests[testName]
+	if passed {
+		entry.PassCount++
+	} else {
+		entry.FailCount++
+	}
+	entry.LastSeen = time.Now().UTC()
+	s.data.FlakyTests[testName] = entry
+}
+
+// IsFlaky returns true if a test has failed intermittently (both passes and failures recorded).
+func (s *Store) IsFlaky(testName string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.data.FlakyTests[testName]
+	if !ok {
+		return false
+	}
+	return entry.FailCount > 0 && entry.PassCount > 0
+}
+
+// RecordCost records the cost of a plan execution for future estimation.
+// History is capped at 100 entries.
+func (s *Store) RecordCost(planName, complexity string, costUSD float64, turns int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.CostHistory = append(s.data.CostHistory, CostEntry{
+		PlanName:   planName,
+		Complexity: complexity,
+		CostUSD:    costUSD,
+		Turns:      turns,
+		Timestamp:  time.Now().UTC(),
+	})
+	// Keep last 100 entries.
+	if len(s.data.CostHistory) > 100 {
+		s.data.CostHistory = s.data.CostHistory[len(s.data.CostHistory)-100:]
+	}
+}
+
+// RecordFileCoupling records files that were changed together.
+// Increments the count if an identical coupling already exists; otherwise appends a new entry.
+// Requires at least 2 files.
+func (s *Store) RecordFileCoupling(files []string) {
 	if len(files) < 2 {
 		return
 	}
-	// Normalise: sort so order doesn't matter for dedup.
-	key := make([]string, len(files))
-	copy(key, files)
-	sort.Strings(key)
+	// Normalize order for consistent comparison.
+	normalized := make([]string, len(files))
+	copy(normalized, files)
+	sort.Strings(normalized)
 
-	for i, entry := range data.FileCoupling {
-		if equalSorted(entry.Files, key) {
-			data.FileCoupling[i].CoChanges++
-			data.FileCoupling[i].LastSeen = time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.data.FileCoupling {
+		if sameFiles(s.data.FileCoupling[i].Files, normalized) {
+			s.data.FileCoupling[i].Count++
 			return
 		}
 	}
-	data.FileCoupling = append(data.FileCoupling, CouplingEntry{
-		Files:     key,
-		CoChanges: 1,
-		LastSeen:  time.Now().UTC(),
+	s.data.FileCoupling = append(s.data.FileCoupling, CouplingEntry{
+		Files: normalized,
+		Count: 1,
 	})
 }
 
-// RecordCost records the actual cost for a given complexity tier and updates
-// running statistics.
-func RecordCost(data *ProjectData, complexity string, cost float64) {
-	s := data.CostHistory[complexity]
-	s.Count++
-	s.TotalCost += cost
-	s.AvgCost = s.TotalCost / float64(s.Count)
-	if s.Count == 1 {
-		s.MinCost = cost
-		s.MaxCost = cost
-	} else {
-		if cost < s.MinCost {
-			s.MinCost = cost
-		}
-		if cost > s.MaxCost {
-			s.MaxCost = cost
+// FilterFlakyTests returns only those test names from failing that are NOT known-flaky.
+// Tests with both pass and fail history in the store are considered flaky and excluded.
+func FilterFlakyTests(s *Store, failing []string) []string {
+	if s == nil {
+		return failing
+	}
+	out := make([]string, 0, len(failing))
+	for _, name := range failing {
+		if !s.IsFlaky(name) {
+			out = append(out, name)
 		}
 	}
-	data.CostHistory[complexity] = s
+	return out
 }
 
-// RecordFailurePattern records that pattern was observed and fix resolved it.
-// If the same (pattern, fix) pair already exists, its counter is incremented.
-func RecordFailurePattern(data *ProjectData, pattern, fix string) {
-	for i, fp := range data.FailurePatterns {
-		if fp.Pattern == pattern && fp.Fix == fix {
-			data.FailurePatterns[i].Occurrences++
-			data.FailurePatterns[i].LastSeen = time.Now().UTC()
+// RecordFailurePattern records an error pattern and its fix.
+// If a pattern with the same error substring already exists, its count is incremented
+// and last_seen is updated. Otherwise a new entry is appended.
+// The list is capped at 50 entries; when over capacity the oldest by last_seen is evicted.
+func (s *Store) RecordFailurePattern(errorPattern, fix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Check for an existing entry whose Error substring matches errorPattern.
+	for i := range s.data.FailurePatterns {
+		if strings.Contains(s.data.FailurePatterns[i].Error, errorPattern) ||
+			strings.Contains(errorPattern, s.data.FailurePatterns[i].Error) {
+			s.data.FailurePatterns[i].Count++
+			s.data.FailurePatterns[i].LastSeen = now
 			return
 		}
 	}
-	data.FailurePatterns = append(data.FailurePatterns, FailurePattern{
-		Pattern:     pattern,
-		Fix:         fix,
-		Occurrences: 1,
-		LastSeen:    time.Now().UTC(),
+
+	// Append new entry.
+	s.data.FailurePatterns = append(s.data.FailurePatterns, FailurePattern{
+		Error:    errorPattern,
+		Fix:      fix,
+		Count:    1,
+		LastSeen: now,
 	})
-}
 
-// IsFlaky reports whether testName is known-flaky (FlakyThreshold or more
-// recorded occurrences).
-func IsFlaky(data *ProjectData, testName string) bool {
-	rec, ok := data.FlakyTests[testName]
-	return ok && rec.Occurrences >= FlakyThreshold
-}
-
-// SuggestedTestCommand returns the known test command for pkg, or an empty
-// string if none has been recorded.
-func SuggestedTestCommand(data *ProjectData, pkg string) string {
-	return data.TestCommands[pkg]
-}
-
-// EstimateCost returns the average historical cost for the given complexity
-// tier, or 0 if no data is available.
-func EstimateCost(data *ProjectData, complexity string) float64 {
-	s, ok := data.CostHistory[complexity]
-	if !ok || s.Count == 0 {
-		return 0
+	// Cap at 50; evict oldest by last_seen.
+	if len(s.data.FailurePatterns) > 50 {
+		oldestIdx := 0
+		for i := 1; i < len(s.data.FailurePatterns); i++ {
+			if s.data.FailurePatterns[i].LastSeen < s.data.FailurePatterns[oldestIdx].LastSeen {
+				oldestIdx = i
+			}
+		}
+		s.data.FailurePatterns = append(
+			s.data.FailurePatterns[:oldestIdx],
+			s.data.FailurePatterns[oldestIdx+1:]...,
+		)
 	}
-	return s.AvgCost
 }
 
-// Prune removes entries that have not been seen within maxAge.
-func Prune(data *ProjectData, maxAge time.Duration) {
-	cutoff := time.Now().UTC().Add(-maxAge)
+// FindFixForError scans known failure patterns and returns the fix for the first
+// pattern whose Error field appears as a substring in errorOutput.
+// Returns "" if no match is found.
+func (s *Store) FindFixForError(errorOutput string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	for name, rec := range data.FlakyTests {
-		if rec.LastSeen.Before(cutoff) {
-			delete(data.FlakyTests, name)
+	for _, fp := range s.data.FailurePatterns {
+		if strings.Contains(errorOutput, fp.Error) {
+			return fp.Fix
+		}
+	}
+	return ""
+}
+
+// RecordConvention records an observed project convention of the given type and pattern.
+// If the same type+pattern already exists, observations is incremented and confidence
+// is raised by 10 (capped at 100). Otherwise a new entry is added with confidence=30
+// and observations=1. The list is capped at 30 entries; when over capacity the entry
+// with the lowest confidence is evicted.
+func (s *Store) RecordConvention(patternType, pattern string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.data.ConventionPatterns {
+		if s.data.ConventionPatterns[i].Type == patternType &&
+			s.data.ConventionPatterns[i].Pattern == pattern {
+			s.data.ConventionPatterns[i].Observations++
+			if s.data.ConventionPatterns[i].Confidence < 100 {
+				s.data.ConventionPatterns[i].Confidence += 10
+				if s.data.ConventionPatterns[i].Confidence > 100 {
+					s.data.ConventionPatterns[i].Confidence = 100
+				}
+			}
+			return
 		}
 	}
 
-	kept := data.FileCoupling[:0]
-	for _, entry := range data.FileCoupling {
-		if !entry.LastSeen.Before(cutoff) {
-			kept = append(kept, entry)
+	s.data.ConventionPatterns = append(s.data.ConventionPatterns, ConventionPattern{
+		Type:         patternType,
+		Pattern:      pattern,
+		Confidence:   30,
+		Observations: 1,
+	})
+
+	// Cap at 30; evict lowest confidence entry.
+	if len(s.data.ConventionPatterns) > 30 {
+		lowestIdx := 0
+		for i := 1; i < len(s.data.ConventionPatterns); i++ {
+			if s.data.ConventionPatterns[i].Confidence < s.data.ConventionPatterns[lowestIdx].Confidence {
+				lowestIdx = i
+			}
+		}
+		s.data.ConventionPatterns = append(
+			s.data.ConventionPatterns[:lowestIdx],
+			s.data.ConventionPatterns[lowestIdx+1:]...,
+		)
+	}
+}
+
+// GetConventions returns all conventions of the given type, sorted by confidence descending.
+func (s *Store) GetConventions(patternType string) []ConventionPattern {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var result []ConventionPattern
+	for _, cp := range s.data.ConventionPatterns {
+		if cp.Type == patternType {
+			result = append(result, cp)
 		}
 	}
-	data.FileCoupling = kept
-
-	keptFP := data.FailurePatterns[:0]
-	for _, fp := range data.FailurePatterns {
-		if !fp.LastSeen.Before(cutoff) {
-			keptFP = append(keptFP, fp)
-		}
-	}
-	data.FailurePatterns = keptFP
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Confidence > result[j].Confidence
+	})
+	return result
 }
 
-// --- helpers ---
+// GetAllConventions returns all conventions, sorted by confidence descending.
+func (s *Store) GetAllConventions() []ConventionPattern {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-func dataPath(projectDir string) string {
-	return filepath.Join(projectDir, arcDir, dataFile)
+	result := make([]ConventionPattern, len(s.data.ConventionPatterns))
+	copy(result, s.data.ConventionPatterns)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Confidence > result[j].Confidence
+	})
+	return result
 }
 
-func empty() *ProjectData {
-	return &ProjectData{
-		Version:      version,
-		TestCommands: make(map[string]string),
-		FlakyTests:   make(map[string]FlakyRecord),
-		CostHistory:  make(map[string]CostStats),
-	}
-}
-
-// equalSorted compares two pre-sorted string slices for equality.
-func equalSorted(a, b []string) bool {
+// sameFiles returns true if two string slices contain exactly the same elements in the same order.
+func sameFiles(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}

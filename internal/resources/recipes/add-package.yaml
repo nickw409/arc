@@ -1,0 +1,44 @@
+name: add-package
+description: Scaffold a new internal Go package with core types, logic, and tests
+params:
+  - name: package_name
+  - name: package_path
+    default: internal
+phases:
+  - name: scaffold
+    spec: |
+      Create the new "{{.package_name}}" package at {{.package_path}}/{{.package_name}}/.
+
+      - Define the core types and interfaces for this package.
+      - Implement the primary exported functions/methods.
+      - Add a package-level doc comment explaining the package purpose.
+      - Keep the public API minimal and consistent with other packages in this codebase.
+    test: go build ./{{.package_path}}/{{.package_name}}/...
+    complexity: medium
+    files:
+      - "{{.package_path}}/{{.package_name}}/{{.package_name}}.go"
+  - name: tests
+    spec: |
+      Write tests for the "{{.package_name}}" package.
+
+      - Test all exported functions and methods.
+      - Use table-driven tests for functions with multiple input/output cases.
+      - Test error paths as well as happy paths.
+      - Aim for meaningful coverage of the core logic.
+    test: go test ./{{.package_path}}/{{.package_name}}/...
+    complexity: medium
+    files:
+      - "{{.package_path}}/{{.package_name}}/{{.package_name}}_test.go"
+    deps:
+      - scaffold
+  - name: integration
+    spec: |
+      Wire the "{{.package_name}}" package into the rest of the codebase.
+
+      - Import and use the package from the appropriate call sites.
+      - Update any registries, factory functions, or init logic that need to know about the new package.
+      - Verify the full build and test suite still pass after integration.
+    test: go test ./...
+    complexity: low
+    deps:
+      - tests

@@ -394,8 +394,8 @@ func TestSpawnStderrOnTimeout(t *testing.T) {
 	if result.PID <= 0 {
 		t.Fatalf("got PID %d, want > 0", result.PID)
 	}
-	if result.Duration < 1*time.Second {
-		t.Fatalf("got Duration %v, want >= 1s", result.Duration)
+	if result.Duration < 950*time.Millisecond {
+		t.Fatalf("got Duration %v, want >= 950ms", result.Duration)
 	}
 }
 

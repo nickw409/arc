@@ -183,7 +183,7 @@ func RemovePhase(plansDir, planName, phaseName string) error {
 }
 
 // UpdateSpec updates the spec.yaml for a phase.
-// Only works on phases in "pending" or "failed" status.
+// Only works on phases in "pending" or "blocked" status.
 func UpdateSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error {
 	planDir := filepath.Join(plansDir, planName)
 	statePath := filepath.Join(planDir, "phases", phaseName, "state.json")
@@ -194,10 +194,10 @@ func UpdateSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error
 	}
 
 	switch phaseState.PhaseStatus {
-	case "pending", "failed":
+	case "pending", "blocked":
 		// allowed
 	default:
-		return fmt.Errorf("phase %q has status %q; only pending or failed phases can be updated", phaseName, phaseState.PhaseStatus)
+		return fmt.Errorf("phase %q has status %q; only pending or blocked phases can have their spec updated", phaseName, phaseState.PhaseStatus)
 	}
 
 	if err := WriteSpec(plansDir, planName, phaseName, spec); err != nil {
@@ -214,7 +214,22 @@ func UpdateSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error
 }
 
 // UpdateGate updates just the gate section of a phase's spec.
+// Only works on phases in "pending" or "blocked" status.
 func UpdateGate(plansDir, planName, phaseName string, gate arc.GateSpec) error {
+	planDir := filepath.Join(plansDir, planName)
+	statePath := filepath.Join(planDir, "phases", phaseName, "state.json")
+	sf := state.NewStateFile(statePath)
+	phaseState, err := sf.Read()
+	if err != nil {
+		return fmt.Errorf("reading phase state: %w", err)
+	}
+	switch phaseState.PhaseStatus {
+	case "pending", "blocked":
+		// allowed
+	default:
+		return fmt.Errorf("phase %q has status %q; only pending or blocked phases can have their gate updated", phaseName, phaseState.PhaseStatus)
+	}
+
 	spec, err := ReadSpec(plansDir, planName, phaseName)
 	if err != nil {
 		return err
@@ -224,8 +239,21 @@ func UpdateGate(plansDir, planName, phaseName string, gate arc.GateSpec) error {
 }
 
 // UpdateDeps updates the dependency edges for a phase in plan.json.
+// Only works on phases in "pending" status.
 func UpdateDeps(plansDir, planName, phaseName string, deps []string) error {
 	planDir := filepath.Join(plansDir, planName)
+
+	// Check the phase status before modifying plan.json.
+	statePath := filepath.Join(planDir, "phases", phaseName, "state.json")
+	sf := state.NewStateFile(statePath)
+	phaseState, err := sf.Read()
+	if err != nil {
+		return fmt.Errorf("reading phase state: %w", err)
+	}
+	if phaseState.PhaseStatus != "pending" {
+		return fmt.Errorf("phase %q has status %q; only pending phases can have their dependencies updated", phaseName, phaseState.PhaseStatus)
+	}
+
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
 		return fmt.Errorf("reading plan: %w", err)

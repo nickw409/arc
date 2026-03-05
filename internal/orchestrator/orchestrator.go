@@ -30,6 +30,7 @@ type LaunchOptions struct {
 	ArcHome          string
 	ProjectDir       string              // working directory for git commits; empty uses process cwd
 	Config           *config.Config
+	ConfigPath       string              // path to .arc.yaml; used by SIGHUP handler to reload config
 	Logger           *slog.Logger
 	Timeout          int                 // wall-clock timeout in seconds (0 = no timeout)
 	UseWorktree      bool                // if true, run agents in isolated git worktrees

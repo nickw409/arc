@@ -42,7 +42,7 @@ func classifyGateFailure(result *arc.GateResult, attempt, maxAttempts, prevPasse
 	passed := countCheckpointsPassed(result)
 
 	// No progress after multiple attempts — strategic intervention needed
-	if attempt >= 2 && passed <= prevPassed && passed == 0 {
+	if attempt >= 2 && passed <= prevPassed {
 		return TierStrategic
 	}
 

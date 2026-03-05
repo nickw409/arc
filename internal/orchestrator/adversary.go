@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwiley/arc/internal/adapter"
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/prompt"
 )
@@ -20,20 +21,12 @@ const (
 	MaxAdversaryRounds = 3
 )
 
-// AdversaryOptions configures the per-plan adversary run.
-type AdversaryOptions struct {
-	PlanName   string
-	PlansDir   string
-	ProjectDir string
-	WorkingDir string // worktree or project dir where code lives
-	Config     *arc.SessionConfig
-	Logger     interface{ Warn(string, ...any) }
-}
-
 // RunAdversary runs a per-plan adversary session that tests all changed files
 // across completed phases. Returns the list of test files written and whether
 // any bugs were found.
-func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*AdversaryResult, error) {
+//
+// planLogger is optional; pass nil to disable structured adversary logging.
+func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string, planLogger *PlanLogger) (*AdversaryResult, error) {
 	// Collect changed files across all phases
 	changedFiles, err := collectChangedFiles(opts.PlansDir, opts.PlanName, workDir)
 	if err != nil {
@@ -60,6 +53,16 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*Adv
 		testCmd = opts.Config.TestCommand
 	}
 
+	// Open intelligence store for flaky test filtering (best-effort).
+	projectDir := opts.ProjectDir
+	if projectDir == "" {
+		projectDir = workDir
+	}
+	var intel *intelligence.Store
+	if s, openErr := intelligence.Open(projectDir); openErr == nil {
+		intel = s
+	}
+
 	result := &AdversaryResult{
 		Rounds: make([]AdversaryRound, 0),
 	}
@@ -70,6 +73,9 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*Adv
 		}
 
 		fmt.Printf("\n[adversary] Round %d/%d — spawning adversary agent\n", round, MaxAdversaryRounds)
+		if planLogger != nil {
+			planLogger.AdversaryStarted(round, fmt.Sprintf("files=%d adapter=%s", len(changedFiles), agentAdapter.Name()))
+		}
 
 		// Build adversary prompt
 		adversaryPrompt, err := buildAdversaryPrompt(changedFiles, testCmd, projectCtx)
@@ -93,15 +99,43 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*Adv
 			opts.Logger.Warn("adversary spawn failed", "round", round, "error", spawnErr)
 			roundResult.Error = spawnErr.Error()
 			result.Rounds = append(result.Rounds, roundResult)
+			if planLogger != nil {
+				planLogger.AdversaryCompleted(round, 0, fmt.Sprintf("spawn error: %v", spawnErr))
+			}
 			continue
 		}
 
 		// Run the test suite to check for new failures
 		testOutput, testErr := runTestCommand(testCmd, workDir)
 		if testErr != nil {
-			// Tests failed — adversary found bugs
+			// Parse failing tests from output
+			rawFailing := parseFailingTests(testOutput)
+
+			// Filter out known-flaky tests — don't count flaky failures as adversary bugs.
+			// Also record second-run outcomes for flaky detection.
+			nonFlakyFailing := intelligence.FilterFlakyTests(intel, rawFailing)
+
+			if len(nonFlakyFailing) == 0 {
+				// All failures are known-flaky — treat as no bugs found.
+				// Record the flaky tests as having passed (they'll pass again eventually).
+				if intel != nil {
+					for _, name := range rawFailing {
+						intel.RecordFlakyTest(name, true)
+					}
+				}
+				roundResult.BugsFound = false
+				result.Rounds = append(result.Rounds, roundResult)
+				fmt.Printf("[adversary] Round %d: all failures are known-flaky — NO BUGS FOUND\n", round)
+				if planLogger != nil {
+					planLogger.AdversaryCompleted(round, 0, "all failures known-flaky")
+				}
+				break
+			}
+
+			// Tests failed with real (non-flaky) failures — adversary found bugs.
 			roundResult.BugsFound = true
 			roundResult.TestOutput = testOutput
+			roundResult.FailingTests = nonFlakyFailing
 			result.BugsFound = true
 
 			// Find new test files written by the adversary
@@ -109,9 +143,13 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*Adv
 
 			result.Rounds = append(result.Rounds, roundResult)
 
-			fmt.Printf("[adversary] Round %d: BUGS FOUND\n", round)
+			fmt.Printf("[adversary] Round %d: BUGS FOUND (%d non-flaky failures)\n", round, len(nonFlakyFailing))
 			if len(roundResult.TestFiles) > 0 {
 				fmt.Printf("[adversary] New test files: %s\n", strings.Join(roundResult.TestFiles, ", "))
+			}
+			if planLogger != nil {
+				planLogger.AdversaryCompleted(round, len(nonFlakyFailing),
+					fmt.Sprintf("bugs_found=%d test_files=%d", len(nonFlakyFailing), len(roundResult.TestFiles)))
 			}
 
 			// Route fix to the responsible phase
@@ -120,12 +158,39 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string) (*Adv
 				if fixErr != nil {
 					opts.Logger.Warn("adversary fix failed", "round", round, "error", fixErr)
 				}
+
+				// After fix attempt, re-run to detect any new flakiness.
+				if intel != nil {
+					retestOutput, retestErr := runTestCommand(testCmd, workDir)
+					retestFailing := parseFailingTests(retestOutput)
+					retestFailSet := make(map[string]bool, len(retestFailing))
+					for _, name := range retestFailing {
+						retestFailSet[name] = true
+					}
+					// Tests that failed before the fix but now pass → potentially flaky.
+					if retestErr == nil {
+						for _, name := range rawFailing {
+							if !retestFailSet[name] {
+								intel.RecordFlakyTest(name, true)
+							}
+						}
+					}
+					_ = intel.Save()
+				}
 			}
 		} else {
-			// Tests pass — no bugs found this round
+			// Tests pass — no bugs found this round.
+			// Record previously-failing tests as having passed (flakiness signal).
+			if intel != nil {
+				// We don't have prior failing tests here, but we can save any accumulated data.
+				_ = intel.Save()
+			}
 			roundResult.BugsFound = false
 			result.Rounds = append(result.Rounds, roundResult)
 			fmt.Printf("[adversary] Round %d: NO BUGS FOUND — converged\n", round)
+			if planLogger != nil {
+				planLogger.AdversaryCompleted(round, 0, "no bugs found")
+			}
 			break
 		}
 	}
@@ -141,12 +206,13 @@ type AdversaryResult struct {
 
 // AdversaryRound describes a single adversary round.
 type AdversaryRound struct {
-	Round      int
-	BugsFound  bool
-	TestOutput string
-	TestFiles  []string
-	Error      string
-	Usage      arc.Usage
+	Round        int
+	BugsFound    bool
+	TestOutput   string
+	TestFiles    []string
+	FailingTests []string // non-flaky failing test names parsed from test output
+	Error        string
+	Usage        arc.Usage
 }
 
 func (r *AdversaryResult) allTestFiles() []string {
@@ -290,7 +356,7 @@ func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, 
 `,
 		bestPhase,
 		round.TestOutput,
-		"go test ./...",
+		testCmdForFix(opts),
 	)
 
 	adapterName := "claude"
@@ -306,4 +372,36 @@ func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, 
 
 	_, err = agentAdapter.Spawn(ctx, fixPrompt, workDir, sessionCfg)
 	return err
+}
+
+// parseFailingTests extracts test names from Go test output by scanning for
+// lines matching "--- FAIL: TestName" patterns.
+func parseFailingTests(output string) []string {
+	var tests []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		// Match "--- FAIL: TestFoo (0.00s)" or "FAIL\t<pkg>" lines.
+		if strings.HasPrefix(line, "--- FAIL: ") {
+			// Extract test name (up to first space after the name)
+			rest := strings.TrimPrefix(line, "--- FAIL: ")
+			name := rest
+			if idx := strings.Index(rest, " "); idx >= 0 {
+				name = rest[:idx]
+			}
+			if name != "" && !seen[name] {
+				seen[name] = true
+				tests = append(tests, name)
+			}
+		}
+	}
+	return tests
+}
+
+// testCmdForFix returns the test command from config, or "go test ./..." as fallback.
+func testCmdForFix(opts LaunchOptions) string {
+	if opts.Config != nil && opts.Config.TestCommand != "" {
+		return opts.Config.TestCommand
+	}
+	return "go test ./..."
 }

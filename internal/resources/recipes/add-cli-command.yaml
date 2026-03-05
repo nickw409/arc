@@ -1,0 +1,34 @@
+name: add-cli-command
+description: Add a new CLI subcommand with flags, help text, and tests
+params:
+  - name: command_name
+  - name: package
+    default: internal/cli
+phases:
+  - name: impl
+    spec: |
+      Add a new CLI subcommand named "{{.command_name}}".
+
+      - Create a constructor function (e.g. `new{{.command_name}}Cmd()`) in the {{.package}} package.
+      - Define all required flags with appropriate defaults and usage strings.
+      - Implement the RunE body: validate arguments, call the appropriate internal API, and print results.
+      - Register the command under the appropriate parent command.
+      - Follow the existing cobra command patterns in the codebase.
+    test: go test ./{{.package}}/...
+    complexity: medium
+    files:
+      - "{{.package}}/{{.command_name}}.go"
+  - name: tests
+    spec: |
+      Write tests for the "{{.command_name}}" CLI command.
+
+      - Test argument validation: missing required args, invalid values.
+      - Test flag defaults and overrides.
+      - Test successful execution paths.
+      - Use the cobra command's Execute() or RunE directly where possible to avoid spawning subprocesses.
+    test: go test ./{{.package}}/...
+    complexity: medium
+    files:
+      - "{{.package}}/{{.command_name}}_test.go"
+    deps:
+      - impl

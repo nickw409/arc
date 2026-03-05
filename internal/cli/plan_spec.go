@@ -26,16 +26,21 @@ func addPlanSpecSubcommands(planCmd *cobra.Command) {
 }
 
 func plansDir() string {
-	return filepath.Join(".plans", "active")
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filepath.Join(".plans", "active")
+	}
+	return filepath.Join(cwd, ".plans", "active")
 }
 
 func newPlanAddPhaseCmd() *cobra.Command {
 	var (
-		specText   string
-		testCmd    string
-		complexity string
-		deps       string
-		files      string
+		specText    string
+		testCmd     string
+		complexity  string
+		deps        string
+		files       string
+		checkpoints []string
 	)
 
 	cmd := &cobra.Command{
@@ -63,6 +68,12 @@ func newPlanAddPhaseCmd() *cobra.Command {
 				spec.Deps = splitCSV(deps)
 			}
 
+			parsed, err := parseCheckpoints(checkpoints)
+			if err != nil {
+				return err
+			}
+			spec.Checkpoints = parsed
+
 			if err := plan.AddPhase(plansDir(), planName, phaseName, spec); err != nil {
 				return err
 			}
@@ -77,6 +88,7 @@ func newPlanAddPhaseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&complexity, "complexity", "medium", "Task complexity: simple, medium, or complex")
 	cmd.Flags().StringVar(&deps, "deps", "", "Comma-separated dependency phases")
 	cmd.Flags().StringVar(&files, "file", "", "Comma-separated relevant file paths")
+	cmd.Flags().StringArrayVar(&checkpoints, "checkpoint", nil, `Named milestone in format "name:description:test_command" (repeatable)`)
 
 	return cmd
 }
@@ -102,9 +114,10 @@ func newPlanRemovePhaseCmd() *cobra.Command {
 
 func newPlanUpdatePhaseCmd() *cobra.Command {
 	var (
-		specText   string
-		testCmd    string
-		complexity string
+		specText    string
+		testCmd     string
+		complexity  string
+		checkpoints []string
 	)
 
 	cmd := &cobra.Command{
@@ -131,6 +144,13 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 			if cmd.Flags().Changed("complexity") {
 				existing.Complexity = complexity
 			}
+			if cmd.Flags().Changed("checkpoint") {
+				parsed, err := parseCheckpoints(checkpoints)
+				if err != nil {
+					return err
+				}
+				existing.Checkpoints = parsed
+			}
 
 			if err := plan.UpdateSpec(plansDir(), planName, phaseName, existing); err != nil {
 				return err
@@ -144,6 +164,7 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&specText, "spec", "", "New phase description")
 	cmd.Flags().StringVar(&testCmd, "test", "", "Scoped test command")
 	cmd.Flags().StringVar(&complexity, "complexity", "", "Task complexity: simple, medium, or complex")
+	cmd.Flags().StringArrayVar(&checkpoints, "checkpoint", nil, `Named milestone in format "name:description:test_command" (repeatable)`)
 
 	return cmd
 }
@@ -265,6 +286,33 @@ func splitCSV(s string) []string {
 		}
 	}
 	return result
+}
+
+// parseCheckpoints converts a slice of "name:description:test_command" strings
+// into a slice of arc.Checkpoint. The test_command field is optional.
+func parseCheckpoints(raw []string) ([]arc.Checkpoint, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	checkpoints := make([]arc.Checkpoint, 0, len(raw))
+	for _, s := range raw {
+		parts := strings.SplitN(s, ":", 3)
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("invalid checkpoint %q: must be in format name:description[:test_command]", s)
+		}
+		cp := arc.Checkpoint{
+			Name:        strings.TrimSpace(parts[0]),
+			Description: strings.TrimSpace(parts[1]),
+		}
+		if len(parts) == 3 {
+			cp.Test = strings.TrimSpace(parts[2])
+		}
+		if cp.Name == "" {
+			return nil, fmt.Errorf("invalid checkpoint %q: name must not be empty", s)
+		}
+		checkpoints = append(checkpoints, cp)
+	}
+	return checkpoints, nil
 }
 
 // parseAssertion parses a "type:target" string into a GateAssertion.

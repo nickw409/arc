@@ -8,7 +8,6 @@ import (
 
 	"github.com/nwiley/arc/internal/adapter"
 	"github.com/nwiley/arc/internal/arc"
-	"github.com/nwiley/arc/internal/gate"
 	"github.com/nwiley/arc/internal/prompt"
 )
 
@@ -80,14 +79,10 @@ type AttemptRecord struct {
 
 // buildStrategicPrompt renders the orchestrator agent prompt with attempt history.
 func buildStrategicPrompt(spec *arc.PhaseSpec, history []AttemptRecord) (string, error) {
-	// Try the template first
-	data := prompt.StrategicData{
-		PhaseName:   spec.Name,
-		SpecSummary: spec.Spec,
-		History:     make([]prompt.AttemptData, len(history)),
-	}
+	// Try the orchestrator template first
+	attempts := make([]prompt.AttemptData, len(history))
 	for i, h := range history {
-		data.History[i] = prompt.AttemptData{
+		attempts[i] = prompt.AttemptData{
 			Attempt:           h.Attempt,
 			GateOutput:        h.GateOutput,
 			CheckpointsPassed: h.CheckpointsPassed,
@@ -95,8 +90,17 @@ func buildStrategicPrompt(spec *arc.PhaseSpec, history []AttemptRecord) (string,
 			DiffSummary:       h.DiffSummary,
 		}
 	}
+	data := prompt.OrchestratorData{
+		AttemptCount: len(history),
+		PhaseName:    spec.Name,
+		SpecSummary:  spec.Spec,
+		Attempts:     attempts,
+	}
+	if len(history) > 0 {
+		data.DiffSummary = history[len(history)-1].DiffSummary
+	}
 
-	rendered, err := prompt.RenderGatePrompt("strategic", data)
+	rendered, err := prompt.RenderGatePrompt("orchestrator", data)
 	if err == nil && rendered != "" {
 		return rendered, nil
 	}
@@ -269,10 +273,3 @@ func applyStrategicDecision(decision *StrategicDecision, spec *arc.PhaseSpec, ga
 	}
 }
 
-// formatGateForHistory converts a gate result to a string for the attempt record.
-func formatGateForHistory(result *arc.GateResult) string {
-	if result == nil {
-		return ""
-	}
-	return gate.Format(result)
-}

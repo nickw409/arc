@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/resources"
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,6 +118,41 @@ func LoadAll(dir string) ([]*Recipe, error) {
 	return recipes, nil
 }
 
+// LoadBuiltIn reads a single built-in recipe by name from the embedded resources.
+func LoadBuiltIn(name string) (*Recipe, error) {
+	data, err := resources.RecipeBytes(name)
+	if err != nil {
+		return nil, fmt.Errorf("built-in recipe %q not found", name)
+	}
+	var r Recipe
+	if err := yaml.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("parse built-in recipe %s: %w", name, err)
+	}
+	if r.Name == "" {
+		r.Name = name
+	}
+	return &r, nil
+}
+
+// LoadAllBuiltIn returns all built-in recipes embedded in the binary.
+func LoadAllBuiltIn() ([]*Recipe, error) {
+	names := resources.ListBuiltInRecipes()
+	var recipes []*Recipe
+	var errs []string
+	for _, name := range names {
+		r, err := LoadBuiltIn(name)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		recipes = append(recipes, r)
+	}
+	if len(errs) > 0 {
+		return recipes, fmt.Errorf("errors loading built-in recipes: %s", strings.Join(errs, "; "))
+	}
+	return recipes, nil
+}
+
 // Instantiate resolves parameter defaults, validates provided params, and
 // performs template substitution on all text fields in the recipe.
 //
@@ -181,9 +217,14 @@ func Instantiate(r *Recipe, provided map[string]string) (*InstantiatedRecipe, er
 }
 
 // ToPlan creates an Arc plan from an instantiated recipe. It calls plan.Create
-// for the initial structure, then plan.AddPhase for each phase with its spec.
-// planName defaults to the recipe name if empty.
+// for the initial structure, then writes each phase's spec.
+// planName defaults to the recipe name if empty. workflowType defaults to "feature".
 func ToPlan(inst *InstantiatedRecipe, plansDir, planName string) error {
+	return ToPlanWithWorkflow(inst, plansDir, planName, "feature")
+}
+
+// ToPlanWithWorkflow is like ToPlan but accepts a workflow type.
+func ToPlanWithWorkflow(inst *InstantiatedRecipe, plansDir, planName, workflowType string) error {
 	if planName == "" {
 		planName = inst.Recipe.Name
 	}
@@ -194,13 +235,14 @@ func ToPlan(inst *InstantiatedRecipe, plansDir, planName string) error {
 		phaseNames[i] = p.Name
 	}
 
-	// Create the skeleton plan. We use "feature" as the default workflow type
-	// (phases will have full specs written by AddPhase immediately after).
+	if workflowType == "" {
+		workflowType = "feature"
+	}
 	_, err := plan.Create(plan.CreateOptions{
 		PlansDir:     plansDir,
 		Name:         planName,
 		Phases:       phaseNames,
-		WorkflowType: "feature",
+		WorkflowType: workflowType,
 	})
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)

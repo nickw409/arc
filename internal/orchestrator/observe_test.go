@@ -317,6 +317,102 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 }
 
+func TestAdversaryStartedWritesToOrchestratorAndAdversaryFiles(t *testing.T) {
+	planDir := t.TempDir()
+	pl := NewPlanLogger(planDir, slog.Default())
+
+	pl.AdversaryStarted(1, "files=5 adapter=claude")
+	pl.Close()
+
+	orchestratorPath := filepath.Join(planDir, "logs", "orchestrator.jsonl")
+	adversaryPath := filepath.Join(planDir, "logs", "adversary.jsonl")
+
+	for _, path := range []string{orchestratorPath, adversaryPath} {
+		events := readJSONLines(t, path)
+		if len(events) != 1 {
+			t.Fatalf("%s: expected 1 event, got %d", path, len(events))
+		}
+		e := events[0]
+		if e.Event != EventAdversaryStarted {
+			t.Errorf("%s: expected Event=%q, got %q", path, EventAdversaryStarted, e.Event)
+		}
+		if e.Attempt != 1 {
+			t.Errorf("%s: expected Attempt=1, got %d", path, e.Attempt)
+		}
+		if e.Component != "adversary" {
+			t.Errorf("%s: expected Component=adversary, got %q", path, e.Component)
+		}
+		if e.Level != "INFO" {
+			t.Errorf("%s: expected Level=INFO, got %q", path, e.Level)
+		}
+		if e.Detail != "files=5 adapter=claude" {
+			t.Errorf("%s: expected Detail=%q, got %q", path, "files=5 adapter=claude", e.Detail)
+		}
+	}
+}
+
+func TestAdversaryCompletedNoBugsWritesInfo(t *testing.T) {
+	planDir := t.TempDir()
+	pl := NewPlanLogger(planDir, slog.Default())
+
+	pl.AdversaryCompleted(1, 0, "no bugs found")
+	pl.Close()
+
+	for _, filename := range []string{"orchestrator.jsonl", "adversary.jsonl"} {
+		events := readJSONLines(t, filepath.Join(planDir, "logs", filename))
+		if len(events) != 1 {
+			t.Fatalf("%s: expected 1 event, got %d", filename, len(events))
+		}
+		if events[0].Event != EventAdversaryCompleted {
+			t.Errorf("%s: expected EventAdversaryCompleted, got %q", filename, events[0].Event)
+		}
+		if events[0].Level != "INFO" {
+			t.Errorf("%s: expected Level=INFO for no bugs, got %q", filename, events[0].Level)
+		}
+	}
+}
+
+func TestAdversaryCompletedWithBugsWritesWarn(t *testing.T) {
+	planDir := t.TempDir()
+	pl := NewPlanLogger(planDir, slog.Default())
+
+	pl.AdversaryCompleted(2, 3, "bugs_found=3")
+	pl.Close()
+
+	for _, filename := range []string{"orchestrator.jsonl", "adversary.jsonl"} {
+		events := readJSONLines(t, filepath.Join(planDir, "logs", filename))
+		if len(events) != 1 {
+			t.Fatalf("%s: expected 1 event, got %d", filename, len(events))
+		}
+		if events[0].Level != "WARN" {
+			t.Errorf("%s: expected Level=WARN when bugs found, got %q", filename, events[0].Level)
+		}
+		if events[0].Attempt != 2 {
+			t.Errorf("%s: expected Attempt=2, got %d", filename, events[0].Attempt)
+		}
+	}
+}
+
+func TestAdversaryDoesNotWriteToPhaseFile(t *testing.T) {
+	planDir := t.TempDir()
+	pl := NewPlanLogger(planDir, slog.Default())
+
+	pl.AdversaryStarted(1, "test")
+	pl.AdversaryCompleted(1, 0, "done")
+	pl.Close()
+
+	// No phase-*.jsonl file should be created — adversary events use adversary.jsonl.
+	entries, err := os.ReadDir(filepath.Join(planDir, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "phase-") {
+			t.Errorf("adversary methods should not create phase files, found %q", entry.Name())
+		}
+	}
+}
+
 func TestNewPlanLoggerNilLoggerDoesNotPanic(t *testing.T) {
 	planDir := t.TempDir()
 	// nil logger should not panic

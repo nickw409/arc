@@ -2,13 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
-
-	"encoding/json"
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
@@ -212,23 +212,10 @@ func TestBuildStrategicPrompt_FallbackInline(t *testing.T) {
 		"GIVE_UP",
 	}
 	for _, check := range checks {
-		if !contains(p, check) {
+		if !strings.Contains(p, check) {
 			t.Errorf("prompt should contain %q", check)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 func TestRunStrategicIntervention_Integration(t *testing.T) {
@@ -306,23 +293,3 @@ func writePlanJSON(t *testing.T, planDir string, phases []string) {
 	os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0o644)
 }
 
-func TestFormatGateForHistory(t *testing.T) {
-	result := &arc.GateResult{
-		Passed: false,
-		Assertions: []arc.AssertionResult{
-			{Description: "file_exists: main.go", Passed: true},
-			{Description: "test_exists: TestFoo", Passed: false},
-		},
-	}
-	output := formatGateForHistory(result)
-	if output == "" {
-		t.Error("expected non-empty formatted output")
-	}
-}
-
-func TestFormatGateForHistory_Nil(t *testing.T) {
-	output := formatGateForHistory(nil)
-	if output != "" {
-		t.Errorf("expected empty string for nil result, got %q", output)
-	}
-}

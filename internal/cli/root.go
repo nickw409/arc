@@ -32,6 +32,8 @@ func NewRootCmd() *cobra.Command {
 		newGateCmd(),
 		newAuditCmd(),
 		newRecipeCmd(),
+		newCancelCmd(),
+		newCleanupCmd(),
 	)
 	return cmd
 }

@@ -18,7 +18,6 @@ type PhaseSpec struct {
 	Name        string       `json:"name" yaml:"name"`
 	Spec        string       `json:"spec,omitempty" yaml:"spec,omitempty"`
 	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
-	Goal        string       `json:"goal,omitempty" yaml:"goal,omitempty"`
 	Files       []string     `json:"files,omitempty" yaml:"files,omitempty"`
 	Test        string       `json:"test,omitempty" yaml:"test,omitempty"`
 	Deps        []string     `json:"deps,omitempty" yaml:"deps,omitempty"`

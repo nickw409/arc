@@ -38,4 +38,5 @@ type AgentResult struct {
 	TimedOut       bool          `json:"timed_out,omitempty"`
 	InactivityKill bool          `json:"inactivity_kill,omitempty"`
 	Duration       time.Duration `json:"duration"`
+	PID            int           `json:"pid,omitempty"` // subprocess PID; 0 if not available
 }

@@ -41,6 +41,14 @@ func WriteStatus(phaseDir string, result *arc.GateResult) error {
 	if err != nil {
 		return fmt.Errorf("marshalling gate status: %w", err)
 	}
+	// Backup existing file before overwriting
+	if _, statErr := os.Stat(statusPath); statErr == nil {
+		backupPath := statusPath + ".bak"
+		// Best-effort backup — don't fail the write if backup fails
+		if existing, readErr := os.ReadFile(statusPath); readErr == nil {
+			os.WriteFile(backupPath, existing, 0o644)
+		}
+	}
 	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
 		return fmt.Errorf("writing gate-status.json to %q: %w", phaseDir, err)
 	}

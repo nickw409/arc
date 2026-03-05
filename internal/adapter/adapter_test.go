@@ -123,6 +123,65 @@ func TestClaudeAdapterPreflightExists(t *testing.T) {
 	}
 }
 
+func TestClaudeAdapterPreflightWorkdirMissing(t *testing.T) {
+	bin := buildMockAgent(t)
+	a := &ClaudeAdapter{CommandName: bin}
+	err := a.Preflight(context.Background(), "/nonexistent-arc-test-workdir-12345")
+	if err == nil {
+		t.Fatal("expected error for missing workdir")
+	}
+	if !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("expected 'not accessible' in error, got: %v", err)
+	}
+}
+
+func TestClaudeAdapterPreflightWorkdirNotWritable(t *testing.T) {
+	workdir := t.TempDir()
+	// Make the directory read-only.
+	if err := os.Chmod(workdir, 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	// Restore permissions after test so TempDir cleanup works.
+	t.Cleanup(func() { os.Chmod(workdir, 0o755) })
+
+	bin := buildMockAgent(t)
+	a := &ClaudeAdapter{CommandName: bin}
+	err := a.Preflight(context.Background(), workdir)
+	if err == nil {
+		t.Fatal("expected error for non-writable workdir")
+	}
+	if !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("expected 'not accessible' in error, got: %v", err)
+	}
+}
+
+func TestClaudeAdapterPreflightAuthFailure(t *testing.T) {
+	workdir := t.TempDir()
+	// Write a script that succeeds for --version but fails for --print.
+	scriptPath := filepath.Join(workdir, "fake-claude.sh")
+	script := `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--print" ]; then
+    echo "Not logged in" >&2
+    exit 1
+  fi
+done
+exit 0
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing script: %v", err)
+	}
+
+	a := &ClaudeAdapter{CommandName: scriptPath}
+	err := a.Preflight(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for auth failure")
+	}
+	if !strings.Contains(err.Error(), "authentication") {
+		t.Fatalf("expected 'authentication' in error, got: %v", err)
+	}
+}
+
 func TestClaudeAdapterStderr(t *testing.T) {
 	bin := buildMockAgent(t)
 	t.Setenv("MOCK_OUTPUT", "ok")
@@ -343,6 +402,62 @@ func TestGenericAdapterPreflightExists(t *testing.T) {
 	}
 }
 
+func TestGenericAdapterPreflightWorkdirMissing(t *testing.T) {
+	a := &GenericAdapter{
+		Name_:   "test",
+		Command: "sh",
+	}
+	err := a.Preflight(context.Background(), "/nonexistent-arc-test-workdir-99999")
+	if err == nil {
+		t.Fatal("expected error for missing workdir")
+	}
+	if !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("expected 'not accessible' in error, got: %v", err)
+	}
+}
+
+func TestGenericAdapterPreflightWorkdirNotWritable(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.Chmod(workdir, 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(workdir, 0o755) })
+
+	a := &GenericAdapter{
+		Name_:   "test",
+		Command: "sh",
+	}
+	err := a.Preflight(context.Background(), workdir)
+	if err == nil {
+		t.Fatal("expected error for non-writable workdir")
+	}
+	if !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("expected 'not accessible' in error, got: %v", err)
+	}
+}
+
+func TestGenericAdapterPreflightWorkdirIsFile(t *testing.T) {
+	// Pass a file path instead of a directory.
+	f, err := os.CreateTemp("", "arc-test-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	f.Close()
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	a := &GenericAdapter{
+		Name_:   "test",
+		Command: "sh",
+	}
+	err = a.Preflight(context.Background(), f.Name())
+	if err == nil {
+		t.Fatal("expected error when workdir is a file, not a directory")
+	}
+	if !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("expected 'not accessible' in error, got: %v", err)
+	}
+}
+
 func TestGenericAdapterEnvironment(t *testing.T) {
 	workdir := t.TempDir()
 	scriptPath := filepath.Join(workdir, "env.sh")
@@ -401,10 +516,118 @@ func TestRegistryContainsClaude(t *testing.T) {
 	}
 }
 
+func TestRegistryContainsGeneric(t *testing.T) {
+	if _, ok := Registry["generic"]; !ok {
+		t.Fatal("Registry should contain 'generic'")
+	}
+}
+
+func TestRegistryGetGeneric(t *testing.T) {
+	a := Get("generic")
+	if a == nil {
+		t.Fatal("expected non-nil adapter for 'generic'")
+	}
+	if _, ok := a.(*GenericAdapter); !ok {
+		t.Fatalf("expected *GenericAdapter, got %T", a)
+	}
+	if a.Name() != "generic" {
+		t.Fatalf("Name()=%q, want %q", a.Name(), "generic")
+	}
+}
+
 func TestRegistryConstructorReturnsNewInstance(t *testing.T) {
 	a1 := Get("claude")
 	a2 := Get("claude")
 	if a1 == a2 {
 		t.Fatal("Get should return new instances each call")
+	}
+}
+
+// --- GenericAdapter inactivity watchdog tests ---
+
+func TestGenericAdapterInactivityKill(t *testing.T) {
+	workdir := t.TempDir()
+	// Script that sleeps long enough to trigger the watchdog.
+	scriptPath := filepath.Join(workdir, "sleepy.sh")
+	script := "#!/bin/sh\nsleep 60\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing script: %v", err)
+	}
+
+	// Override watchdog interval and minimum inactivity to tiny values for this test.
+	origInterval := genericWatchdogInterval
+	origMin := genericInactivityMin
+	genericWatchdogInterval = 50 * time.Millisecond
+	genericInactivityMin = 200 * time.Millisecond
+	defer func() {
+		genericWatchdogInterval = origInterval
+		genericInactivityMin = origMin
+	}()
+
+	a := &GenericAdapter{
+		Name_:   "test",
+		Command: scriptPath,
+	}
+
+	// Total timeout is 10s; inactivity limit = 10s/3 ≈ 3.3s, but we force
+	// a very short inactivity by using a tiny total timeout and very small
+	// inactivity window. To make this fast in tests we set total timeout
+	// equal to 6 minutes so that 1/3 = 2 minutes; that's too slow.
+	// Instead we rely on the minimum (2 minutes) being way longer than the
+	// script actually produces output — but that would take 2 minutes.
+	//
+	// Better approach: set total timeout to 3*300ms = 900ms so the
+	// inactivity limit = 300ms, which is well below the 60s sleep.
+	res, err := a.Spawn(context.Background(), "", t.TempDir(), arc.SessionConfig{
+		Timeout: 900 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !res.InactivityKill {
+		t.Fatalf("expected InactivityKill=true, got TimedOut=%v InactivityKill=%v", res.TimedOut, res.InactivityKill)
+	}
+}
+
+func TestGenericAdapterNoInactivityKillOnOutput(t *testing.T) {
+	workdir := t.TempDir()
+	// Script that produces output continuously, should NOT be inactivity-killed.
+	scriptPath := filepath.Join(workdir, "chatty.sh")
+	script := "#!/bin/sh\nfor i in 1 2 3 4 5; do echo line$i; done\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing script: %v", err)
+	}
+
+	origInterval := genericWatchdogInterval
+	origMin := genericInactivityMin
+	genericWatchdogInterval = 10 * time.Millisecond
+	genericInactivityMin = 100 * time.Millisecond
+	defer func() {
+		genericWatchdogInterval = origInterval
+		genericInactivityMin = origMin
+	}()
+
+	a := &GenericAdapter{
+		Name_:   "test",
+		Command: scriptPath,
+	}
+
+	res, err := a.Spawn(context.Background(), "", t.TempDir(), arc.SessionConfig{
+		Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.InactivityKill {
+		t.Fatal("expected InactivityKill=false for fast-completing process")
+	}
+	if res.TimedOut {
+		t.Fatal("expected TimedOut=false")
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("exit code %d, want 0", res.ExitCode)
 	}
 }

@@ -1,22 +1,26 @@
 package arc
 
-import "time"
-
 // GateAssertion defines a single verifiable condition for a phase gate.
 type GateAssertion struct {
-	// Type is the assertion kind: "file_exists", "grep", or "test_exists".
-	Type string `yaml:"type"`
+	// Type is the assertion kind: "file_exists", "grep", "test_exists",
+	// "build_passes", or "no_untracked".
+	Type string `json:"type,omitempty" yaml:"type"`
 	// Description is a human-readable label for this assertion.
-	Description string `yaml:"description"`
-	// Target is the file path (for file_exists), pattern (for grep), or
-	// function name (for test_exists).
-	Target string `yaml:"target"`
+	Description string `json:"description,omitempty" yaml:"description"`
+	// Target is the file path (for file_exists), pattern (for grep),
+	// function name (for test_exists), or build command (for build_passes).
+	Target string `json:"target,omitempty" yaml:"target"`
 	// FileExists checks that the given path exists relative to workdir.
-	FileExists string `yaml:"file_exists,omitempty"`
+	FileExists string `json:"file_exists,omitempty" yaml:"file_exists,omitempty"`
 	// Grep searches all .go files for the given pattern.
-	Grep string `yaml:"grep,omitempty"`
+	Grep string `json:"grep,omitempty" yaml:"grep,omitempty"`
 	// TestExists searches _test.go files for a function with the given name.
-	TestExists string `yaml:"test_exists,omitempty"`
+	TestExists string `json:"test_exists,omitempty" yaml:"test_exists,omitempty"`
+	// BuildPasses runs the given build command and checks for exit code 0.
+	BuildPasses string `json:"build_passes,omitempty" yaml:"build_passes,omitempty"`
+	// NoUntracked checks that no debug/temp artifact files are untracked in git.
+	// The value is ignored; any non-empty string enables this assertion.
+	NoUntracked string `json:"no_untracked,omitempty" yaml:"no_untracked,omitempty"`
 }
 
 // AssertionResult is the outcome of a single assertion check.
@@ -67,16 +71,3 @@ type GateStatus struct {
 	Checkpoints map[string]string `json:"checkpoints"`
 }
 
-// NewGateStatus creates a GateStatus initialized from a GateResult.
-func NewGateStatus(result *GateResult) *GateStatus {
-	cps := make(map[string]string, len(result.Checkpoints))
-	for _, cp := range result.Checkpoints {
-		cps[cp.Name] = cp.Status
-	}
-	return &GateStatus{
-		LastRun:     time.Now().UTC().Format(time.RFC3339),
-		RunCount:    1,
-		Passed:      result.Passed,
-		Checkpoints: cps,
-	}
-}

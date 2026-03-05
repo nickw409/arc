@@ -319,6 +319,115 @@ func TestUpdateDeps(t *testing.T) {
 	}
 }
 
+// TestUpdateSpecBlockedAllowed verifies that UpdateSpec succeeds on a blocked phase.
+func TestUpdateSpecBlockedAllowed(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-a", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "blocked"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	spec := &arc.PhaseSpec{Spec: "updated on blocked phase"}
+	if err := UpdateSpec(plansDir, "my-plan", "phase-a", spec); err != nil {
+		t.Fatalf("UpdateSpec on blocked phase should succeed, got: %v", err)
+	}
+}
+
+// TestUpdateSpecCompleteBlocked verifies that UpdateSpec fails on a complete phase.
+func TestUpdateSpecCompleteBlocked(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-a", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "complete"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	spec := &arc.PhaseSpec{Spec: "should fail"}
+	if err := UpdateSpec(plansDir, "my-plan", "phase-a", spec); err == nil {
+		t.Fatal("expected error updating complete phase, got nil")
+	}
+}
+
+// TestUpdateGateRunningBlocked verifies that UpdateGate fails on a running phase.
+func TestUpdateGateRunningBlocked(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	initial := &arc.PhaseSpec{Spec: "phase spec"}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-a", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "running"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	gate := arc.GateSpec{VerifierAgent: true}
+	if err := UpdateGate(plansDir, "my-plan", "phase-a", gate); err == nil {
+		t.Fatal("expected error updating gate on running phase, got nil")
+	}
+}
+
+// TestUpdateGateCompleteBlocked verifies that UpdateGate fails on a complete phase.
+func TestUpdateGateCompleteBlocked(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	initial := &arc.PhaseSpec{Spec: "phase spec"}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-a", "state.json")
+	sf := state.NewStateFile(statePath)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "complete"
+		return nil
+	}); err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+
+	gate := arc.GateSpec{VerifierAgent: true}
+	if err := UpdateGate(plansDir, "my-plan", "phase-a", gate); err == nil {
+		t.Fatal("expected error updating gate on complete phase, got nil")
+	}
+}
+
+// TestUpdateDepsNonPendingBlocked verifies that UpdateDeps fails on running and
+// complete phases.
+func TestUpdateDepsNonPendingBlocked(t *testing.T) {
+	for _, status := range []string{"running", "complete", "blocked", "deferred"} {
+		t.Run(status, func(t *testing.T) {
+			plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
+
+			statePath := filepath.Join(plansDir, "my-plan", "phases", "phase-b", "state.json")
+			sf := state.NewStateFile(statePath)
+			if err := sf.Update(func(s *arc.PhaseState) error {
+				s.PhaseStatus = status
+				return nil
+			}); err != nil {
+				t.Fatalf("update state: %v", err)
+			}
+
+			if err := UpdateDeps(plansDir, "my-plan", "phase-b", []string{"phase-a"}); err == nil {
+				t.Fatalf("expected error updating deps on %q phase, got nil", status)
+			}
+		})
+	}
+}
+
 func TestAddPhaseWithDeps(t *testing.T) {
 	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a", "phase-b"})
 

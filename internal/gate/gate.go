@@ -4,11 +4,13 @@ package gate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nwiley/arc/internal/arc"
 	"gopkg.in/yaml.v3"
@@ -19,7 +21,16 @@ import (
 //
 // specPath must point to a spec.yaml file.
 // workdir is the directory against which file-system assertions are evaluated.
-func Run(specPath string, workdir string) (*arc.GateResult, error) {
+//
+// If ctx has no deadline, a default 5-minute timeout is applied.
+func Run(ctx context.Context, specPath string, workdir string) (*arc.GateResult, error) {
+	// Apply a default timeout if the caller did not set one.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+	}
+
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading spec file %q: %w", specPath, err)
@@ -47,7 +58,7 @@ func Run(specPath string, workdir string) (*arc.GateResult, error) {
 
 	// Run checkpoint test commands.
 	for _, cp := range spec.Checkpoints {
-		cs := runCheckpoint(cp, workdir)
+		cs := runCheckpoint(ctx, cp, workdir)
 		result.Checkpoints = append(result.Checkpoints, cs)
 		if cs.Status == "fail" {
 			result.Passed = false
@@ -59,13 +70,27 @@ func Run(specPath string, workdir string) (*arc.GateResult, error) {
 		result.ScopedTestSkipped = true
 		result.ScopedTestPassed = true // nothing to fail
 	} else {
-		out, testErr := runCommand(spec.Test, workdir)
+		out, testErr := runCommand(ctx, spec.Test, workdir)
 		result.ScopedTestOutput = out
 		if testErr != nil {
 			result.ScopedTestPassed = false
 			result.Passed = false
 		} else {
 			result.ScopedTestPassed = true
+		}
+	}
+
+	// Run verifier agent if configured and all other checks passed.
+	if spec.Gate.VerifierAgent && result.Passed {
+		verifyCtx, verifyCancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer verifyCancel()
+		passed, reasoning, verifyErr := RunVerifier(verifyCtx, &spec, workdir)
+		if verifyErr != nil {
+			// Verifier error is non-fatal — log but don't fail.
+			result.ScopedTestOutput += fmt.Sprintf("\n\nVerifier error: %v", verifyErr)
+		} else if !passed {
+			result.Passed = false
+			result.ScopedTestOutput += fmt.Sprintf("\n\nVerifier FAILED:\n%s", reasoning)
 		}
 	}
 
@@ -85,12 +110,20 @@ func runAssertion(a arc.GateAssertion, workdir string) arc.AssertionResult {
 		return checkGrep(desc, a.Grep, workdir)
 	case a.TestExists != "":
 		return checkTestExists(desc, a.TestExists, workdir)
+	case a.BuildPasses != "":
+		return checkBuildPasses(desc, a.BuildPasses, workdir)
+	case a.NoUntracked != "":
+		return checkNoUntracked(desc, workdir)
 	case a.Type == "file_exists" && a.Target != "":
 		return checkFileExists(desc, a.Target, workdir)
 	case a.Type == "grep" && a.Target != "":
 		return checkGrep(desc, a.Target, workdir)
 	case a.Type == "test_exists" && a.Target != "":
 		return checkTestExists(desc, a.Target, workdir)
+	case a.Type == "build_passes" && a.Target != "":
+		return checkBuildPasses(desc, a.Target, workdir)
+	case a.Type == "no_untracked":
+		return checkNoUntracked(desc, workdir)
 	default:
 		return arc.AssertionResult{
 			Description: desc,
@@ -225,15 +258,112 @@ func checkTestExists(desc, funcName, workdir string) arc.AssertionResult {
 	}
 }
 
+// checkBuildPasses runs the given build command in workdir and checks exit code 0.
+// The command is run via sh -c so it supports pipelines and environment expansion.
+func checkBuildPasses(desc, command, workdir string) arc.AssertionResult {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = workdir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	output := buf.String()
+	if err == nil {
+		return arc.AssertionResult{
+			Description: desc,
+			Passed:      true,
+			Detail:      fmt.Sprintf("build command %q passed", command),
+		}
+	}
+	return arc.AssertionResult{
+		Description: desc,
+		Passed:      false,
+		Detail:      fmt.Sprintf("build command %q failed: %v\n%s", command, err, strings.TrimSpace(output)),
+	}
+}
+
+// suspiciousPatterns are the glob-style suffixes and prefixes that flag a file
+// as a debug/temp artifact for the no_untracked assertion.
+var suspiciousPatterns = []struct {
+	suffix string
+	prefix string
+	exact  string
+}{
+	{suffix: ".tmp"},
+	{suffix: ".bak"},
+	{suffix: ".orig"},
+	{prefix: "debug_"},
+	{prefix: "scratch"},
+	{exact: "TODO"},
+}
+
+// isSuspicious returns true if the base name of path looks like a debug or
+// temporary artifact.
+func isSuspicious(path string) bool {
+	base := filepath.Base(path)
+	for _, p := range suspiciousPatterns {
+		switch {
+		case p.exact != "" && base == p.exact:
+			return true
+		case p.suffix != "" && strings.HasSuffix(base, p.suffix):
+			return true
+		case p.prefix != "" && strings.HasPrefix(base, p.prefix):
+			return true
+		}
+	}
+	return false
+}
+
+// checkNoUntracked runs git ls-files --others --exclude-standard in workdir
+// and fails if any suspicious untracked files are found.
+func checkNoUntracked(desc, workdir string) arc.AssertionResult {
+	cmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	cmd.Dir = workdir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		return arc.AssertionResult{
+			Description: desc,
+			Passed:      false,
+			Detail:      fmt.Sprintf("git ls-files failed: %v: %s", err, strings.TrimSpace(buf.String())),
+		}
+	}
+
+	var found []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if isSuspicious(line) {
+			found = append(found, line)
+		}
+	}
+
+	if len(found) == 0 {
+		return arc.AssertionResult{
+			Description: desc,
+			Passed:      true,
+			Detail:      "no suspicious untracked files found",
+		}
+	}
+	return arc.AssertionResult{
+		Description: desc,
+		Passed:      false,
+		Detail:      fmt.Sprintf("suspicious untracked files: %s", strings.Join(found, ", ")),
+	}
+}
+
 // runCheckpoint runs a checkpoint's test command and returns its status.
-func runCheckpoint(cp arc.Checkpoint, workdir string) arc.CheckpointStatus {
+func runCheckpoint(ctx context.Context, cp arc.Checkpoint, workdir string) arc.CheckpointStatus {
 	if cp.Test == "" {
 		return arc.CheckpointStatus{
 			Name:   cp.Name,
 			Status: "not_run",
 		}
 	}
-	out, err := runCommand(cp.Test, workdir)
+	out, err := runCommand(ctx, cp.Test, workdir)
 	if err != nil {
 		return arc.CheckpointStatus{
 			Name:   cp.Name,
@@ -250,8 +380,8 @@ func runCheckpoint(cp arc.Checkpoint, workdir string) arc.CheckpointStatus {
 
 // runCommand executes a shell command in dir and returns combined output.
 // Returns an error if the command exits with a non-zero status.
-func runCommand(command, dir string) (string, error) {
-	cmd := exec.Command("sh", "-c", command)
+func runCommand(ctx context.Context, command, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = dir
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

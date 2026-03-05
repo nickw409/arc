@@ -1,7 +1,9 @@
 package gate
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,7 +58,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -84,7 +86,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -121,7 +123,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -148,7 +150,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -184,7 +186,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -217,7 +219,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -249,7 +251,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -257,6 +259,330 @@ gate:
 	if result.Passed {
 		t.Errorf("expected Passed=false (function is in non-test file)")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Run — build_passes assertions
+// ---------------------------------------------------------------------------
+
+func TestRun_BuildPasses_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "true exits 0"
+      build_passes: "true"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected Passed=true, got false")
+	}
+	if len(result.Assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(result.Assertions))
+	}
+	if !result.Assertions[0].Passed {
+		t.Errorf("expected assertion to pass: %v", result.Assertions[0].Detail)
+	}
+}
+
+func TestRun_BuildPasses_Fail(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "false exits 1"
+      build_passes: "false"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected Passed=false, got true")
+	}
+	if len(result.Assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(result.Assertions))
+	}
+	if result.Assertions[0].Passed {
+		t.Errorf("expected assertion to fail")
+	}
+	if result.Assertions[0].Detail == "" {
+		t.Errorf("expected detail to contain failure info")
+	}
+}
+
+func TestRun_BuildPasses_TypeTarget(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "build via type field"
+      type: build_passes
+      target: "true"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected Passed=true")
+	}
+}
+
+func TestRun_BuildPasses_OutputCaptured(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	// A command that produces output and fails.
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "failing build with output"
+      build_passes: "echo 'syntax error'; exit 1"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected Passed=false")
+	}
+	if !strings.Contains(result.Assertions[0].Detail, "syntax error") {
+		t.Errorf("expected output in detail, got: %s", result.Assertions[0].Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run — no_untracked assertions
+// ---------------------------------------------------------------------------
+
+func TestRun_NoUntracked_Pass_NoSuspicious(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	// Initialize a git repo so git ls-files works.
+	if out, err := runGit(t, workdir, "init"); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+	// Create a normal tracked file (staged).
+	writeFile(t, workdir, "main.go", "package main\n")
+	runGit(t, workdir, "add", "main.go")
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "no debug artifacts"
+      no_untracked: "true"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected Passed=true, got: %v", result.Assertions[0].Detail)
+	}
+}
+
+func TestRun_NoUntracked_Fail_TmpFile(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	if out, err := runGit(t, workdir, "init"); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+	// Drop a .tmp file (untracked, not gitignored).
+	writeFile(t, workdir, "output.tmp", "temporary\n")
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "no debug artifacts"
+      no_untracked: "true"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected Passed=false when .tmp file is untracked")
+	}
+	if !strings.Contains(result.Assertions[0].Detail, "output.tmp") {
+		t.Errorf("expected detail to mention output.tmp, got: %s", result.Assertions[0].Detail)
+	}
+}
+
+func TestRun_NoUntracked_Fail_DebugPrefix(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	if out, err := runGit(t, workdir, "init"); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+	writeFile(t, workdir, "debug_output.go", "package main\n")
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "no debug artifacts"
+      no_untracked: "yes"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected Passed=false for debug_ prefixed file")
+	}
+}
+
+func TestRun_NoUntracked_Pass_NormalUntrackedFile(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	if out, err := runGit(t, workdir, "init"); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+	// An untracked file with a normal name should not trigger the assertion.
+	writeFile(t, workdir, "newfeature.go", "package main\n")
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "no debug artifacts"
+      no_untracked: "true"
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected Passed=true for non-suspicious untracked file, got: %s", result.Assertions[0].Detail)
+	}
+}
+
+func TestRun_NoUntracked_TypeField(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	if out, err := runGit(t, workdir, "init"); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "no debug artifacts via type"
+      type: no_untracked
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected Passed=true, got: %v", result.Assertions[0].Detail)
+	}
+}
+
+// isSuspicious_* tests exercise the helper directly.
+
+func TestIsSuspicious_Tmp(t *testing.T) {
+	if !isSuspicious("foo.tmp") {
+		t.Error("expected foo.tmp to be suspicious")
+	}
+}
+
+func TestIsSuspicious_Bak(t *testing.T) {
+	if !isSuspicious("config.bak") {
+		t.Error("expected config.bak to be suspicious")
+	}
+}
+
+func TestIsSuspicious_Orig(t *testing.T) {
+	if !isSuspicious("file.orig") {
+		t.Error("expected file.orig to be suspicious")
+	}
+}
+
+func TestIsSuspicious_DebugPrefix(t *testing.T) {
+	if !isSuspicious("debug_output.go") {
+		t.Error("expected debug_output.go to be suspicious")
+	}
+}
+
+func TestIsSuspicious_ScratchPrefix(t *testing.T) {
+	if !isSuspicious("scratch_notes.txt") {
+		t.Error("expected scratch_notes.txt to be suspicious")
+	}
+	if !isSuspicious("scratch.go") {
+		t.Error("expected scratch.go to be suspicious")
+	}
+}
+
+func TestIsSuspicious_TODO(t *testing.T) {
+	if !isSuspicious("TODO") {
+		t.Error("expected TODO to be suspicious")
+	}
+}
+
+func TestIsSuspicious_Normal(t *testing.T) {
+	cases := []string{"main.go", "README.md", "config.yaml", "internal/api/auth.go"}
+	for _, c := range cases {
+		if isSuspicious(c) {
+			t.Errorf("expected %q to NOT be suspicious", c)
+		}
+	}
+}
+
+// runGit is a test helper that runs a git command in dir.
+func runGit(t *testing.T, dir string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	// Configure a fake identity so git doesn't fail on systems without global config.
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +605,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -304,7 +630,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -334,7 +660,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -349,7 +675,7 @@ gate:
 
 func TestRun_MissingSpec(t *testing.T) {
 	workdir := t.TempDir()
-	_, err := Run(filepath.Join(workdir, "nonexistent.yaml"), workdir)
+	_, err := Run(context.Background(), filepath.Join(workdir, "nonexistent.yaml"), workdir)
 	if err == nil {
 		t.Fatal("expected error for missing spec file, got nil")
 	}
@@ -370,7 +696,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -398,7 +724,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -425,7 +751,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -448,7 +774,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -476,7 +802,7 @@ checkpoints:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -506,7 +832,7 @@ checkpoints:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -532,7 +858,7 @@ checkpoints:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -565,11 +891,11 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	r1, err := Run(specPath, workdir)
+	r1, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	r2, err := Run(specPath, workdir)
+	r2, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -890,7 +1216,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -923,7 +1249,7 @@ gate:
 `
 	specPath := writeSpec(t, phaseDir, spec)
 
-	result, err := Run(specPath, workdir)
+	result, err := Run(context.Background(), specPath, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}

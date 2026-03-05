@@ -4,7 +4,9 @@ import "github.com/nwiley/arc/internal/arc"
 
 // Registry maps adapter names to constructor functions.
 var Registry = map[string]func() arc.AgentAdapter{
-	"claude": func() arc.AgentAdapter { return &ClaudeAdapter{} },
+	"claude":  func() arc.AgentAdapter { return &ClaudeAdapter{} },
+	"generic": func() arc.AgentAdapter { return &GenericAdapter{Name_: "generic"} },
+	"codex":   func() arc.AgentAdapter { return &CodexAdapter{} },
 }
 
 // Get returns the adapter registered under the given name.

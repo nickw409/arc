@@ -51,13 +51,6 @@ type AttemptData struct {
 	DiffSummary       string
 }
 
-// StrategicData is the template data for the strategic intervention prompt.
-type StrategicData struct {
-	PhaseName   string
-	SpecSummary string
-	History     []AttemptData
-}
-
 // AdversaryData is the template data for the adversary prompt.
 type AdversaryData struct {
 	ChangedFiles   []string

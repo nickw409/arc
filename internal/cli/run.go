@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -20,6 +21,8 @@ func newRunCmd() *cobra.Command {
 	var timeout int
 	var useWorktree bool
 	var perPhaseWorktree bool
+	var foreground bool
+	var detached bool
 
 	cmd := &cobra.Command{
 		Use:   "run [plan-name]",
@@ -82,6 +85,63 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("plan %q has review status %q — run: arc review %s", planName, meta.ReviewStatus, planName)
 			}
 
+			// Detach mode: re-exec ourselves with --detached and return immediately.
+			if !foreground && !detached {
+				exe, err := os.Executable()
+				if err != nil {
+					return fmt.Errorf("resolving executable path: %w", err)
+				}
+
+				reExecArgs := []string{"run", planName, "--detached"}
+				if timeout != 14400 {
+					reExecArgs = append(reExecArgs, fmt.Sprintf("--timeout=%d", timeout))
+				}
+				if !useWorktree {
+					reExecArgs = append(reExecArgs, "--worktree=false")
+				}
+				if perPhaseWorktree {
+					reExecArgs = append(reExecArgs, "--per-phase-worktree")
+				}
+
+				logPath := filepath.Join(planDir, "orchestrator.log")
+				logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if err != nil {
+					return fmt.Errorf("creating log file: %w", err)
+				}
+
+				detachedCmd := exec.Command(exe, reExecArgs...)
+				detachedCmd.Stdout = logFile
+				detachedCmd.Stderr = logFile
+				detachedCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+				if err := detachedCmd.Start(); err != nil {
+					logFile.Close()
+					return fmt.Errorf("starting detached orchestrator: %w", err)
+				}
+				logFile.Close()
+
+				pidPath := filepath.Join(planDir, "orchestrator.pid")
+				if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", detachedCmd.Process.Pid)), 0644); err != nil {
+					return fmt.Errorf("writing PID file: %w", err)
+				}
+
+				fmt.Printf("Orchestrator started (PID %d)\n", detachedCmd.Process.Pid)
+				fmt.Printf("Log: %s\n", logPath)
+				fmt.Println("Use 'arc status' to check progress.")
+				return nil
+			}
+
+			// Inline execution path (--foreground or --detached).
+			pidPath := filepath.Join(planDir, "orchestrator.pid")
+			if detached {
+				// Write our own PID so status can track us.
+				if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+					// Non-fatal; log and continue.
+					fmt.Fprintf(os.Stderr, "warning: could not write PID file: %v\n", err)
+				}
+				defer os.Remove(pidPath)
+			}
+
 			// Resolve ARC_HOME
 			arcHome := resolveArcHome()
 
@@ -113,6 +173,7 @@ func newRunCmd() *cobra.Command {
 				ArcHome:          arcHome,
 				ProjectDir:       projectRoot,
 				Config:           cfg,
+				ConfigPath:       filepath.Join(projectRoot, ".arc.yaml"),
 				Logger:           logger,
 				Timeout:          timeout,
 				UseWorktree:      useWorktree,
@@ -126,5 +187,10 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&timeout, "timeout", 14400, "Wall-clock timeout in seconds")
 	cmd.Flags().BoolVar(&useWorktree, "worktree", true, "Run agents in isolated git worktrees")
 	cmd.Flags().BoolVar(&perPhaseWorktree, "per-phase-worktree", false, "Create a separate worktree per phase instead of one shared worktree")
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "Run orchestrator in the foreground (blocking)")
+	cmd.Flags().BoolVar(&detached, "detached", false, "")
+	if err := cmd.Flags().MarkHidden("detached"); err != nil {
+		panic(err)
+	}
 	return cmd
 }

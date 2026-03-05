@@ -90,8 +90,8 @@ func TestRenderGatePromptPlanner(t *testing.T) {
 	if !strings.Contains(result, "Add rate limiting to the HTTP server") {
 		t.Error("expected description in planner output")
 	}
-	if !strings.Contains(result, "arc plan create rate-limit") {
-		t.Error("expected plan create command in planner output")
+	if !strings.Contains(result, "arc plan rate-limit") {
+		t.Error("expected plan command in planner output")
 	}
 	if !strings.Contains(result, "arc plan add-phase rate-limit") {
 		t.Error("expected add-phase command in planner output")

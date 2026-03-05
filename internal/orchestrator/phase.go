@@ -32,6 +32,7 @@ type RunPhaseOptions struct {
 	WorkingDir   string              // override working directory for agents (set by worktree)
 	ChatMode     bool                // if true, block immediately instead of retrying on failure
 	Resolver     *resources.Resolver // if nil, uses NewResolver("", "")
+	PlanLogger   *PlanLogger         // structured JSONL logger; nil disables structured logging
 }
 
 // RunPhase executes a single phase from entry state to terminal state.
