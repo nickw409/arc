@@ -41,8 +41,8 @@ func newMonitorCmd() *cobra.Command {
 			}
 
 			return monitor.Start(monitor.StartOptions{
-				PlanName: planName,
-				PlansDir: plansDir,
+				PlanFilter: planName,
+				PlansDir:   plansDir,
 			})
 		},
 	}

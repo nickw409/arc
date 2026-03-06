@@ -8,13 +8,13 @@ import (
 
 // StartOptions configures the monitor TUI.
 type StartOptions struct {
-	PlanName string
-	PlansDir string
+	PlanFilter string
+	PlansDir   string
 }
 
 // Start launches the bubbletea TUI monitor.
 func Start(opts StartOptions) error {
-	model := NewModel(opts.PlanName, opts.PlansDir)
+	model := NewModel(opts.PlanFilter, opts.PlansDir)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

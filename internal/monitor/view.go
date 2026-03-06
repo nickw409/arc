@@ -20,31 +20,37 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%dk", n/1000)
 }
 
-// renderHeader renders plan name, workflow type, overall progress, and last update time.
+// renderHeader renders "Arc Monitor" or "Arc Monitor: plan-name" with aggregate totals.
 func (m Model) renderHeader() string {
-	plan := m.firstPlan()
-	meta := plan.Meta
-
-	// First line: plan name, workflow type, progress, update time
-	line1 := fmt.Sprintf("Arc Monitor: %s", m.planFilter)
-	if plan.WorkflowType != "" {
-		line1 += fmt.Sprintf("  [%s]", plan.WorkflowType)
+	// Aggregate totals across all plans
+	var totalCompleted, totalPhases, totalRunning, totalFailed, totalIter int
+	for _, p := range m.plans {
+		totalPhases += len(p.Phases)
+		totalCompleted += p.Meta.CompletedCount
+		totalRunning += p.Meta.RunningCount
+		totalFailed += p.Meta.FailedCount
+		totalIter += p.Meta.TotalIterations
 	}
-	line1 += fmt.Sprintf("  %d/%d phases", meta.CompletedCount, len(plan.Phases))
+
+	title := "Arc Monitor"
+	if m.planFilter != "" {
+		title = fmt.Sprintf("Arc Monitor: %s", m.planFilter)
+	}
+
+	line1 := fmt.Sprintf("%s  %d/%d phases", title, totalCompleted, totalPhases)
 	if !m.lastUpdate.IsZero() {
 		line1 += fmt.Sprintf("  updated %s", m.lastUpdate.Format("15:04:05"))
 	}
 
-	// Second line: aggregate stats
 	var parts []string
-	if meta.TotalIterations > 0 {
-		parts = append(parts, fmt.Sprintf("%d iter", meta.TotalIterations))
+	if totalIter > 0 {
+		parts = append(parts, fmt.Sprintf("%d iter", totalIter))
 	}
-	if meta.RunningCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d active", meta.RunningCount))
+	if totalRunning > 0 {
+		parts = append(parts, fmt.Sprintf("%d active", totalRunning))
 	}
-	if meta.FailedCount > 0 {
-		parts = append(parts, blockedStyle.Render(fmt.Sprintf("%d blocked", meta.FailedCount)))
+	if totalFailed > 0 {
+		parts = append(parts, blockedStyle.Render(fmt.Sprintf("%d blocked", totalFailed)))
 	}
 
 	header := headerStyle.Render(line1)
@@ -55,16 +61,14 @@ func (m Model) renderHeader() string {
 	return header
 }
 
-// renderInterventionAlerts renders alerts for phases with intervention requests.
-// Intervention is no longer tracked in PhaseView; this is a no-op.
+// renderInterventionAlerts is a no-op; intervention is no longer tracked in PhaseView.
 func (m Model) renderInterventionAlerts() string {
 	return ""
 }
 
-// renderPhaseTable renders the column-header and all phase rows.
+// renderPhaseTable renders the column-header and all phase rows across all plans.
 func (m Model) renderPhaseTable() string {
-	phases := m.firstPlan().Phases
-	if len(phases) == 0 {
+	if len(m.plans) == 0 {
 		return "\n  No phases found.\n"
 	}
 
@@ -80,38 +84,43 @@ func (m Model) renderPhaseTable() string {
 	b.WriteString(dimStyle.Render(renderColumnHeader(width)))
 	b.WriteString("\n")
 
-	for i, pv := range phases {
-		selected := i == m.selectedIdx
-		b.WriteString(renderPhaseRow(pv, width, selected))
+	flatIdx := 0
+	for _, plan := range m.plans {
+		// Plan section header
+		planHeader := fmt.Sprintf("  %s", plan.Name)
+		if plan.WorkflowType != "" {
+			planHeader += fmt.Sprintf("  [%s]", plan.WorkflowType)
+		}
+		planHeader += fmt.Sprintf("  %d/%d phases", plan.Meta.CompletedCount, len(plan.Phases))
+		if plan.Meta.RunningCount > 0 {
+			planHeader += fmt.Sprintf("  (%d active)", plan.Meta.RunningCount)
+		}
+		b.WriteString(dimStyle.Render(planHeader))
 		b.WriteString("\n")
+
+		for _, pv := range plan.Phases {
+			selected := flatIdx == m.selectedIdx
+			b.WriteString(renderPhaseRow(pv, width, selected))
+			b.WriteString("\n")
+			flatIdx++
+		}
 	}
 	return b.String()
 }
 
-// renderColumnHeader renders the column header row.
+// renderColumnHeader renders the column header row (PHASE, ITER, TESTS, TOKENS).
 func renderColumnHeader(width int) string {
 	nameW := phaseNameWidth(width)
 
 	if width < 80 {
-		return fmt.Sprintf("  %s %-*s  %s", "   ", nameW, "PHASE", "STATE")
+		return fmt.Sprintf("    %s %-*s", "   ", nameW, "PHASE")
 	}
 
-	stateW := stateColWidth(width)
-	header := fmt.Sprintf("  %s %-*s  %-*s %-7s %-9s", "   ", nameW, "PHASE", stateW, "STATE", "ITER", "TESTS")
+	header := fmt.Sprintf("    %s %-*s  %-7s %-9s", "   ", nameW, "PHASE", "ITER", "TESTS")
 	if width >= 90 {
 		header += fmt.Sprintf(" %-9s", "TOKENS")
 	}
 	return header
-}
-
-func stateColWidth(width int) int {
-	if width < 100 {
-		return 16
-	}
-	if width < 120 {
-		return 20
-	}
-	return 28
 }
 
 func phaseNameWidth(width int) int {
@@ -124,7 +133,7 @@ func phaseNameWidth(width int) int {
 	return 24
 }
 
-// renderPhaseRow renders one phase row with all columns.
+// renderPhaseRow renders one phase row with indented cursor (4 chars: "  > " or "    ").
 func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 	if width <= 0 {
 		width = 80
@@ -137,10 +146,10 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		name = name[:nameW-1] + "~"
 	}
 
-	// Selection cursor
-	cursor := "  "
+	// Selection cursor: 2-space indent + 2-char cursor
+	cursor := "    "
 	if selected {
-		cursor = "> "
+		cursor = "  > "
 	}
 
 	icon := pv.Icon
@@ -158,20 +167,13 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		style = disputedStyle
 	}
 
-	// Narrow terminal: just icon, name, state
+	// Narrow terminal: just icon, name, status
 	if width < 80 {
 		row := fmt.Sprintf("%s%s %-*s  %s", cursor, icon, nameW, name, pv.Status)
 		if selected {
 			return selectedStyle.Render(style.Render(row))
 		}
 		return style.Render(row)
-	}
-
-	// State column: use Status
-	state := pv.Status
-	switch pv.Status {
-	case "pending", "complete", "blocked", "deferred":
-		state = "—"
 	}
 
 	// Iter column
@@ -190,11 +192,7 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		tests = "—"
 	}
 
-	stateW := stateColWidth(width)
-	if len(state) > stateW {
-		state = state[:stateW-1] + "~"
-	}
-	row := fmt.Sprintf("%s%s %-*s  %-*s %-7s %-9s", cursor, icon, nameW, name, stateW, state, iter, tests)
+	row := fmt.Sprintf("%s%s %-*s  %-7s %-9s", cursor, icon, nameW, name, iter, tests)
 
 	// Tokens column (wide terminal)
 	if width >= 90 {
@@ -206,16 +204,16 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		}
 	}
 
-	// Activity line: dim second line shown only for active phases on wide terminals
-	if width >= 80 && pv.Activity != "" && isActiveStatus(pv.Status) {
-		activityLine := fmt.Sprintf("      ↳ %s", pv.Activity)
+	// Activity line for running phases: NOT dimmed, shown immediately after the phase row
+	if pv.Status == "running" && pv.Activity != "" {
+		activityLine := fmt.Sprintf("          %s", pv.Activity)
 		if len(activityLine) > width-2 {
 			activityLine = activityLine[:width-5] + "..."
 		}
 		if selected {
-			return selectedStyle.Render(style.Render(row)) + "\n" + selectedStyle.Render(dimStyle.Render(activityLine))
+			return selectedStyle.Render(style.Render(row)) + "\n" + selectedStyle.Render(activityLine)
 		}
-		return style.Render(row) + "\n" + dimStyle.Render(activityLine)
+		return style.Render(row) + "\n" + activityLine
 	}
 
 	if selected {
@@ -226,64 +224,51 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 
 // renderDetailPanel renders a full-screen detail view for the selected phase.
 func (m Model) renderDetailPanel() string {
-	phases := m.firstPlan().Phases
-	if m.selectedIdx >= len(phases) {
+	planIdx, phaseIdx := m.selectedPhase()
+	if planIdx < 0 || phaseIdx < 0 {
 		return ""
 	}
-	pv := phases[m.selectedIdx]
+	pv := m.plans[planIdx].Phases[phaseIdx]
+	planName := m.plans[planIdx].Name
 
 	var lines []string
 
 	// Header
-	header := fmt.Sprintf("  Phase: %s", pv.Name)
+	header := fmt.Sprintf("  Phase: %s  (plan: %s)", pv.Name, planName)
 	lines = append(lines, headerStyle.Render(header))
 	lines = append(lines, dimStyle.Render("  esc: back  ↑/↓: scroll  r: refresh"))
 	lines = append(lines, "")
 
 	// Status row
-	lines = append(lines, fmt.Sprintf("  Status: %s", pv.Status))
+	lines = append(lines, fmt.Sprintf("  Status:    %s", pv.Status))
 
 	// Iter row
-	lines = append(lines, fmt.Sprintf("  Iter:   %s", formatIter(pv)))
+	lines = append(lines, fmt.Sprintf("  Iter:      %s", formatIter(pv)))
 
 	// Tests row
 	if pv.TestsTotal > 0 {
-		lines = append(lines, fmt.Sprintf("  Tests:  %s", formatTests(pv)))
+		lines = append(lines, fmt.Sprintf("  Tests:     %s", formatTests(pv)))
 	}
 
-	// Commit/tokens row
-	commitLine := "  Commit: "
-	if pv.LastCommit != "" {
-		commitLine += fmt.Sprintf("%-14s", pv.LastCommit)
-	} else {
-		commitLine += fmt.Sprintf("%-14s", "—")
-	}
+	// Tokens row
 	total := pv.InputTokens + pv.OutputTokens
 	if total > 0 {
-		commitLine += fmt.Sprintf(" Tokens: %s (in: %s, out: %s)",
-			formatTokens(total), formatTokens(pv.InputTokens), formatTokens(pv.OutputTokens))
-	}
-	if pv.CompletedAt != "" {
-		commitLine += fmt.Sprintf("  Completed: %s", pv.CompletedAt)
-	}
-	lines = append(lines, commitLine)
-
-	// Blocked/deferred reason
-	if pv.BlockedReason != "" {
-		lines = append(lines, blockedStyle.Render(fmt.Sprintf("  Blocked: %s", pv.BlockedReason)))
-	}
-	if pv.DeferredReason != "" {
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("  Deferred: %s", pv.DeferredReason)))
+		lines = append(lines, fmt.Sprintf("  Tokens:    %s (in: %s, out: %s)",
+			formatTokens(total), formatTokens(pv.InputTokens), formatTokens(pv.OutputTokens)))
 	}
 
-	// Notes
-	if pv.Notes != "" {
-		lines = append(lines, fmt.Sprintf("  Notes:  %s", pv.Notes))
+	// Commit row
+	if pv.LastCommit != "" {
+		commitLine := fmt.Sprintf("  Commit:    %s", pv.LastCommit)
+		if pv.CompletedAt != "" {
+			commitLine += fmt.Sprintf("  completed: %s", pv.CompletedAt)
+		}
+		lines = append(lines, commitLine)
 	}
 
 	// Activity
 	if pv.Activity != "" {
-		actLine := fmt.Sprintf("  Activity: %s", pv.Activity)
+		actLine := fmt.Sprintf("  Activity:  %s", pv.Activity)
 		if pv.ActivityUpdatedAt != "" {
 			if t, err := time.Parse(time.RFC3339, pv.ActivityUpdatedAt); err == nil {
 				actLine += dimStyle.Render(fmt.Sprintf("  (at %s)", t.Format("15:04:05")))
@@ -291,11 +276,29 @@ func (m Model) renderDetailPanel() string {
 		}
 		lines = append(lines, actLine)
 	} else if isActiveStatus(pv.Status) {
-		lines = append(lines, dimStyle.Render("  Activity: —"))
+		lines = append(lines, dimStyle.Render("  Activity:  —"))
+	}
+
+	// Notes
+	if pv.Notes != "" {
+		lines = append(lines, fmt.Sprintf("  Notes:     %s", pv.Notes))
+	}
+
+	// Blocked/deferred reason
+	if pv.BlockedReason != "" {
+		lines = append(lines, blockedStyle.Render(fmt.Sprintf("  Blocked:   %s", pv.BlockedReason)))
+	}
+	if pv.DeferredReason != "" {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("  Deferred:  %s", pv.DeferredReason)))
+	}
+
+	// Adversary round (only if > 0)
+	if pv.AdversaryRound > 0 {
+		lines = append(lines, fmt.Sprintf("  Adversary: round %d", pv.AdversaryRound))
 	}
 
 	// Apply scroll offset
-	visibleHeight := m.height - 2 // leave room for scroll indicator
+	visibleHeight := m.height - 2
 	if visibleHeight <= 0 {
 		visibleHeight = 20
 	}
