@@ -632,6 +632,146 @@ func TestBuildRetryPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildPhasePrompt_Review(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:  "Review the authentication module",
+		Role:  "review",
+		Files: []string{"internal/auth/handler.go", "internal/auth/middleware.go"},
+		Name:  "auth-review",
+	}
+
+	result, err := buildPhasePrompt(spec, "test-plan", "Go 1.24 project")
+	if err != nil {
+		t.Fatalf("buildPhasePrompt: %v", err)
+	}
+
+	checks := []string{
+		"reviewing code for quality",
+		"Review the authentication module",
+		"internal/auth/handler.go",
+		"internal/auth/middleware.go",
+		"findings-auth-review.md",
+		"arc gate test-plan auth-review",
+		"Go 1.24 project",
+	}
+	for _, check := range checks {
+		if !strings.Contains(result, check) {
+			t.Errorf("prompt should contain %q", check)
+		}
+	}
+
+	// Should NOT contain impl-specific content
+	if strings.Contains(result, "Checkpoints") {
+		t.Error("review prompt should not contain 'Checkpoints'")
+	}
+}
+
+func TestBuildPhasePrompt_Investigate(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:  "Why is the connection pool leaking?",
+		Role:  "investigate",
+		Files: []string{"internal/db/pool.go"},
+		Name:  "pool-leak",
+	}
+
+	result, err := buildPhasePrompt(spec, "debug-plan", "")
+	if err != nil {
+		t.Fatalf("buildPhasePrompt: %v", err)
+	}
+
+	checks := []string{
+		"investigating a technical question",
+		"Why is the connection pool leaking?",
+		"internal/db/pool.go",
+		"findings-pool-leak.md",
+		"arc gate debug-plan pool-leak",
+	}
+	for _, check := range checks {
+		if !strings.Contains(result, check) {
+			t.Errorf("prompt should contain %q", check)
+		}
+	}
+
+	// No project context section when empty
+	if strings.Contains(result, "Project Context") {
+		t.Error("prompt should not contain Project Context when empty")
+	}
+}
+
+func TestBuildPhasePrompt_DefaultImpl(t *testing.T) {
+	// Empty role defaults to impl
+	spec := &arc.PhaseSpec{
+		Spec: "Add a new feature",
+		Name: "new-feat",
+		Checkpoints: []arc.Checkpoint{
+			{Name: "step-1", Description: "First step", Test: "go test ./..."},
+		},
+	}
+
+	result, err := buildPhasePrompt(spec, "test-plan", "")
+	if err != nil {
+		t.Fatalf("buildPhasePrompt: %v", err)
+	}
+
+	if !strings.Contains(result, "implementing a phase") {
+		t.Error("default should use impl template")
+	}
+	if !strings.Contains(result, "Checkpoints") {
+		t.Error("impl prompt should contain Checkpoints")
+	}
+
+	// Unknown role also defaults to impl
+	spec.Role = "unknown-role"
+	result2, err := buildPhasePrompt(spec, "test-plan", "")
+	if err != nil {
+		t.Fatalf("buildPhasePrompt with unknown role: %v", err)
+	}
+	if !strings.Contains(result2, "implementing a phase") {
+		t.Error("unknown role should fall back to impl template")
+	}
+}
+
+func TestBuildRetryPrompt_Review(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec: "Review the auth module",
+		Role: "review",
+		Name: "auth-review",
+	}
+
+	gateResult := &arc.GateResult{
+		Passed: false,
+		Assertions: []arc.AssertionResult{
+			{Passed: false, Detail: "output file missing"},
+		},
+	}
+
+	result, err := buildRetryPrompt(spec, "test-plan", "", 2, gateResult, "")
+	if err != nil {
+		t.Fatalf("buildRetryPrompt: %v", err)
+	}
+
+	// Should contain the review prompt
+	if !strings.Contains(result, "reviewing code for quality") {
+		t.Error("retry should contain review prompt")
+	}
+
+	// Should use review-retry template (verifier feedback), not standard retry
+	if !strings.Contains(result, "verifier rejected") {
+		t.Error("review retry should contain 'verifier rejected'")
+	}
+	if !strings.Contains(result, "findings-auth-review.md") {
+		t.Error("review retry should reference the output file")
+	}
+	if !strings.Contains(result, "attempt 2 of 4") {
+		t.Error("review retry should contain attempt count")
+	}
+
+	// Should NOT contain impl-specific retry content
+	if strings.Contains(result, "Changes made so far") {
+		t.Error("review retry should not contain impl retry content")
+	}
+}
+
 // readGateStatus reads gate-status.json from a phase directory.
 func readGateStatus(phaseDir string) (*arc.GateStatus, error) {
 	data, err := os.ReadFile(filepath.Join(phaseDir, "gate-status.json"))
