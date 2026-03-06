@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,7 +38,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 	defer releaseLock(planDir)
 
 	// Kill any stale agent processes recorded in phase state files before starting.
-	killStaleAgents(planDir, opts)
+	KillStaleAgents(planDir, opts.Logger)
 
 	// SIGHUP handler: reload config from disk when received.
 	// Only set up if a config path is known. A mutex-protected holder is used
@@ -104,9 +105,12 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 		}
 	}
 
-	// Initialize structured logger
-	planLogger := NewPlanLogger(planDir, opts.Logger)
-	defer planLogger.Close()
+	// Initialize structured logger (reuse if provided).
+	planLogger := opts.PlanLogger
+	if planLogger == nil {
+		planLogger = NewPlanLogger(planDir, opts.Logger)
+		defer planLogger.Close()
+	}
 
 	// Print header
 	fmt.Println("==========================================")
@@ -122,7 +126,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 	fmt.Println()
 
 	buildResult := func(status, failedPhase, failedReason string) *LaunchResult {
-		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		phaseStates := LoadAllPhaseStates(planDir, meta.Phases)
 		summary := make(map[string]string, len(meta.Phases))
 		var totalUsage arc.Usage
 		for _, p := range meta.Phases {
@@ -169,7 +173,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 			return buildResult("cancelled", "", ctx.Err().Error()), ctx.Err()
 		}
 
-		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		phaseStates := LoadAllPhaseStates(planDir, meta.Phases)
 
 		// Check if all done
 		allDone := true
@@ -190,7 +194,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 			// gatedPlanComplete, which runs after the SIGHUP goroutine may still be active.
 			snapshotOpts := opts
 			snapshotOpts.Config = getConfig()
-			return gatedPlanComplete(snapshotOpts, meta, planDir, sharedWorktree, phaseStates, buildResult)
+			return GatedPlanComplete(snapshotOpts, meta, planDir, sharedWorktree, phaseStates)
 		}
 
 		// Find ready phases
@@ -272,7 +276,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 					batchCancel()
 					return buildResult("cancelled", "", ctx.Err().Error()), ctx.Err()
 				}
-				ps := loadPhaseState(planDir, r.phase)
+				ps := LoadPhaseState(planDir, r.phase)
 				if ps != nil && (ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred") {
 					// Tag the shared worktree with the failure reason.
 					if sharedWorktree != nil {
@@ -319,7 +323,7 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 		if budgetCfg := getConfig(); budgetCfg != nil && budgetCfg.Budget.MaxCost > 0 {
 			var totalCost float64
 			for _, p := range meta.Phases {
-				ps := loadPhaseState(planDir, p)
+				ps := LoadPhaseState(planDir, p)
 				if ps != nil {
 					totalCost += ps.Usage.CostUSD
 				}
@@ -332,16 +336,52 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 	}
 }
 
-// gatedPlanComplete handles the success path for a gate-based plan:
+// GatedPlanComplete handles the success path for a gate-based plan:
 // run adversary, merge worktree, regression suite, generate report.
-func gatedPlanComplete(
+func GatedPlanComplete(
 	opts LaunchOptions,
 	meta *arc.PlanMeta,
 	planDir string,
 	sharedWorktree *worktree.Worktree,
 	phaseStates map[string]*arc.PhaseState,
-	buildResult func(string, string, string) *LaunchResult,
 ) (*LaunchResult, error) {
+	// Inline buildResult — constructs a LaunchResult from current phase states.
+	buildResult := func(status, failedPhase, failedReason string) *LaunchResult {
+		summary := make(map[string]string, len(meta.Phases))
+		var totalUsage arc.Usage
+		for _, p := range meta.Phases {
+			ps := phaseStates[p]
+			if ps == nil {
+				summary[p] = "pending"
+				continue
+			}
+			summary[p] = ps.PhaseStatus
+			totalUsage = totalUsage.Add(ps.Usage)
+		}
+		if status == "complete" {
+			hasComplete := false
+			hasNonTerminal := false
+			for _, s := range summary {
+				switch s {
+				case "complete":
+					hasComplete = true
+				case "blocked", "deferred", "failed":
+					hasNonTerminal = true
+				}
+			}
+			if hasComplete && hasNonTerminal {
+				status = "partial"
+			}
+		}
+		return &LaunchResult{
+			Status:       status,
+			FailedPhase:  failedPhase,
+			FailedReason: failedReason,
+			PhaseSummary: summary,
+			Usage:        totalUsage,
+		}
+	}
+
 	fmt.Println("\nAll phases complete.")
 
 	// Determine the working directory (worktree or project dir).
@@ -353,9 +393,12 @@ func gatedPlanComplete(
 		workDir, _ = os.Getwd()
 	}
 
-	// Initialize plan logger for this completion path.
-	planLogger := NewPlanLogger(planDir, opts.Logger)
-	defer planLogger.Close()
+	// Use provided PlanLogger or create a new one.
+	planLogger := opts.PlanLogger
+	if planLogger == nil {
+		planLogger = NewPlanLogger(planDir, opts.Logger)
+		defer planLogger.Close()
+	}
 
 	// --- Task 1: Run plan-level adversary session ---
 	// Gate on: adversary agent is configured (non-empty role) AND there are phase specs.
@@ -466,7 +509,7 @@ func gatedPlanComplete(
 			opts.Logger.Warn("regression suite failed", "output", regressionResult.Output)
 
 			// --- Task 2: Route regression failures to responsible phases ---
-			phaseStates = loadAllPhaseStates(planDir, meta.Phases)
+			phaseStates = LoadAllPhaseStates(planDir, meta.Phases)
 			if routeErr := routeRegressionFailure(context.Background(), opts, meta, phaseStates, regressionResult.Output, opts.ProjectDir); routeErr != nil {
 				opts.Logger.Warn("regression failure routing failed", "error", routeErr)
 			}
@@ -839,13 +882,11 @@ func rerunPhaseInTree(
 	})
 }
 
-// runRegressionSuite runs the given shell command in dir with a 10-minute timeout.
-// Returns the combined stdout+stderr output and any execution error.
-// killStaleAgents scans all phase state files for non-zero AgentPID values.
+// KillStaleAgents scans all phase state files for non-zero AgentPID values.
 // For each, it checks if the process is still alive (via signal 0). If alive,
 // it sends SIGTERM, waits up to 5 seconds, then SIGKILLs. After termination
 // it resets AgentPID to 0 in the phase state.
-func killStaleAgents(planDir string, opts LaunchOptions) {
+func KillStaleAgents(planDir string, logger *slog.Logger) {
 	phasesDir := filepath.Join(planDir, "phases")
 	entries, err := os.ReadDir(phasesDir)
 	if err != nil {
@@ -886,7 +927,7 @@ func killStaleAgents(planDir string, opts LaunchOptions) {
 		}
 
 		// Process is alive — send SIGTERM first.
-		opts.Logger.Warn("killing stale agent process", "phase", phaseName, "pid", pid)
+		logger.Warn("killing stale agent process", "phase", phaseName, "pid", pid)
 		fmt.Printf("[%s] Killing stale agent process (PID %d)\n", phaseName, pid)
 		_ = proc.Signal(syscall.SIGTERM)
 
@@ -901,7 +942,7 @@ func killStaleAgents(planDir string, opts LaunchOptions) {
 
 		// If still alive, SIGKILL.
 		if err := proc.Signal(syscall.Signal(0)); err == nil {
-			opts.Logger.Warn("SIGTERM did not terminate stale agent, sending SIGKILL", "pid", pid)
+			logger.Warn("SIGTERM did not terminate stale agent, sending SIGKILL", "pid", pid)
 			_ = proc.Signal(syscall.SIGKILL)
 		}
 

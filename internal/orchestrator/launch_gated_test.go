@@ -709,7 +709,7 @@ func TestKillStaleAgents_DeadProcess(t *testing.T) {
 	}
 
 	logger := slog.Default()
-	killStaleAgents(planDir, LaunchOptions{Logger: logger})
+	KillStaleAgents(planDir, logger)
 
 	// After killStaleAgents, AgentPID should be cleared.
 	ps, err := sf.Read()
@@ -730,7 +730,7 @@ func TestKillStaleAgents_NoPIDPhases(t *testing.T) {
 	// Default state has AgentPID=0, so no killing should happen.
 	logger := slog.Default()
 	// Should not panic or error.
-	killStaleAgents(planDir, LaunchOptions{Logger: logger})
+	KillStaleAgents(planDir, logger)
 
 	phaseDir := filepath.Join(planDir, "phases", "impl")
 	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
