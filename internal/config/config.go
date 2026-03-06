@@ -59,6 +59,7 @@ type GitConfig struct {
 	CommitStyle string `yaml:"commit_style"`
 	Sign        bool   `yaml:"sign"`
 	CoAuthor    bool   `yaml:"co_author"`
+	BaseBranch  string `yaml:"base_branch"` // branch worktrees diverge from and merge into (default: current branch)
 }
 
 // AgentForRole returns the configured agent adapter name for a given role.

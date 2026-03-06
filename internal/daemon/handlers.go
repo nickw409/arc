@@ -96,7 +96,7 @@ func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {
 	// Create shared worktree if requested (not per-phase).
 	var wt *worktree.Worktree
 	if req.UseWorktree && !req.PerPhaseWorktree {
-		created, wtErr := worktree.Create(req.Project, req.Plan, "")
+		created, wtErr := worktree.Create(req.Project, req.Plan, "", projCfg.Git.BaseBranch)
 		if wtErr != nil {
 			slog.Warn("failed to create worktree, running in-tree", "error", wtErr)
 		} else {

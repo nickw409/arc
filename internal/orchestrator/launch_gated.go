@@ -96,7 +96,11 @@ func LaunchGated(ctx context.Context, opts LaunchOptions) (*LaunchResult, error)
 		if projectDir == "" {
 			projectDir, _ = os.Getwd()
 		}
-		wt, wtErr := worktree.Create(projectDir, opts.PlanName, "")
+		baseBranch := ""
+		if opts.Config != nil {
+			baseBranch = opts.Config.Git.BaseBranch
+		}
+		wt, wtErr := worktree.Create(projectDir, opts.PlanName, "", baseBranch)
 		if wtErr != nil {
 			opts.Logger.Warn("failed to create shared worktree, running in-tree", "error", wtErr)
 		} else {
@@ -478,6 +482,11 @@ func GatedPlanComplete(
 			fmt.Printf("Committed worktree changes: %s\n", shortHash(hash))
 		}
 
+		mergeTarget := ""
+		if opts.Config != nil {
+			mergeTarget = opts.Config.Git.BaseBranch
+		}
+
 		// Check for uncommitted changes in the project dir before merging.
 		// If dirty, skip the merge — the worktree is durable and can be
 		// merged later once the user commits or stashes their changes.
@@ -488,11 +497,15 @@ func GatedPlanComplete(
 			fmt.Printf("Your completed work is safe in the worktree: %s\n", sharedWorktree.Dir)
 			fmt.Printf("To merge manually:\n")
 			fmt.Printf("  1. Commit or stash your changes\n")
-			fmt.Printf("  2. git merge --no-ff %s\n", sharedWorktree.Branch)
+			targetDisplay := mergeTarget
+			if targetDisplay == "" {
+				targetDisplay = "<your-branch>"
+			}
+			fmt.Printf("  2. git rebase %s %s && git checkout %s && git merge --ff-only %s\n",
+				targetDisplay, sharedWorktree.Branch, targetDisplay, sharedWorktree.Branch)
 			return buildResult("complete", "", ""), nil
 		}
-
-		if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
+		if hash, mergeErr := worktree.MergeBack(sharedWorktree, mergeTarget); mergeErr != nil {
 			opts.Logger.Warn("worktree merge failed", "branch", sharedWorktree.Branch, "error", mergeErr)
 
 			// --- Task 5: Merge conflict re-run ---

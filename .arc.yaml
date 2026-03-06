@@ -42,6 +42,7 @@ git:
   commit_style: conventional
   sign: false
   co_author: false
+  base_branch: dev
 
 # Review settings for adversarial plan review agents
 review:

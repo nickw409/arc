@@ -48,7 +48,7 @@ func initTestRepo(t *testing.T) string {
 func TestCreateAndRemove(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "my-plan", "my-phase")
+	wt, err := Create(projectDir, "my-plan", "my-phase", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestCreateAndRemove(t *testing.T) {
 func TestMergeBack(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "merge-plan", "merge-phase")
+	wt, err := Create(projectDir, "merge-plan", "merge-phase", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestMergeBack(t *testing.T) {
 	}
 
 	// Merge back
-	hash, err := MergeBack(wt)
+	hash, err := MergeBack(wt, "")
 	if err != nil {
 		t.Fatalf("MergeBack failed: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestMergeBack(t *testing.T) {
 func TestMergeConflict(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "conflict-plan", "conflict-phase")
+	wt, err := Create(projectDir, "conflict-plan", "conflict-phase", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -171,12 +171,12 @@ func TestMergeConflict(t *testing.T) {
 	}
 
 	// Attempt merge — should fail with conflict
-	_, err = MergeBack(wt)
+	_, err = MergeBack(wt, "")
 	if err == nil {
 		t.Fatal("expected MergeBack to return error on conflict")
 	}
-	if !strings.Contains(err.Error(), "merge conflict") {
-		t.Fatalf("expected 'merge conflict' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "rebase conflict") {
+		t.Fatalf("expected 'rebase conflict' in error, got: %v", err)
 	}
 }
 
@@ -205,7 +205,7 @@ func TestBranchNaming(t *testing.T) {
 func TestCreatePlanLevel(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "shared-plan", "")
+	wt, err := Create(projectDir, "shared-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create with empty phaseName failed: %v", err)
 	}
@@ -233,17 +233,17 @@ func TestCleanupPlan(t *testing.T) {
 	projectDir := initTestRepo(t)
 
 	// Create two per-phase worktrees for "my-plan"
-	wt1, err := Create(projectDir, "my-plan", "phase-a")
+	wt1, err := Create(projectDir, "my-plan", "phase-a", "")
 	if err != nil {
 		t.Fatalf("Create phase-a failed: %v", err)
 	}
-	wt2, err := Create(projectDir, "my-plan", "phase-b")
+	wt2, err := Create(projectDir, "my-plan", "phase-b", "")
 	if err != nil {
 		t.Fatalf("Create phase-b failed: %v", err)
 	}
 
 	// Create a worktree for a different plan (should not be removed)
-	wtOther, err := Create(projectDir, "other-plan", "phase-x")
+	wtOther, err := Create(projectDir, "other-plan", "phase-x", "")
 	if err != nil {
 		t.Fatalf("Create other-plan failed: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestCreate_BranchExistsWorktreeRemoved(t *testing.T) {
 	projectDir := initTestRepo(t)
 
 	// First create succeeds normally
-	wt1, err := Create(projectDir, "restart-plan", "impl")
+	wt1, err := Create(projectDir, "restart-plan", "impl", "")
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestCreate_BranchExistsWorktreeRemoved(t *testing.T) {
 
 	// BUG: Create fails with "fatal: a branch named 'arc/restart-plan/impl' already exists"
 	// because it unconditionally passes -b to git worktree add.
-	wt2, err := Create(projectDir, "restart-plan", "impl")
+	wt2, err := Create(projectDir, "restart-plan", "impl", "")
 	if err != nil {
 		t.Fatalf("Create with lingering branch should succeed, got: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestCreate_BranchAndWorktreeAlreadyExist(t *testing.T) {
 	projectDir := initTestRepo(t)
 
 	// First create succeeds
-	wt1, err := Create(projectDir, "restart-plan", "")
+	wt1, err := Create(projectDir, "restart-plan", "", "")
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestCreate_BranchAndWorktreeAlreadyExist(t *testing.T) {
 
 	// BUG: Create fails with "fatal: a branch named 'arc/restart-plan' already exists"
 	// After fix: should detect and reuse the existing worktree.
-	wt2, err := Create(projectDir, "restart-plan", "")
+	wt2, err := Create(projectDir, "restart-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create with existing worktree should reuse it, got: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestCreate_PlanLevelBranchExistsWorktreeRemoved(t *testing.T) {
 	// orchestrator.Launch() on restart.
 	projectDir := initTestRepo(t)
 
-	wt1, err := Create(projectDir, "shared-restart", "")
+	wt1, err := Create(projectDir, "shared-restart", "", "")
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestCreate_PlanLevelBranchExistsWorktreeRemoved(t *testing.T) {
 	pruneCmd.Run()
 
 	// BUG: fails because -b flag is always used
-	wt2, err := Create(projectDir, "shared-restart", "")
+	wt2, err := Create(projectDir, "shared-restart", "", "")
 	if err != nil {
 		t.Fatalf("plan-level Create with lingering branch should succeed, got: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestListOrphaned_NoWorktrees(t *testing.T) {
 func TestListOrphaned_ActivePlanNotOrphaned(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "active-plan", "phase-a")
+	wt, err := Create(projectDir, "active-plan", "phase-a", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestListOrphaned_OrphanedWorktree(t *testing.T) {
 	projectDir := initTestRepo(t)
 
 	// Create a worktree for "old-plan".
-	wt, err := Create(projectDir, "old-plan", "")
+	wt, err := Create(projectDir, "old-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -470,13 +470,13 @@ func TestListOrphaned_OrphanedWorktree(t *testing.T) {
 func TestListOrphaned_MultipleWorktrees(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wtActive, err := Create(projectDir, "active-plan", "phase-a")
+	wtActive, err := Create(projectDir, "active-plan", "phase-a", "")
 	if err != nil {
 		t.Fatalf("Create active-plan failed: %v", err)
 	}
 	defer Remove(wtActive)
 
-	wtOrphan, err := Create(projectDir, "orphan-plan", "phase-b")
+	wtOrphan, err := Create(projectDir, "orphan-plan", "phase-b", "")
 	if err != nil {
 		t.Fatalf("Create orphan-plan failed: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestListOrphaned_MultipleWorktrees(t *testing.T) {
 func TestListOrphaned_NilActivePlansAllArcOrphaned(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "some-plan", "")
+	wt, err := Create(projectDir, "some-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -557,7 +557,7 @@ func TestCreate_DiskSpaceCheck(t *testing.T) {
 
 	// Verify that Create succeeds under normal conditions (1 byte threshold is
 	// injected inside the package-level const, but we test Create end-to-end).
-	wt, err := Create(projectDir, "disk-check-plan", "")
+	wt, err := Create(projectDir, "disk-check-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create should succeed when disk space is sufficient: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestCreate_DiskSpaceCheck(t *testing.T) {
 func TestWriteMetadata_Basic(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "meta-plan", "meta-phase")
+	wt, err := Create(projectDir, "meta-plan", "meta-phase", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestWriteMetadata_Basic(t *testing.T) {
 func TestWriteAndReadMetadata_RoundTrip(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "round-trip-plan", "impl")
+	wt, err := Create(projectDir, "round-trip-plan", "impl", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestReadMetadata_Corrupt(t *testing.T) {
 func TestWriteMetadata_PlanExtractedFromBranch(t *testing.T) {
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "extract-plan", "phase-x")
+	wt, err := Create(projectDir, "extract-plan", "phase-x", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -682,7 +682,7 @@ func TestWriteMetadata_SharedWorktree(t *testing.T) {
 	// Shared (plan-level) worktree has branch arc/<plan> with no phase segment
 	projectDir := initTestRepo(t)
 
-	wt, err := Create(projectDir, "shared-meta-plan", "")
+	wt, err := Create(projectDir, "shared-meta-plan", "", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}

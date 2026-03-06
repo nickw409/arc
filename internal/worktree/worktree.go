@@ -53,7 +53,11 @@ func worktreeDir(projectDir, planName, phaseName string) (string, error) {
 // and system reboots. If the branch already exists from a previous run, Create
 // detects and reuses the existing worktree (preserving agent work) or creates
 // a new worktree on the existing branch.
-func Create(projectDir, planName, phaseName string) (*Worktree, error) {
+//
+// baseBranch controls where the new branch diverges from. If empty, the current
+// HEAD is used (git default). Set this to e.g. "develop" to isolate agent work
+// from your working branch.
+func Create(projectDir, planName, phaseName, baseBranch string) (*Worktree, error) {
 	if err := CheckDiskSpace(defaultMinDiskBytes); err != nil {
 		return nil, err
 	}
@@ -67,7 +71,11 @@ func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, dir)
+	args := []string{"worktree", "add", "-b", branch, dir}
+	if baseBranch != "" {
+		args = append(args, baseBranch)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = projectDir
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// Branch already exists — check if a worktree is still attached
@@ -193,20 +201,53 @@ func CleanupPlan(projectDir, planName string) int {
 	return removed
 }
 
-// MergeBack merges the worktree branch into the current branch.
-// Returns the merge commit hash or error if conflicts exist.
-func MergeBack(wt *Worktree) (string, error) {
-	cmd := exec.Command("git", "merge", "--no-ff", wt.Branch, "-m", fmt.Sprintf("Merge %s", wt.Branch))
-	cmd.Dir = wt.ProjectDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		// Abort the merge on conflict
-		abortCmd := exec.Command("git", "merge", "--abort")
-		abortCmd.Dir = wt.ProjectDir
-		abortCmd.Run()
-		return "", fmt.Errorf("merge conflict: %s: %w", strings.TrimSpace(string(out)), err)
+// MergeBack rebases the worktree branch onto the target branch, then
+// fast-forward merges it. If baseBranch is empty, the current branch is used.
+//
+// The rebase handles the common case where the target moved forward during the
+// run. If the rebase conflicts, it aborts and returns an error — the caller
+// can fall back to manual merge or in-tree re-run.
+func MergeBack(wt *Worktree, baseBranch string) (string, error) {
+	// Determine the target branch for rebase.
+	target := baseBranch
+	if target == "" {
+		// Use the current branch in the project dir.
+		headCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+		headCmd.Dir = wt.ProjectDir
+		out, err := headCmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("determining current branch: %w", err)
+		}
+		target = strings.TrimSpace(string(out))
 	}
 
-	// Get the merge commit hash
+	// Rebase the worktree branch onto the target.
+	// Run from the worktree dir since the branch is checked out there.
+	rebaseCmd := exec.Command("git", "rebase", target)
+	rebaseCmd.Dir = wt.Dir
+	if out, err := rebaseCmd.CombinedOutput(); err != nil {
+		// Abort the rebase on conflict.
+		abortCmd := exec.Command("git", "rebase", "--abort")
+		abortCmd.Dir = wt.Dir
+		abortCmd.Run()
+		return "", fmt.Errorf("rebase conflict: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Fast-forward merge onto the target branch.
+	// First, check out the target branch in the project dir.
+	checkoutCmd := exec.Command("git", "checkout", target)
+	checkoutCmd.Dir = wt.ProjectDir
+	if out, err := checkoutCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("checkout %s: %s: %w", target, strings.TrimSpace(string(out)), err)
+	}
+
+	mergeCmd := exec.Command("git", "merge", "--ff-only", wt.Branch, "-m", fmt.Sprintf("Merge %s", wt.Branch))
+	mergeCmd.Dir = wt.ProjectDir
+	if out, err := mergeCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("fast-forward merge failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Get the resulting commit hash.
 	hashCmd := exec.Command("git", "rev-parse", "HEAD")
 	hashCmd.Dir = wt.ProjectDir
 	out, err := hashCmd.Output()
