@@ -11,18 +11,19 @@ import (
 	"github.com/nwiley/arc/internal/arc"
 )
 
-// RunVerifier spawns a lightweight agent to review the code diff against the phase spec.
-// Returns a pass/fail assessment with reasoning.
+// RunVerifier spawns an agent to verify that the implementation matches the spec.
+// The agent has read/search tools so it can inspect files directly rather than
+// relying solely on the diff. Returns a pass/fail assessment with reasoning.
 func RunVerifier(ctx context.Context, spec *arc.PhaseSpec, workdir string) (passed bool, reasoning string, err error) {
-	// Get diff of changes.
+	// Get diff as orientation context — not the primary verification mechanism.
 	diff, diffErr := getDiff(workdir)
 	if diffErr != nil || diff == "" {
 		return true, "no changes to verify", nil
 	}
 
-	// Truncate diff if too large.
-	if len(diff) > 8000 {
-		diff = diff[:8000] + "\n... (truncated)"
+	// Truncate diff for prompt context — agent reads files directly for full detail.
+	if len(diff) > 12000 {
+		diff = diff[:12000] + "\n... (truncated — use Read/Grep tools for full detail)"
 	}
 
 	verifyCriteria := ""
@@ -35,26 +36,33 @@ func RunVerifier(ctx context.Context, spec *arc.PhaseSpec, workdir string) (pass
 ## Specification
 %s
 %s
-## Code Changes
+## Code Changes (summary)
 %s
 
 ## Instructions
-Review the changes and determine if they satisfy the specification and acceptance criteria.
-Respond with either PASS or FAIL on the first line, followed by your reasoning.
-Focus on:
-- Does the implementation match what was asked for?
-- Are there obvious bugs or missing pieces?
-- Are the required files and functions present?
-- Do the changes meet the acceptance criteria (if provided)?
+Verify that the implementation FULLY satisfies the specification. You have Read, Grep, Glob,
+and Bash tools — use them to inspect files directly rather than relying only on the diff above.
 
-Do NOT nitpick style, naming, or minor issues. Focus on correctness and completeness.
+Check:
+- Every file listed in the spec was modified or created
+- Every required function, type, struct field, or wiring exists with the correct signature
+- All integration points (register X in Y, wire A into B) are present
+- The implementation builds: run "go build ./..." if in doubt
+- No required items from the spec are missing or partially implemented
+
+Do NOT fail for style, naming conventions, comments, or minor issues.
+Do NOT fail if the diff is truncated — read the files directly.
+Focus only on correctness and completeness against the spec.
+
+Respond with PASS or FAIL on the first line, followed by your reasoning.
 `, spec.Spec, verifyCriteria, diff)
 
 	agentAdapter := adapter.Get("claude")
 
 	sessionCfg := arc.SessionConfig{
-		MaxTurns: 3,
-		Timeout:  2 * time.Minute,
+		MaxTurns: 15,
+		Timeout:  5 * time.Minute,
+		Tools:    []string{"Read", "Grep", "Glob", "Bash"},
 	}
 
 	result, spawnErr := agentAdapter.Spawn(ctx, prompt, workdir, sessionCfg)
