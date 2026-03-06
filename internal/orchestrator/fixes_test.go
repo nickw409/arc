@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/nwiley/arc/internal/arc"
 )
 
 // --- shortHash tests ---
@@ -165,115 +163,6 @@ func TestJudgeDisputeRejectPreservesCase(t *testing.T) {
 	}
 }
 
-// --- phaseObjective trimming tests ---
-
-func TestPhaseObjectiveMarkdownHeading(t *testing.T) {
-	dir := t.TempDir()
-	planName := "myplan"
-	phaseName := "myphase"
-	phaseDir := filepath.Join(dir, planName, "phases", phaseName)
-	if err := os.MkdirAll(phaseDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(phaseDir, "plan.md"), "# Add user authentication\n\nSome details.")
-
-	opts := RunPhaseOptions{
-		PlanName:  planName,
-		PhaseName: phaseName,
-		PlansDir:  dir,
-	}
-	got := phaseObjective(opts)
-	want := "add user authentication"
-	if got != want {
-		t.Fatalf("phaseObjective() = %q, want %q", got, want)
-	}
-}
-
-func TestPhaseObjectiveMultiHashHeading(t *testing.T) {
-	dir := t.TempDir()
-	planName := "myplan"
-	phaseName := "myphase"
-	phaseDir := filepath.Join(dir, planName, "phases", phaseName)
-	if err := os.MkdirAll(phaseDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(phaseDir, "plan.md"), "## Refactor database layer\n\nDetails.")
-
-	opts := RunPhaseOptions{
-		PlanName:  planName,
-		PhaseName: phaseName,
-		PlansDir:  dir,
-	}
-	got := phaseObjective(opts)
-	want := "refactor database layer"
-	if got != want {
-		t.Fatalf("phaseObjective() = %q, want %q", got, want)
-	}
-}
-
-func TestPhaseObjectiveNoSpaceAfterHash(t *testing.T) {
-	// Ensure a heading like "# word" doesn't strip the leading space from content
-	// and also that a space-only heading doesn't confuse things.
-	dir := t.TempDir()
-	planName := "myplan"
-	phaseName := "myphase"
-	phaseDir := filepath.Join(dir, planName, "phases", phaseName)
-	if err := os.MkdirAll(phaseDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	// "# fix" — the old TrimLeft("# ") would also strip 'f', 'i', 'x' if they appeared in "# ".
-	// New code should preserve the word.
-	writeFile(t, filepath.Join(phaseDir, "plan.md"), "# fix the parser bug\n")
-
-	opts := RunPhaseOptions{
-		PlanName:  planName,
-		PhaseName: phaseName,
-		PlansDir:  dir,
-	}
-	got := phaseObjective(opts)
-	want := "fix the parser bug"
-	if got != want {
-		t.Fatalf("phaseObjective() = %q, want %q", got, want)
-	}
-}
-
-func TestPhaseObjectiveMissingFile(t *testing.T) {
-	dir := t.TempDir()
-	opts := RunPhaseOptions{
-		PlanName:  "noplan",
-		PhaseName: "nophase",
-		PlansDir:  dir,
-	}
-	got := phaseObjective(opts)
-	if got != "implement phase" {
-		t.Fatalf("phaseObjective() = %q, want %q", got, "implement phase")
-	}
-}
-
-func TestPhaseObjectiveTruncatesLongLine(t *testing.T) {
-	dir := t.TempDir()
-	planName := "myplan"
-	phaseName := "myphase"
-	phaseDir := filepath.Join(dir, planName, "phases", phaseName)
-	if err := os.MkdirAll(phaseDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	longLine := "# " + string(make([]byte, 100))
-	for i := range longLine[2:] {
-		longLine = longLine[:2+i] + "a" + longLine[2+i+1:]
-	}
-	writeFile(t, filepath.Join(phaseDir, "plan.md"), longLine)
-
-	opts := RunPhaseOptions{
-		PlanName:  planName,
-		PhaseName: phaseName,
-		PlansDir:  dir,
-	}
-	got := phaseObjective(opts)
-	if len(got) > 72 {
-		t.Fatalf("phaseObjective() returned string longer than 72 chars: len=%d", len(got))
-	}
-}
 
 // --- helpers ---
 
@@ -309,5 +198,3 @@ func trimSpace(s string) string {
 	return result
 }
 
-// Ensure arc package is used (referenced by TestPhaseObjectiveTruncatesLongLine indirectly).
-var _ = arc.PhaseState{}

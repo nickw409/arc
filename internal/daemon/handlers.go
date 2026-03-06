@@ -141,12 +141,18 @@ func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {
 		Cancel:           cancel,
 	}
 
+	queued := len(state.PhasesReady(meta, phaseStates))
+	if queued == 0 {
+		cancel()
+		releaseLock()
+		return Response{OK: false, Error: "plan has no pending phases to run (all phases are complete, blocked, or blocked by a failed dependency)"}
+	}
+
 	if err := sched.Register(reg); err != nil {
 		cancel()
 		releaseLock()
 		return Response{OK: false, Error: fmt.Sprintf("registering plan: %v", err)}
 	}
 
-	queued := len(state.PhasesReady(meta, phaseStates))
 	return Response{OK: true, QueuedPhases: queued}
 }

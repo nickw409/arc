@@ -2,11 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/nwiley/arc/internal/plan"
-	"github.com/nwiley/arc/internal/resources"
 	"github.com/spf13/cobra"
 )
 
@@ -33,16 +31,6 @@ func newPlanCmd() *cobra.Command {
 				return fmt.Errorf("role must be impl, review, investigate, or audit; got %q", role)
 			}
 
-			projectRoot, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getting working directory: %w", err)
-			}
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("getting home directory: %w", err)
-			}
-			resolver := resources.NewResolver(projectRoot, homeDir)
-
 			var phaseRoles map[string]string
 			if role != "" {
 				phaseRoles = make(map[string]string, len(phases))
@@ -56,7 +44,6 @@ func newPlanCmd() *cobra.Command {
 				Name:         name,
 				Phases:       phases,
 				WorkflowType: workflowType,
-				Resolver:     resolver,
 				PhaseRoles:   phaseRoles,
 			})
 			if err != nil {

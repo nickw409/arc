@@ -16,14 +16,12 @@ var planNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
 
 // CreateOptions configures plan creation.
 type CreateOptions struct {
-	PlansDir       string
-	Name           string
-	Phases         []string
-	WorkflowType   string
-	PlanContent    map[string]string   // optional: phase name → plan.md content (skip template)
-	CustomWorkflow []byte              // optional: custom workflow YAML (written as workflow.yaml)
-	Resolver       *resources.Resolver // if nil, uses NewResolver("", "") (embedded-only)
-	PhaseRoles     map[string]string   // optional: phase name → role (impl, review, investigate, audit)
+	PlansDir     string
+	Name         string
+	Phases       []string
+	WorkflowType string
+	PlanContent  map[string]string // optional: phase name → plan.md content (skip template)
+	PhaseRoles   map[string]string // optional: phase name → role (impl, review, investigate, audit)
 }
 
 // Create creates a new plan with directory structure, state files, and templates.
@@ -48,33 +46,7 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 
 	// Default workflow type
 	if opts.WorkflowType == "" {
-		if len(opts.CustomWorkflow) > 0 {
-			opts.WorkflowType = "custom"
-		} else {
-			opts.WorkflowType = "feature"
-		}
-	}
-
-	// Resolve effective resolver
-	r := opts.Resolver
-	if r == nil {
-		r = resources.NewResolver("", "")
-	}
-
-	// Skip validation for custom workflows (they won't be in the registry)
-	if opts.WorkflowType != "custom" {
-		// Validate workflow type exists (for non-feature, we'll copy it; for feature, just check)
-		validWorkflows := r.ListWorkflows()
-		found := false
-		for _, w := range validWorkflows {
-			if w == opts.WorkflowType {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("invalid workflow type %q", opts.WorkflowType)
-		}
+		opts.WorkflowType = "feature"
 	}
 
 	// 3. Check plan doesn't already exist
@@ -102,22 +74,7 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		return nil, fmt.Errorf("write session_id: %w", err)
 	}
 
-	// 6. Copy workflow YAML for non-feature types, or write custom workflow
-	if len(opts.CustomWorkflow) > 0 {
-		if err := os.WriteFile(filepath.Join(planDir, "workflow.yaml"), opts.CustomWorkflow, 0644); err != nil {
-			return nil, fmt.Errorf("write workflow.yaml: %w", err)
-		}
-	} else if opts.WorkflowType != "feature" {
-		workflowData, err := r.WorkflowBytes(opts.WorkflowType)
-		if err != nil {
-			return nil, fmt.Errorf("read workflow %s: %w", opts.WorkflowType, err)
-		}
-		if err := os.WriteFile(filepath.Join(planDir, "workflow.yaml"), workflowData, 0644); err != nil {
-			return nil, fmt.Errorf("write workflow.yaml: %w", err)
-		}
-	}
-
-	// 7. Build metadata
+	// 6. Build metadata
 	meta := arc.NewPlanMeta(opts.Name, opts.WorkflowType, opts.Phases)
 
 	// 8. Write plan.json
@@ -162,14 +119,17 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 			return nil, fmt.Errorf("write plan.md for %s: %w", phase, err)
 		}
 
-		// Write spec.yaml with role if PhaseRoles specifies one
+		// Write spec.yaml — always, so the gate orchestrator picks up the plan.
+		// Use the role from PhaseRoles if provided, defaulting to "impl".
+		role := "impl"
 		if opts.PhaseRoles != nil {
-			if role, ok := opts.PhaseRoles[phase]; ok && role != "" {
-				spec := &arc.PhaseSpec{Role: role}
-				if err := WriteSpec(opts.PlansDir, opts.Name, phase, spec); err != nil {
-					return nil, fmt.Errorf("write spec.yaml for %s: %w", phase, err)
-				}
+			if r, ok := opts.PhaseRoles[phase]; ok && r != "" {
+				role = r
 			}
+		}
+		spec := &arc.PhaseSpec{Role: role}
+		if err := WriteSpec(opts.PlansDir, dirName, phase, spec); err != nil {
+			return nil, fmt.Errorf("write spec.yaml for %s: %w", phase, err)
 		}
 	}
 

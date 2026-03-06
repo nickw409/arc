@@ -15,7 +15,7 @@ func TestCobraRootHasAllSubcommands(t *testing.T) {
 	}
 	sort.Strings(names)
 
-	want := []string{"archive", "guide", "init", "iterate", "manage", "monitor", "plan", "review", "run", "status", "test", "update", "validate"}
+	want := []string{"archive", "guide", "init", "manage", "monitor", "plan", "review", "run", "status", "test", "update", "validate"}
 	sort.Strings(want)
 
 	if len(names) < len(want) {

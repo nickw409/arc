@@ -699,4 +699,37 @@ Every phase has predictable failure modes. Without a DO NOT section, agents will
 
 When phase B depends on types from phase A, both plans must agree on exact type names, field names, and method signatures. Mismatches cause phase B to fail with confusing errors.
 
+### Gates That Only Check the New Package
+
+**Wrong:** A phase implementing a new system (e.g., a daemon) has gate assertions that only verify the new package compiles and its tests pass. The phase completes even though the callers that were supposed to wire it in were never updated.
+
+**Right:** Every gate must include assertions for **every integration point the design doc specifies** — not just the new code, but the existing code that must change to use it.
+
+If the design doc says "`arc run` delegates to the daemon", the gate must assert that:
+```yaml
+- type: grep
+  file: internal/cli/run.go
+  pattern: "daemon\\.Connect|daemon\\.Submit"
+```
+
+Before writing gate assertions, re-read the design doc (or plan.md) and ask: *what existing files must change for this feature to be live end-to-end?* Add a gate assertion for each one. A feature is not done when its package is done — it's done when it's wired in.
+
+### Custom Workflow Is Per-Phase, Not Plan-Level
+
+**Wrong:** Embedding a full multi-phase pipeline (with parallel blocks, multiple act/scout blocks) in the `workflow` param of `arc_plan`, expecting it to orchestrate the whole plan.
+
+**Right:** The `workflow` param defines the **state machine each individual phase runs through**. Every phase in the plan gets that same workflow. Parallelism happens at the phase level, not inside the workflow YAML.
+
+To run phases in parallel: create them as independent phases with no dependency between them — they run concurrently automatically. To sequence them: use `arc_plan_update_deps`.
+
+```
+# Correct: sequential then parallel then sequential
+arc_plan doc-update scout update-user-docs update-arch-docs verify --workflow-type direct
+arc_plan_update_deps update-user-docs --deps scout
+arc_plan_update_deps update-arch-docs --deps scout        # parallel with update-user-docs
+arc_plan_update_deps verify --deps update-user-docs update-arch-docs
+```
+
+Custom workflow YAML is only useful when you need a non-standard state machine **within** a single phase (e.g., a phase that loops, branches on a verdict, or uses a specialized block sequence). For straightforward tasks, use a preset workflow type.
+
 <!-- /section: mistakes -->

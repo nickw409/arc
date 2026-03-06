@@ -1,50 +1,16 @@
 package resources
 
 import (
-	"sort"
-	"strings"
 	"testing"
 )
 
-func TestEmbeddedWorkflowsAccessible(t *testing.T) {
-	data, err := WorkflowBytes("feature")
-	if err != nil {
-		t.Fatalf("WorkflowBytes(feature) error: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("WorkflowBytes(feature) returned empty byte slice")
-	}
-}
-
-func TestEmbeddedWorkflowNotFound(t *testing.T) {
-	_, err := WorkflowBytes("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent workflow, got nil")
-	}
-}
-
-func TestEmbeddedAllWorkflowTypes(t *testing.T) {
-	workflows := ListWorkflows()
-	expected := []string{"audit", "bugfix", "direct", "feature", "investigation", "performance", "refactor"}
-
-	sort.Strings(workflows)
-	if len(workflows) != len(expected) {
-		t.Fatalf("ListWorkflows() = %v, want %v", workflows, expected)
-	}
-	for i, name := range expected {
-		if workflows[i] != name {
-			t.Fatalf("ListWorkflows()[%d] = %q, want %q", i, workflows[i], name)
-		}
-	}
-}
-
 func TestEmbeddedPromptAccessible(t *testing.T) {
-	data, err := PromptBytes("blocks/tests.md")
+	data, err := PromptBytes("gate/impl.md")
 	if err != nil {
-		t.Fatalf("PromptBytes(blocks/tests.md) error: %v", err)
+		t.Fatalf("PromptBytes(gate/impl.md) error: %v", err)
 	}
 	if len(data) == 0 {
-		t.Fatal("PromptBytes(blocks/tests.md) returned empty byte slice")
+		t.Fatal("PromptBytes(gate/impl.md) returned empty byte slice")
 	}
 }
 
@@ -82,32 +48,6 @@ func TestEmbeddedHookAccessible(t *testing.T) {
 	}
 }
 
-func TestHookPathTraversal(t *testing.T) {
-	_, err := HookBytes("../../../etc/passwd")
-	if err == nil {
-		t.Fatal("expected error for path traversal, got nil")
-	}
-}
-
-func TestResourcePathTraversalAll(t *testing.T) {
-	traversalPath := "../../../etc/passwd"
-
-	_, err := WorkflowBytes(traversalPath)
-	if err == nil {
-		t.Fatal("WorkflowBytes should reject path traversal")
-	}
-
-	_, err = PromptBytes(traversalPath)
-	if err == nil {
-		t.Fatal("PromptBytes should reject path traversal")
-	}
-
-	_, err = TemplateBytes(traversalPath)
-	if err == nil {
-		t.Fatal("TemplateBytes should reject path traversal")
-	}
-}
-
 func TestEmbeddedValidatePromptAccessible(t *testing.T) {
 	data, err := PromptBytes("validate/audit.md")
 	if err != nil {
@@ -142,49 +82,5 @@ func TestEmbeddedGuideNotFound(t *testing.T) {
 	_, err := GuideBytes("nonexistent.md")
 	if err == nil {
 		t.Fatal("expected error for nonexistent guide, got nil")
-	}
-}
-
-func TestAdversaryPromptContainsArcTest(t *testing.T) {
-	data, err := PromptBytes("blocks/adversary.md")
-	if err != nil {
-		t.Fatalf("PromptBytes(blocks/adversary.md) error: %v", err)
-	}
-	content := string(data)
-	if !strings.Contains(content, "arc test") {
-		t.Fatal("adversary prompt does not contain 'arc test' instructions")
-	}
-}
-
-func TestEmbeddedWorkflowContent(t *testing.T) {
-	// Verify embedded workflows have expected content markers
-	// Pipeline-based workflows use 'pipeline:'; state-based use 'states:'
-	statesWorkflows := []string{"bugfix", "direct", "investigation", "refactor", "performance"}
-	for _, wt := range statesWorkflows {
-		data, err := WorkflowBytes(wt)
-		if err != nil {
-			t.Fatalf("WorkflowBytes(%s) error: %v", wt, err)
-		}
-		content := string(data)
-		if !strings.Contains(content, "name:") {
-			t.Fatalf("WorkflowBytes(%s) missing 'name:' field", wt)
-		}
-		if !strings.Contains(content, "states:") {
-			t.Fatalf("WorkflowBytes(%s) missing 'states:' field", wt)
-		}
-	}
-	pipelineWorkflows := []string{"feature", "audit"}
-	for _, wt := range pipelineWorkflows {
-		data, err := WorkflowBytes(wt)
-		if err != nil {
-			t.Fatalf("WorkflowBytes(%s) error: %v", wt, err)
-		}
-		content := string(data)
-		if !strings.Contains(content, "name:") {
-			t.Fatalf("WorkflowBytes(%s) missing 'name:' field", wt)
-		}
-		if !strings.Contains(content, "pipeline:") {
-			t.Fatalf("WorkflowBytes(%s) missing 'pipeline:' field", wt)
-		}
 	}
 }

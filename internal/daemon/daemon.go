@@ -134,12 +134,17 @@ func (d *Daemon) Shutdown() error {
 		}
 	}
 
-	// 2. Wait up to 10s for running phases
-	// The scheduler's context is cancelled by the caller; we just wait a bit
-	// for in-flight work to drain.
+	// 2. Remove socket and PID files immediately after closing the listener.
+	// Doing this before the drain wait ensures cleanup happens even if the
+	// process is killed mid-drain.
+	if d.cfg.SocketPath != "" {
+		os.Remove(d.cfg.SocketPath)
+	}
+	d.removePIDFile()
+
+	// 3. Wait up to 10s for running phases to drain.
 	done := make(chan struct{})
 	go func() {
-		// Persist final state via scheduler (which also waits for drain)
 		if d.sched != nil {
 			if err := d.sched.PersistState(); err != nil {
 				d.mu.Lock()
@@ -156,15 +161,7 @@ func (d *Daemon) Shutdown() error {
 		errs = append(errs, fmt.Errorf("timed out waiting for scheduler to persist"))
 	}
 
-	// 4. Remove socket file
-	if d.cfg.SocketPath != "" {
-		os.Remove(d.cfg.SocketPath)
-	}
-
-	// 5. Remove PID file
-	d.removePIDFile()
-
-	// 6. Release flock
+	// 4. Release flock
 	d.releaseLock()
 
 	return errors.Join(errs...)

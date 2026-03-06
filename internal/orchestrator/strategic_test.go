@@ -253,35 +253,6 @@ func TestRunStrategicIntervention_Integration(t *testing.T) {
 	}
 }
 
-func TestIsGatedPlan(t *testing.T) {
-	plansDir := t.TempDir()
-
-	// Non-gated plan (only plan.md, no spec.yaml)
-	legacyDir := filepath.Join(plansDir, "legacy-plan", "phases", "phase-a")
-	os.MkdirAll(legacyDir, 0o755)
-	os.WriteFile(filepath.Join(legacyDir, "plan.md"), []byte("# Plan"), 0o644)
-	// Need plan.json
-	writePlanJSON(t, filepath.Join(plansDir, "legacy-plan"), []string{"phase-a"})
-
-	if IsGatedPlan(plansDir, "legacy-plan") {
-		t.Error("legacy plan should not be detected as gated")
-	}
-
-	// Gated plan (has spec.yaml)
-	gatedDir := filepath.Join(plansDir, "gated-plan", "phases", "phase-a")
-	os.MkdirAll(gatedDir, 0o755)
-	os.WriteFile(filepath.Join(gatedDir, "spec.yaml"), []byte("name: phase-a\nspec: test"), 0o644)
-	writePlanJSON(t, filepath.Join(plansDir, "gated-plan"), []string{"phase-a"})
-
-	if !IsGatedPlan(plansDir, "gated-plan") {
-		t.Error("gated plan should be detected")
-	}
-
-	// Non-existent plan
-	if IsGatedPlan(plansDir, "nonexistent") {
-		t.Error("nonexistent plan should not be detected as gated")
-	}
-}
 
 func writePlanJSON(t *testing.T, planDir string, phases []string) {
 	t.Helper()

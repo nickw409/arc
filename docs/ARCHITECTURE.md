@@ -1,285 +1,308 @@
-# Orchestration System Architecture
+# Arc Architecture
 
 ## Overview
 
-The orchestration system is a general-purpose workflow executor that handles any type of software engineering work: features, bug fixes, investigations, refactors, and performance optimizations.
+Arc is a Go binary that orchestrates multi-phase software engineering tasks through AI agents. It breaks work into phases, drives each phase through a **session → gate → retry** loop, and supports multiple AI providers.
 
-**Core Principle:** Scripts define the game rules. Agents play the game.
+**Core principle:** Gates define the completion criteria. Agents do the work. The gate is the final arbiter.
 
-## Design Goals
-
-1. **Work-type agnostic** - Same system handles features, bug fixes, investigations, etc.
-2. **Portable** - Can be used in any project
-3. **Reliable** - Critical decisions enforced by scripts, not agent memory
-4. **Flexible** - Workflows are data, not code
-5. **Safe** - Multiple escape hatches when things go wrong
-
-## Work Types Supported
-
-| Type | Description | Key Difference |
-|------|-------------|----------------|
-| Feature | New capability | Implement with tests, then one-shot adversarial review |
-| Bug Fix | Correct existing behavior | Tests define correct behavior, current code fails them |
-| Investigation | Produce findings | No code changes, output is documentation |
-| Refactor | Change structure | Characterization tests pass before AND after |
-| Performance | Make faster | Benchmarks, not unit tests |
-| Adversarial | Robust implementation | Implement freely, adversary writes failing tests, fix until convergence |
-| Direct | Simple tasks | Single-phase execution, no review loop |
+There is **no state machine**. There are no workflow YAMLs, no verdict extraction, no state transitions. Each phase runs one or more agent sessions until its gate assertions pass (or attempts are exhausted).
 
 ## System Components
 
 ```
-$ARC_HOME/
-+-- workflows/           # Workflow definitions (YAML)
-+-- prompts/            # Prompt templates (Markdown)
-+-- templates/          # Plan templates per work type
-+-- adversaries/        # Adversarial review definitions
-+-- blocks/             # Reusable workflow blocks (YAML)
-+-- scripts/            # Execution scripts (Bash)
-+-- docs/               # This documentation
+cmd/arc/              Entry point (main.go)
+internal/
+  adapter/            Multi-provider AI adapter (claude, codex, generic)
+  agent/              Agent spawning (claude CLI subprocess)
+  arc/                Core types: PhaseSpec, PhaseState, GateResult, PlanMeta
+  cli/                Cobra command definitions (arc plan, arc run, arc manage, ...)
+  config/             .arc.yaml parsing
+  daemon/             Background orchestration daemon (persistent, multi-plan)
+  dev/                arc dev pipeline (discovery → architecture → plan generation)
+  gate/               Gate assertion evaluation (file_exists, grep, build_passes, ...)
+  gitops/             Git commit operations
+  guide/              Agent-facing reference guide (arc guide)
+  intelligence/       Project intelligence store (test cmds, flaky tests, costs)
+  logging/            Structured JSONL logger (PlanLogger, plan.jsonl)
+  mcp/                MCP server and tool handlers (arc chat / arc serve backend)
+  migrate/            State migration utilities
+  monitor/            Live TUI (bubbletea) for arc status --live
+  orchestrator/       Orchestration engine:
+    orchestrator.go   Launch() entry point, LaunchOptions, lock management
+    launch_gated.go   LaunchGated(): phase scheduling, worktrees, regression suite
+    gated.go          RunPhaseGated(): per-phase session→gate→retry loop
+    phase_types.go    RunPhaseOptions, commitPhase, discoverNewTestFiles
+    strategic.go      RunStrategicIntervention(): AI agent for stuck phases
+    adversary.go      Post-plan adversarial test session
+    classify.go       Error tier classification (Transient/Feedback/Strategic/GiveUp)
+    judge.go          AI dispute resolution for contested test failures
+    observe.go        Agent output streaming and PID tracking
+    report.go         COMPLETION_REPORT.md generation
+    commitment_audit  Post-completion commitment audit
+  plan/               Plan creation, status, manage mutations, archival, summaries
+  project/            Project detection & init (.arc.yaml, .plans/)
+  prompt/             Prompt rendering (Handlebars shim over Go templates)
+  resources/          Embedded static assets:
+    prompts/          Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/
+    templates/        Plan scaffolding templates (.md)
+    enforcement/      Hook scripts
+    guides/           Agent-facing reference docs
+    recipes/          Built-in recipe definitions (.yaml)
+  review/             Adversarial plan review (5 adversaries, auto-remediation)
+  selfupdate/         Self-update (GitHub releases, SHA256 verification)
+  state/              Phase state.json read/write/update
+  testcmd/            Test command resolution and execution
+  validate/           AI-powered test quality audit
+  worktree/           Git worktree isolation for parallel phase execution
+docs/                 Documentation
 ```
 
-## Plan / Phase / State Hierarchy
-
-Understanding the three-level hierarchy is critical:
+## Plan / Phase Hierarchy
 
 ```
 Plan: fix-wasm-rng
-+-- Phase: investigate-variance      <-- A portion of work
-|   +-- States: research -> draft -> review -> complete
-+-- Phase: port-pcg-algorithm        <-- Another portion
-|   +-- States: impl.act -> check.adversary -> complete
-+-- Phase: verify-cross-engine       <-- Final portion
-    +-- States: impl.act -> check.adversary -> complete
+├── Phase: investigate-variance    status: complete
+├── Phase: port-pcg-algorithm      status: in-progress  (attempt 2/4)
+└── Phase: verify-cross-engine     status: pending
 ```
 
-| Concept | What it is | Example |
+| Concept | What it is | On disk |
 |---------|------------|---------|
-| **Plan** | The overall work request | "Fix WASM RNG variance issue" |
-| **Phase** | A self-contained portion of the plan | "Port PCG algorithm to WASM" |
-| **State** | Current position in the workflow | `impl` (implementing) |
+| **Plan** | The overall work request | `.plans/active/{name}/` |
+| **Phase** | A self-contained unit of work | `.plans/active/{name}/phases/{phase}/` |
 
-### Key Points
+### Files in a phase directory
 
-1. **Each phase runs independently through the workflow**
-   - Phase A being in `impl` doesn't affect Phase B
-   - Each phase has its own `state.json`
+| File | Purpose |
+|------|---------|
+| `spec.yaml` | Phase specification: role, spec text, files, checkpoints, gate assertions |
+| `plan.md` | Human-written context and task description for the agent |
+| `state.json` | Runtime state: status, iteration count, test counts, usage, blocked reason |
+| `gate-status.json` | Last gate run result (assertions, which passed/failed) |
+| `last_agent_output.txt` | Captured stdout from the most recent agent session |
 
-2. **Phases can have dependencies**
-   - Phase B might depend on Phase A completing
-   - The orchestrator manages execution order
+### Phase status values
 
-3. **The workflow defines possible states**
-   - All phases of the same type use the same workflow
-   - A bugfix plan uses bugfix.yaml for all its phases
-
-### Phase Execution Order
-
-The orchestrator executes phases based on dependencies:
-
-```
-+-------------------------------------------------------------+
-| Phase Dependencies                                          |
-|                                                             |
-|   investigate-variance (no deps)                            |
-|          |                                                  |
-|          v                                                  |
-|   port-pcg-algorithm (depends on: investigate-variance)     |
-|          |                                                  |
-|          v                                                  |
-|   verify-cross-engine (depends on: port-pcg-algorithm)      |
-|                                                             |
-+-------------------------------------------------------------+
-```
-
-**Execution rules:**
-- Phases with no dependencies start immediately
-- Phases wait for all dependencies to reach `complete` state
-- Independent phases MAY run in parallel (V5+)
-- If a dependency is `blocked`, dependent phases are also blocked
-
-### Phase Dependency Specification
-
-Dependencies are declared in plan.md frontmatter:
-
-```yaml
----
-type: feature
-depends_on:
-  - phase: investigate-variance
-    required: true  # Must complete, not just exist
----
-```
-
-Or in the plan's manifest:
-
-```yaml
-# .plans/active/<plan>/manifest.yaml
-phases:
-  - name: investigate-variance
-    depends_on: []
-  - name: port-pcg-algorithm
-    depends_on: [investigate-variance]
-  - name: verify-cross-engine
-    depends_on: [port-pcg-algorithm]
-```
+| Status | Meaning |
+|--------|---------|
+| `pending` | Not yet started |
+| `in-progress` | Agent session running or between retries |
+| `complete` | Gate passed, committed |
+| `blocked` | Exhausted retries or human intervention required |
+| `deferred` | Intentionally skipped |
 
 ## Execution Model
 
+### 1. Plan creation (`arc plan` / `arc dev`)
+
+`plan.Create` always writes `spec.yaml` for every phase. The gate orchestrator requires `spec.yaml` — plans without it cannot run.
+
 ```
-Human Request
-     |
-     v
-+--------------+
-| Plan Agent   |------> Generates plan.md + workflow.yaml
-+--------------+
-     |
-     v
-+--------------+
-| Adversary    |------> Attacks plan until flawless
-| Committee    |<------  Plan Agent fixes issues
-+--------------+
-     |
-     v
-+--------------+
-| Orchestrator |------> Reads workflow, calls arc iterate
-+--------------+
-     |
-     v
-+--------------+
-| iterate.sh   |------> Validates, runs sub-agent, enforces constraints
-+--------------+
-     |
-     v
-+--------------+
-| Sub-Agent    |------> Does actual work within constraints
-+--------------+
+arc plan my-plan impl qa
+  → .plans/active/my-plan/plan.json
+  → .plans/active/my-plan/phases/impl/spec.yaml   (role: impl)
+  → .plans/active/my-plan/phases/impl/state.json
+  → .plans/active/my-plan/phases/impl/plan.md
+  → .plans/active/my-plan/phases/qa/spec.yaml     (role: impl)
+  → ...
 ```
 
-## Decision Tiers
+### 2. Phase scheduling (`LaunchGated` in `launch_gated.go`)
 
-| Tier | Decision Type | Who Decides | Enforcement |
-|------|--------------|-------------|-------------|
-| Critical | Commit, mark complete, modify tests | Script gate | Hard block |
-| Structural | State transitions, retry vs escalate | Workflow rules | Script enforces |
-| Tactical | Which file to edit, how to implement | Agent | No enforcement |
+The orchestrator reads `plan.json` to discover phase dependencies, then runs phases concurrently when their dependencies are satisfied:
 
-## Key Innovations
+```
+phases with no deps → start immediately (parallel)
+phases with deps    → wait for all deps to reach "complete"
+```
 
-### 1. Workflow Inheritance
-Plans can extend base workflows and customize for specific needs:
+If `StopOnFailure` is set (default), one blocked phase cancels all siblings.
+
+### 3. Per-phase execution (`RunPhaseGated` in `gated.go`)
+
+Each phase loops up to `MaxGatedAttempts` (4) times:
+
+```
+Attempt N
+  1. Build prompt
+     - Attempt 1: phase spec + plan.md + project context
+     - Attempt 2+: above + gate failure details + git diff
+  2. Spawn agent (adapter.Spawn)
+  3. Run gate (gate.Run: evaluate all assertions in spec.yaml)
+  4a. Gate passed → commit changes, mark phase complete, exit loop
+  4b. Gate failed → classify error tier, decide next step:
+        TierTransient  (rate limit, crash) → retry same attempt
+        TierFeedback   (gate failed, has context) → next attempt with feedback
+        TierStrategic  (no progress after N attempts) → call RunStrategicIntervention
+        TierGiveUp     (attempts exhausted) → mark blocked, stop
+```
+
+### 4. After all phases complete
+
+```
+LaunchGated post-processing:
+  1. Run regression suite (if configured in .arc.yaml)
+     → route failures back to responsible phases
+  2. Merge shared worktree back to main branch (if UseWorktree)
+  3. Run adversarial test session (if adversary adapter configured)
+  4. Generate COMPLETION_REPORT.md
+  5. Generate SUMMARY.md
+  6. Record intelligence (cost, complexity, failure patterns)
+```
+
+## Gate Assertions (`internal/gate/`)
+
+Gate assertions in `spec.yaml` define what "done" means for a phase:
+
 ```yaml
-extends: bugfix
-states:
-  - name: cross_verify
-    insert_after: fix
+gate:
+  assertions:
+    - type: file_exists
+      path: internal/auth/handler.go
+    - type: test_exists
+      name: TestAuthHandler
+    - type: build_passes
+      command: go build ./...
+    - type: grep
+      pattern: "func AuthHandler"
+    - type: no_untracked
+      pattern: "*.tmp"
+  verifier_agent: false   # set true to run AI verifier for review/investigate roles
 ```
 
-### 2. Adversarial Planning
-Multiple specialized adversaries attack plans:
-- Coverage adversary
-- Ambiguity adversary
-- Scope adversary
-- Consistency adversary
-- Executability adversary
+| Assertion type | What it checks |
+|----------------|----------------|
+| `file_exists` | Path exists relative to workdir |
+| `grep` | Regex pattern found in `.go` files |
+| `test_exists` | Function name found in `_test.go` files |
+| `build_passes` | Command exits with code 0 |
+| `no_untracked` | No matching untracked files in git |
 
-### 3. Composable Workflow Blocks
+Results are written to `gate-status.json` after each gate run.
 
-Workflows can be composed from reusable, parameterized blocks rather than written as monolithic YAML. A block defines a self-contained group of states with entry/exit points and substitutable parameters:
+## Phase Roles
 
-```yaml
-# blocks/adversary.yaml
-name: adversary
-params:
-  max_rounds: {default: 5}
-entry: adversary
-exits: [done]
-states:
-  - name: adversary
-    constraints:
-      max_iterations: ${max_rounds}
-    next: {bugs_found: adversary, no_bugs_found: $done}
+The `role` field in `spec.yaml` determines the agent prompt and gate behavior:
+
+| Role | Agent prompt | Completion verification |
+|------|-------------|------------------------|
+| `impl` (default) | `gate/impl.md` — write code, run gate | Gate assertions |
+| `review` | `gate/review.md` — analyze, produce findings | AI verifier agent |
+| `investigate` | `gate/investigate.md` — research, document | AI verifier agent |
+| `audit` | `gate/review.md` — security/quality audit | AI verifier agent |
+
+## Error Tier Classification (`internal/orchestrator/classify.go`)
+
+| Tier | Condition | Response |
+|------|-----------|----------|
+| `TierTransient` (1) | Rate limit, timeout, process crash with no output | Retry immediately |
+| `TierFeedback` (2) | Gate failed with actionable context | Retry with gate failure details injected |
+| `TierStrategic` (3) | Multiple retries, no progress | Invoke strategic intervention agent |
+| `TierGiveUp` (4) | Attempts exhausted | Mark phase blocked, stop |
+
+## Adapter System (`internal/adapter/`)
+
+Arc supports multiple AI providers through `arc.AgentAdapter`:
+
+```go
+type AgentAdapter interface {
+    Name() string
+    Spawn(ctx context.Context, prompt string, workdir string, config SessionConfig) (*AgentResult, error)
+    Preflight(ctx context.Context, workdir string) error
+}
 ```
 
-Workflows compose blocks into pipelines. The loader resolves blocks into a flat state machine (namespacing states as `block.state`) so the runtime doesn't change.
+Built-in adapters: `claude` (Claude Code CLI), `codex` (OpenAI Codex CLI), `generic` (any CLI tool).
 
-Built-in blocks: `impl`, `qa-loop`, `review`, `adversary`.
+Adapter selection: per-role in `.arc.yaml` (e.g. `agents.impl: claude`, `agents.adversary: claude`), or per-phase via `spec.yaml`.
 
-### 4. Git Worktree Isolation
+## Worktree Isolation (`internal/worktree/`)
 
-Agents run in isolated git worktrees (`internal/worktree/`) so developers keep their working directory clean. Each phase gets a branch like `arc/plan/phase` in a temp directory. On completion, branches merge back via `--no-ff`. On failure, branches are preserved for inspection.
+Agents run in isolated git worktrees so the developer's working directory stays clean:
 
-### 5. Automated Plan Generation (`arc dev`)
+- **Shared worktree** (default): one worktree per plan run, all phases share it
+- **Per-phase worktree**: each phase gets its own branch (`arc/{plan}/{phase}`)
 
-The `arc dev` command (`internal/dev/`) automates the full lifecycle:
+Worktrees live under `.arc/worktrees/` in the project root. On phase completion, changes are committed and merged back. On failure, the branch is preserved for inspection.
 
-1. **Discovery** — Read-only agent analyzes codebase and task description
-2. **Sizing** — Heuristic validates complexity classification (simple/medium/complex)
-3. **Architecture** — For complex tasks, 3 parallel architect agents propose designs; best is selected
-4. **Plan generation** — Creates plan directory, phases, `plan.md` files, and workflow YAML
-5. **Review** — Optional adversarial review with auto-remediation
-6. **Orchestration** — Launches the orchestrator to execute the plan
+## Prompt System (`internal/prompt/`)
 
-### 6. Plan Summaries
+Prompts are Markdown templates using a Handlebars-style syntax shim over Go `text/template`. Key template variables: `{{phase}}`, `{{plan}}`, `{{plan_md}}`, `{{iteration}}`, `{{state.tests_passing}}`, `{{params.key}}`.
 
-On completion, the orchestrator generates `SUMMARY.md` (`internal/plan/summary.go`) with phase details, test results, files changed (from git history), and cost tracking.
+Gate prompts (`gate/impl.md`, `gate/retry.md`, etc.) use raw Go template syntax with typed data structs (`ImplData`, `RetryData`), rendered via `prompt.RenderGatePrompt`.
 
-### 7. Context Injection
-Orchestrator can inject context to sub-agents via:
-- Template variables in prompts
-- orchestrator_notes.md file
-- Escalation context from state
+Dev pipeline prompts (`dev/discovery.md`, `dev/architect.md`, etc.) use the Handlebars shim via `prompt.Render`.
 
-### 8. Intervention System
-When orchestrator can't proceed:
-1. Proposes workflow changes (human approves)
-2. Requests human intervention
-3. Emergency override mode available
-
-## Sub-Agent Enforcement
-
-Sub-agents spawned by the orchestrator must be prevented from running test commands directly (they must use `$ARC_SCRIPTS_DIR/run-phase-tests.sh`). Three layers enforce this:
-
-### Layer 1: PATH Shims (Primary)
-
-`$ARC_HOME/bin/` contains wrapper scripts for test runners. `arc run-orchestrator` prepends this directory to PATH, so when a sub-agent runs the test command, our shim executes instead. The shim checks `ORCHESTRATOR_MODE=1` and returns exit 1 with a clear error message:
+## Automated Plan Generation (`arc dev`, `internal/dev/`)
 
 ```
-BLOCKED: Orchestrator sub-agents cannot run test commands directly.
-Use $ARC_SCRIPTS_DIR/run-phase-tests.sh instead.
+Task description
+  → RunDiscovery   — agent reads codebase, outputs JSON: complexity, phases, approach
+  → ValidateComplexity — heuristic overrides if agent under/over-estimated
+  → RunClarificationLoop — interactive Q&A (skipped with --yes)
+  → GeneratePlanName
+  → Branch by complexity:
+      simple   → GeneratePlan (direct: single-phase "execute" plan)
+      medium   → GeneratePlan (feature: impl phases with descriptions)
+      complex  → RunArchitects (3 parallel agents) → SelectProposal → GeneratePlan
+  → arc review (optional)
+  → orchestrator.Launch
+  → RunCodeReview  — post-execution review of git diff
 ```
 
-This gives the sub-agent an immediate, actionable error rather than a mysterious failure.
+## Daemon (`internal/daemon/`)
 
-### Layer 2: Tool Restrictions
+Optional persistent background process for running multiple plans concurrently:
 
-Review agents (qa-review, impl-review) are not given Bash access at all -- they can only Read, Glob, Grep, and Write. This eliminates the possibility of running any commands.
+- **Unix socket** at `~/.arc/daemon.sock` — JSON newline-delimited protocol
+- **Bounded worker pool** (default: 3 parallel phases), dependency-aware FIFO dispatch
+- **State persistence** — `~/.arc/daemon-state.json` for crash recovery
+- **File locking** — exclusive flock on `~/.arc/daemon.lock` prevents duplicates
+- **Auto-start** — `arc daemon submit` starts the daemon if not already running
 
-### Layer 3: Background Process Killer (Fallback)
+Contrast with `arc run`: the daemon handles multiple plans concurrently as a persistent service; `arc run` blocks the terminal for one plan.
 
-A background process in `arc run-orchestrator` kills any unauthorized test processes every 5 seconds. This catches edge cases where a sub-agent bypasses the shim (e.g., using an absolute path).
+## Intelligence Store (`internal/intelligence/`)
 
-### Why Not Hooks?
+Arc learns from runs and uses that knowledge to improve future runs:
 
-Claude Code hooks (`PreToolUse` in `.claude/settings.json`) work for the top-level agent but **not for sub-agents**. The `CLAUDE_TOOL_INPUT` environment variable is empty when hooks fire for sub-agent tool calls, so the hook cannot inspect the command being run. This was confirmed on Claude Code 2.1.32. The PATH shim approach was adopted because it works at the OS level regardless of Claude Code internals.
+- Test command discovery (what command to run tests)
+- Flaky test tracking (tests that fail intermittently)
+- File coupling (which files change together)
+- Cost tracking per plan/complexity
+- Failure pattern recording
 
-## Version Evolution
+## Dead Code in `internal/arc/`
 
-| Version | Features | Trigger to Upgrade |
-|---------|----------|-------------------|
-| V1 | Linear workflows, basic prompts | Starting point |
-| V2 | Conditional branches | Reviews need retry logic |
-| V3 | Parameters, templates | Copy-pasting prompts |
-| V4 | Hooks, escalation | Custom logic in iterate.sh |
-| V5 | Parallel states | Sequential too slow |
+The `internal/arc/` package contains several types that are no longer used after the state machine was removed. They compile but serve no purpose:
 
-All versions are backwards compatible - V1 workflows run on V5 engine.
+| File | Dead types |
+|------|-----------|
+| `workflow.go` | `Workflow`, `StateConfig`, `Transition`, `ParallelGroup`, `EscalationRule`, `HookConfig` |
+| `unmarshal.go` | `UnmarshalYAML` for `Transition` |
+| `result.go` | `IterationResult`, `ResultAction`, `ActionContinue`, `ActionRetry`, `ActionAbort` |
 
-## Related Documents
+Still-used types in `arc/` that look related but aren't dead:
+- `VerdictEntry`, `VerdictsHistory`, `ParseVerdict` — used by `internal/review/` (adversarial *plan* review, not phase execution)
+- `Verdict`, `VerdictUnknown` — same
+- `Usage`, `PhaseError`, `AgentAdapter`, `GateResult`, `PhaseSpec`, `PhaseState`, `PlanMeta` — all actively used
 
-- [WORKFLOW_SCHEMA.md](./WORKFLOW_SCHEMA.md) - Complete workflow file specification
-- [ADVERSARY_SYSTEM.md](./ADVERSARY_SYSTEM.md) - Adversarial planning design
-- [PLANNING_PROCESS.md](./PLANNING_PROCESS.md) - How plans are created
-- [INTERVENTION_SYSTEM.md](./INTERVENTION_SYSTEM.md) - Escape hatches and overrides
-- [PROMPT_TEMPLATES.md](./PROMPT_TEMPLATES.md) - Template variable system
-- [../ISSUES.md](../ISSUES.md) - Known issues and resolutions
+Fields in `PhaseState` that are dead (written but never read by the gate system):
+- `CurrentState`, `StateIterations` — state machine position tracking
+- `StuckIterations`, `HangCount`, `ExecutedEscalations`, `RollbackCount`, `GlobalIterations` — state machine retry logic
+- `VerdictsHistory`, `LastVerdict` — verdict-based state transitions
+- `ParallelExecution`, `InterventionRequest` — state machine escalation paths
+- `Chunks` — state machine chunking
+
+These fields are preserved in `state.json` for backwards compatibility but the gate system does not write or read them.
+
+## Key Invariants
+
+These invariants must hold across the entire codebase:
+
+1. **Every phase has `spec.yaml`** — `plan.Create` always writes it. There are no "legacy" plans without `spec.yaml`. The gate orchestrator requires it.
+2. **No state machines** — There are no workflow YAMLs, no verdict strings, no `## Verdict` extraction, no `internal/workflow/`, `internal/pipeline/`, `internal/block/`, `internal/runner/` packages. All execution goes through `RunPhaseGated`.
+3. **`Launch()` always calls `LaunchGated()`** — There is no other execution path. The `IsGatedPlan()` function does not exist.
+4. **Gate is the only completion criterion** — Phases complete when their gate passes, not when an agent says "done" or outputs a verdict token.
+5. **Prompts are in `gate/` or `dev/`** — There are no `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories. The prompt namespace is: `gate/`, `dev/`, `adversaries/`, `validate/`, `commitment-audit/`.

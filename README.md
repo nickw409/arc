@@ -100,6 +100,139 @@ arc validate clear-prompt       # Revert to built-in prompt
 arc monitor my-feature   # Live TUI for orchestration progress
 ```
 
+### Adversarial Audit
+
+```bash
+arc audit                                            # Audit uncommitted changes
+arc audit --branch feature/auth                      # Audit branch vs HEAD
+arc audit --diff origin/main...HEAD                  # Audit a diff range
+arc audit internal/api/auth.go                       # Audit specific files
+arc audit --diff origin/main...HEAD --format github  # GitHub Actions CI mode
+```
+
+### Task Automation
+
+```bash
+arc task "Add user authentication"              # Plan, review, and run automatically
+arc task --run=false "Add caching layer"        # Plan only, don't run
+arc task --skip-review "Fix the login bug"      # Skip adversarial review
+arc task --model opus "Refactor auth module"    # Model override
+```
+
+### Recipe Management
+
+```bash
+arc recipe list                                        # List available recipes
+arc recipe show <name>                                 # Show recipe details
+arc recipe instantiate <name> --param key=value        # Create plan from recipe
+arc recipe instantiate <name> --run                    # Create and run immediately
+```
+
+### Daemon Management
+
+```bash
+arc daemon start                  # Start the background daemon (auto-detaches)
+arc daemon start --foreground     # Run daemon in foreground
+arc daemon stop                   # Drain and stop daemon after current work
+arc daemon status                 # Show all running plans
+arc daemon status --plan my-plan  # Show specific plan
+arc daemon submit my-plan         # Submit plan to daemon for execution
+arc daemon cancel my-plan         # Cancel a plan running in daemon
+```
+
+### Cleanup and Cancellation
+
+```bash
+arc cleanup my-plan               # Remove failed worktrees and stale logs
+arc cleanup my-plan --ttl 24h    # Keep only logs newer than 24h
+arc cancel my-plan                # Stop a running orchestrator process
+```
+
+### Gate Checks
+
+```bash
+arc gate my-plan my-phase                    # Run gate assertions for a phase
+arc gate my-plan my-phase --workdir /path   # Use a specific working directory
+```
+
+### Plan Spec Management
+
+```bash
+arc plan add-phase my-plan my-phase --spec "implement X" --role impl
+arc plan update-phase my-plan my-phase --spec "updated objective"
+arc plan update-gate my-plan my-phase --add-assertion "file_exists:internal/x.go"
+arc plan update-deps my-plan my-phase --deps "phase1,phase2"
+arc plan remove-phase my-plan my-phase
+arc plan show-spec my-plan my-phase
+```
+
+## Phase Roles
+
+Phase roles control how a phase agent is prompted and how its output is verified.
+
+| Role | Description | Verification |
+|------|-------------|--------------|
+| `impl` (default) | Write code and implement features | Gate assertions (file_exists, grep, test_exists, build_passes, no_untracked) |
+| `review` | Analyze code and produce findings | AI verifier agent |
+| `investigate` | Research questions and document findings | AI verifier agent |
+| `audit` | Security or quality audit | AI verifier agent |
+
+Set the role in a phase spec:
+
+```bash
+arc plan add-phase my-plan my-phase --spec "..." --role review
+```
+
+Or in `spec.yaml`:
+
+```yaml
+role: review
+```
+
+## Gate System
+
+Gates enforce objective acceptance criteria after each agent session. Each phase can define assertions in its `spec.yaml`:
+
+```yaml
+gate:
+  assertions:
+    - type: file_exists
+      description: "Implementation file created"
+      file_exists: internal/pkg/feature.go
+    - type: grep
+      description: "Function exported"
+      grep: "func NewFeature"
+    - type: test_exists
+      description: "Test written"
+      test_exists: TestNewFeature
+    - type: build_passes
+      description: "Code compiles"
+      build_passes: "go build ./..."
+    - type: no_untracked
+      description: "No debug artifacts left"
+      no_untracked: "true"
+```
+
+Gate results are persisted to `gate-status.json` in the phase directory. Use `arc gate <plan> <phase>` to run checks manually.
+
+## Adapter System
+
+Arc supports multiple AI providers through the adapter interface. The active adapter is selected per-role in `.arc.yaml` or per-phase in `spec.yaml`.
+
+| Adapter | Provider | Preflight Check |
+|---------|----------|-----------------|
+| `claude` (default) | Claude Code CLI | Binary in PATH, auth check |
+| `codex` | OpenAI Codex CLI | Binary in PATH |
+| `generic` | Any CLI tool | Command in PATH |
+
+Configure in `.arc.yaml`:
+
+```yaml
+agents:
+  impl: claude
+  adversary: claude
+```
+
 ## How It Works
 
 ### Three-Level Hierarchy
@@ -173,9 +306,10 @@ Five workflow types, each with its own state machine and prompt set:
 | **refactor** | `characterize` | Characterization tests must pass before and after changes |
 | **performance** | `baseline` | Benchmarks drive optimization, not unit tests |
 | **adversarial** | `impl` | Implement freely, then adversary writes tests to find bugs |
+| **audit** | `adversary` | Adversarial security/quality audit with fix loop |
 | **direct** | `impl` | Single-phase execution for simple tasks (used by `arc dev`) |
 
-Workflows are defined as YAML state machines in `workflows/`. The **adversarial** and **direct** workflows are composed from reusable blocks (see Composable Blocks below).
+Workflows are defined as YAML state machines in `internal/resources/workflows/`. The **adversarial**, **audit**, and **direct** workflows are composed from reusable blocks (see Composable Blocks below).
 
 ## Workflow YAML
 
@@ -299,7 +433,7 @@ When a plan completes, a `SUMMARY.md` is generated in the plan directory contain
 
 ## Test Runners
 
-Arc uses a plugin system for test runners. Each runner lives in `runners/` and provides a uniform interface:
+Arc automatically resolves the test command for your project via `internal/testcmd`. Resolution priority: explicit override → `.arc.yaml` `test_command` → project detection → `go test ./...`.
 
 | Runner | Language | Command |
 |--------|----------|---------|
@@ -399,35 +533,34 @@ Each phase directory (`.plans/active/<plan>/phases/<phase>/`) contains:
 arc/
 ├── cmd/arc/          CLI entry point (main.go)
 ├── internal/         All Go packages
-│   ├── cli/          Cobra command definitions
-│   ├── selfupdate/   GitHub Releases-based self-update
-│   ├── orchestrator/ Top-level orchestrator loop
-│   ├── mcp/          MCP server and tool handlers (arc chat backend)
-│   ├── pipeline/     Phase iteration, escalation, hooks
+│   ├── adapter/      Multi-provider AI adapter system (claude, codex, generic)
 │   ├── agent/        Agent spawning
-│   ├── runner/       Subprocess runner (claude CLI)
-│   ├── review/       Adversarial plan review
-│   ├── workflow/     Workflow YAML loading & validation
-│   ├── state/        Phase state (state.json) management
+│   ├── arc/          Core types (verdict, result, errors, state, gate, spec)
+│   ├── block/        Composable workflow block loading & composition
+│   ├── cli/          Cobra command definitions
 │   ├── config/       .arc.yaml parsing
-│   ├── prompt/       Prompt rendering & extraction
+│   ├── daemon/       Background orchestration daemon
+│   ├── dev/          Arc dev pipeline (discovery → architecture → plan generation)
+│   ├── gitops/       Git commit operations
+│   ├── guide/        Agent-facing reference guide
+│   ├── logging/      Structured logger
+│   ├── mcp/          MCP server and tool handlers (arc chat backend)
+│   ├── migrate/      State migration
+│   ├── monitor/      Live TUI (bubbletea)
+│   ├── orchestrator/ Top-level orchestrator loop
+│   ├── pipeline/     Phase iteration, escalation, hooks
 │   ├── plan/         Plan creation, status & summary generation
 │   ├── project/      Project detection & init
-│   ├── gitops/       Git commit operations
-│   ├── monitor/      Live TUI (bubbletea)
-│   ├── resources/    Embedded templates, prompts & blocks
-│   ├── block/        Composable workflow block loading & composition
-│   ├── worktree/     Git worktree isolation for parallel execution
-│   ├── dev/          Arc dev pipeline (discovery → architecture → plan generation)
-│   ├── logging/      Structured logger
-│   ├── migrate/      State migration
-│   ├── guide/        Agent-facing reference guide
+│   ├── prompt/       Prompt rendering & extraction
+│   ├── resources/    Embedded workflows, prompts, templates & blocks
+│   ├── review/       Adversarial plan review
+│   ├── runner/       Subprocess runner (claude CLI)
+│   ├── selfupdate/   GitHub Releases-based self-update
+│   ├── state/        Phase state (state.json) management
+│   ├── testcmd/      Test command abstraction (resolution + execution)
 │   ├── validate/     AI-powered test quality audit
-│   └── arc/          Core types (verdict, result, errors, state)
-├── workflows/        YAML workflow definitions (feature, bugfix, etc.)
-├── prompts/          Prompt templates organized by work type
-├── runners/          Test runner plugins (cargo-nextest, vitest, pytest, go-test)
-├── templates/        Plan and command templates
+│   ├── workflow/     Workflow YAML loading & validation
+│   └── worktree/     Git worktree isolation for parallel execution
 ├── testdata/         Test fixtures
 └── docs/             Detailed documentation
 ```
@@ -462,6 +595,4 @@ your-project/
 | `docs/ADVERSARY_SYSTEM.md` | Plan review design |
 | `docs/PLANNING_PROCESS.md` | How to write phase plans |
 | `docs/INTERVENTION_SYSTEM.md` | Escape hatches and overrides |
-| `docs/V4_FEATURES.md` | Hooks, constraints, and escalation details |
 | `docs/PROMPT_TEMPLATES.md` | Template variable system |
-| `docs/IMPLEMENTATION_ROADMAP.md` | Version-by-version build history (V1 through V5) |

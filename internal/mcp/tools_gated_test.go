@@ -581,26 +581,6 @@ func TestHandlePlanShowSpec(t *testing.T) {
 	}
 }
 
-func TestHandlePlanShowSpecNoSpec(t *testing.T) {
-	h, dir := newTestHandler(t)
-	createPlanForGated(t, dir, "my-plan", []string{"impl"})
-	// impl phase was created without spec.yaml
-
-	result, err := callTool(context.Background(), h, h.handlePlanShowSpec, map[string]any{
-		"plan_name":  "my-plan",
-		"phase_name": "impl",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error when spec.yaml does not exist")
-	}
-	text := resultText(t, result)
-	if !strings.Contains(text, "spec.yaml") {
-		t.Fatalf("expected 'spec.yaml' in error, got: %s", text)
-	}
-}
 
 func TestHandlePlanShowSpecMissingArgs(t *testing.T) {
 	h, _ := newTestHandler(t)

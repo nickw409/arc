@@ -508,43 +508,6 @@ func TestHandleRunMissingPlan(t *testing.T) {
 	}
 }
 
-// --- Iterate tests ---
-
-func TestHandleIterateMissingPhase(t *testing.T) {
-	h, dir := newTestHandler(t)
-	plansDir := filepath.Join(dir, ".plans", "active")
-
-	plan.Create(plan.CreateOptions{
-		PlansDir:     plansDir,
-		Name:         "test-plan",
-		Phases:       []string{"impl"},
-		WorkflowType: "feature",
-	})
-
-	result, err := callTool(context.Background(), h, h.handleIterate, map[string]any{
-		"plan_name":  "test-plan",
-		"phase_name": "nonexistent",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for missing phase")
-	}
-}
-
-func TestHandleIterateMissingArgs(t *testing.T) {
-	h, _ := newTestHandler(t)
-
-	result, err := callTool(context.Background(), h, h.handleIterate, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for missing args")
-	}
-}
-
 // --- Stdout isolation test ---
 
 func TestHandlersWriteToBufferNotStdout(t *testing.T) {

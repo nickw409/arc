@@ -62,35 +62,36 @@ See the [README](README.md#directory-structure) for the full directory layout. K
 - `internal/orchestrator/` — Top-level orchestrator loop
 - `internal/pipeline/` — Phase iteration, escalation, hooks, constraints
 - `internal/selfupdate/` — GitHub Releases-based self-update
-- `workflows/` — YAML state machine definitions
-- `prompts/` — prompt templates by work type
-- `runners/` — test runner plugins (one per language/tool)
-
-## Adding a Test Runner
-
-Runner plugins live in `runners/<name>/` and must provide a `run.sh` with this interface:
-
-```bash
-./run.sh <test_target> [--filter PATTERN] [--timeout SECONDS] [--extra-args ARGS]
-```
-
-Output must be JSON:
-
-```json
-{
-  "total": 12,
-  "passed": 10,
-  "failed": 2,
-  "failed_names": ["test_foo", "test_bar"],
-  "raw_output": "..."
-}
-```
-
-Exit codes: 0 (all pass), 1 (failures), 2 (no tests found).
+- `internal/adapter/` — AI provider adapters (claude, codex, generic)
+- `internal/daemon/` — Background orchestration daemon
+- `internal/testcmd/` — Test command resolution and execution
+- `internal/resources/workflows/` — YAML state machine definitions
+- `internal/resources/prompts/` — Prompt templates by work type
 
 ## Adding a Workflow
 
-Workflow definitions live in `workflows/<name>.yaml`. See `docs/WORKFLOW_SCHEMA.md` for the full spec. Each workflow needs:
+Workflow definitions live in `internal/resources/workflows/<name>.yaml`. See `docs/WORKFLOW_SCHEMA.md` for the full spec. Each workflow needs:
 
-1. A YAML state machine in `workflows/`
-2. Prompt templates in `prompts/<name>/` (one per state)
+1. A YAML state machine in `internal/resources/workflows/`
+2. Prompt templates in `internal/resources/prompts/<name>/` (one per state)
+
+## Adding an Adapter
+
+Adapters implement the `arc.AgentAdapter` interface (`internal/arc/adapter.go`):
+
+```go
+type AgentAdapter interface {
+    Name() string
+    Spawn(ctx context.Context, prompt string, workdir string, config SessionConfig) (*AgentResult, error)
+    Preflight(ctx context.Context, workdir string) error
+}
+```
+
+See `internal/adapter/claude.go` or `internal/adapter/codex.go` for working examples. Register new adapters in `internal/adapter/registry.go`:
+
+```go
+var Registry = map[string]func() arc.AgentAdapter{
+    "claude":  func() arc.AgentAdapter { return &ClaudeAdapter{} },
+    "myagent": func() arc.AgentAdapter { return &MyAdapter{} },
+}
+```

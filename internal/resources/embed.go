@@ -8,9 +8,6 @@ import (
 	"strings"
 )
 
-//go:embed workflows/*.yaml
-var workflowsFS embed.FS
-
 //go:embed prompts/**/*.md
 var promptsFS embed.FS
 
@@ -23,18 +20,10 @@ var enforcementFS embed.FS
 //go:embed guides/*.md
 var guidesFS embed.FS
 
-//go:embed blocks/*.yaml
-var blocksFS embed.FS
-
 //go:embed recipes/*.yaml
 var recipesFS embed.FS
 
-// WorkflowBytes returns the raw YAML for a workflow type (e.g., "feature").
-func WorkflowBytes(workflowType string) ([]byte, error) {
-	return workflowsFS.ReadFile(filepath.Join("workflows", workflowType+".yaml"))
-}
-
-// PromptBytes returns the raw markdown for a prompt path (e.g., "feature/qa.md").
+// PromptBytes returns the raw markdown for a prompt path (e.g., "gate/impl.md").
 func PromptBytes(promptPath string) ([]byte, error) {
 	return promptsFS.ReadFile(filepath.Join("prompts", promptPath))
 }
@@ -49,22 +38,7 @@ func HookBytes(name string) ([]byte, error) {
 	return enforcementFS.ReadFile(filepath.Join("enforcement", "hooks", name))
 }
 
-// ListWorkflows returns all available workflow type names (without .yaml extension).
-func ListWorkflows() []string {
-	entries, err := fs.ReadDir(workflowsFS, "workflows")
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
-			names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
-		}
-	}
-	return names
-}
-
-// ListPrompts returns all prompt file paths relative to "prompts/" (e.g., "feature/qa.md").
+// ListPrompts returns all prompt file paths relative to "prompts/" (e.g., "gate/impl.md").
 func ListPrompts() ([]string, error) {
 	var paths []string
 	err := fs.WalkDir(promptsFS, "prompts", func(path string, d fs.DirEntry, walkErr error) error {
@@ -85,26 +59,6 @@ func ListPrompts() ([]string, error) {
 // GuideBytes returns the raw markdown for a guide file (e.g., "guide.md").
 func GuideBytes(name string) ([]byte, error) {
 	return guidesFS.ReadFile(filepath.Join("guides", name))
-}
-
-// BlockBytes returns the raw YAML for a block definition (e.g., "adversary").
-func BlockBytes(name string) ([]byte, error) {
-	return blocksFS.ReadFile(filepath.Join("blocks", name+".yaml"))
-}
-
-// ListBlocks returns all available block names (without .yaml extension).
-func ListBlocks() []string {
-	entries, err := fs.ReadDir(blocksFS, "blocks")
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
-			names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
-		}
-	}
-	return names
 }
 
 // RecipeBytes returns the raw YAML for a built-in recipe (e.g., "add-endpoint").

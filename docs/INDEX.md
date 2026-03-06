@@ -1,138 +1,74 @@
-# Orchestration System Documentation
+# Arc Documentation
 
 ## Quick Start
 
-1. Read [ARCHITECTURE.md](./ARCHITECTURE.md) for system overview
-2. Read [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md) for build plan
-3. Start with V1 implementation
+1. Read [ARCHITECTURE.md](./ARCHITECTURE.md) for system overview and key invariants
+2. Read [PLANNING_PROCESS.md](./PLANNING_PROCESS.md) for how to create plans
+3. Run `arc init` in your project and `arc plan` to create your first plan
 
 ## Document Index
 
-### Core Architecture
-
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System overview, design goals, components, composable blocks, worktrees, arc dev pipeline |
-| [WORKFLOW_SCHEMA.md](./WORKFLOW_SCHEMA.md) | Complete workflow YAML specification, block composition, per-state agent config |
-| [STATE_SCHEMA.md](./STATE_SCHEMA.md) | Phase state.json specification |
-| [PROMPT_TEMPLATES.md](./PROMPT_TEMPLATES.md) | Template variable system |
-
-### Processes
-
-| Document | Description |
-|----------|-------------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System overview, components, gate-based execution model, adapter system, invariants |
+| [STATE_SCHEMA.md](./STATE_SCHEMA.md) | Phase state.json field reference |
 | [PLANNING_PROCESS.md](./PLANNING_PROCESS.md) | How plans are created and validated |
-| [ADVERSARY_SYSTEM.md](./ADVERSARY_SYSTEM.md) | Adversarial plan review with confidence scoring |
-| [INTERVENTION_SYSTEM.md](./INTERVENTION_SYSTEM.md) | Escape hatches and overrides |
-
-### Implementation
-
-| Document | Description |
-|----------|-------------|
-| [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md) | Version-by-version build plan |
 
 ## Key Concepts
 
-### Work Types
+### What Arc Does
 
-The system supports 7 work types, each with its own workflow and plan template:
+Arc breaks a software engineering task into **phases**, then drives each phase through a **session → gate → retry** loop until the gate passes (or attempts are exhausted). There is no state machine — completion is defined by gate assertions in `spec.yaml`, not by agent verdicts.
 
-- **Feature** - New capability (TDD flow)
-- **Bug Fix** - Correct existing behavior
-- **Investigation** - Research, produce findings
-- **Refactor** - Change structure, preserve behavior
-- **Performance** - Optimize speed/memory
-- **Adversarial** - Implement freely, adversary writes failing tests, fix until convergence
-- **Direct** - Single-phase execution for simple tasks
+### Phase Roles
 
-### Decision Tiers
+| Role | Agent prompt | Completion check |
+|------|-------------|-----------------|
+| `impl` | `gate/impl.md` — write code | Gate assertions |
+| `review` | `gate/review.md` — produce findings | AI verifier |
+| `investigate` | `gate/investigate.md` — research | AI verifier |
+| `audit` | `gate/review.md` — security/quality | AI verifier |
 
-| Tier | Who Decides | Enforcement |
-|------|-------------|-------------|
-| Critical | Script gate | Hard block |
-| Structural | Workflow rules | Script enforces |
-| Tactical | Agent | No enforcement |
-
-### Version Evolution
-
-| Version | Key Features |
-|---------|--------------|
-| V1 | Linear workflows, basic prompts |
-| V2 | Conditional branches |
-| V3 | Parameters, templates |
-| V4 | Hooks, escalation |
-| V5 | Parallel states |
-
-## Directory Structure
+### Directory Structure
 
 ```
-$ARC_HOME/
-+-- docs/               # This documentation
-+-- workflows/          # Base workflow definitions
-+-- blocks/             # Reusable workflow blocks
-+-- prompts/            # Prompt templates
-|   +-- feature/
-|   +-- bugfix/
-|   +-- investigation/
-|   +-- refactor/
-|   +-- performance/
-|   +-- adversarial/    # Adversarial workflow prompts
-|   +-- common/
-|   +-- adversaries/    # Adversarial review prompts
-+-- templates/          # Plan templates per work type
-+-- adversaries/        # Adversary definitions
-+-- scripts/            # Execution scripts
+arc/
+├── cmd/arc/          CLI entry point (main.go)
+├── internal/
+│   ├── adapter/      Multi-provider AI adapter (claude, codex, generic)
+│   ├── agent/        Agent spawning
+│   ├── arc/          Core types (PhaseSpec, PhaseState, GateResult, PlanMeta)
+│   ├── cli/          Cobra commands
+│   ├── config/       .arc.yaml parsing
+│   ├── daemon/       Background orchestration daemon
+│   ├── dev/          arc dev pipeline (discovery → plan generation)
+│   ├── gate/         Gate assertion evaluation
+│   ├── gitops/       Git commit operations
+│   ├── guide/        Agent-facing reference guide
+│   ├── intelligence/ Project intelligence store
+│   ├── logging/      Structured JSONL logger
+│   ├── mcp/          MCP server (arc chat / arc serve)
+│   ├── migrate/      State migration
+│   ├── monitor/      Live TUI
+│   ├── orchestrator/ Execution engine (LaunchGated, RunPhaseGated)
+│   ├── plan/         Plan/phase lifecycle management
+│   ├── project/      Project detection & init
+│   ├── prompt/       Prompt rendering
+│   ├── resources/    Embedded prompts, templates, guides, recipes
+│   ├── review/       Adversarial plan review
+│   ├── selfupdate/   Self-update mechanism
+│   ├── state/        Phase state.json management
+│   ├── testcmd/      Test command resolution and execution
+│   ├── validate/     AI-powered test quality audit
+│   └── worktree/     Git worktree isolation
+└── docs/             This documentation
 ```
 
-## Getting Started with Implementation
+## What Is NOT in Arc
 
-### V1 Checklist
-
-1. [ ] Create workflow files in `workflows/`
-2. [ ] Extract prompts from iterate.sh to `prompts/`
-3. [ ] Write `validate-workflow.sh`
-4. [ ] Refactor `iterate.sh` to read workflows
-5. [ ] Update `init-plan.sh` for --type flag
-6. [ ] Test backwards compatibility
-
-### First Workflow to Implement
-
-Start with `feature.yaml` since it's closest to the current system:
-
-```yaml
-name: feature
-version: 1
-
-states:
-  - name: qa
-    prompt: prompts/feature/qa.md
-    next: qa_review
-
-  - name: qa_review
-    prompt: prompts/feature/qa-review.md
-    next: impl
-
-  - name: impl
-    prompt: prompts/feature/impl.md
-    next: impl_review
-
-  - name: impl_review
-    prompt: prompts/feature/impl-review.md
-    next: complete
-
-  - name: fix
-    prompt: prompts/feature/fix.md
-    next: impl
-
-entry_state: qa
-terminal_states:
-  - complete
-```
-
-## Questions?
-
-If something is unclear or missing from the documentation:
-
-1. Check the related docs in this index
-2. Look at the implementation roadmap for context
-3. Ask for clarification before implementing
+Arc does **not** have:
+- Workflow YAML files or state machine definitions
+- Verdict extraction from agent output
+- `internal/pipeline/`, `internal/workflow/`, `internal/block/`, `internal/runner/` packages
+- `arc iterate` command
+- `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories

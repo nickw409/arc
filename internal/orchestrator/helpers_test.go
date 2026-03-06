@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"testing"
-
-	"github.com/nwiley/arc/internal/arc"
 )
 
 func TestStringOrDefaultWithValue(t *testing.T) {
@@ -29,55 +27,6 @@ func TestStringOrDefaultEmptyString(t *testing.T) {
 	}
 }
 
-func TestIsComingFromQAReviewTrue(t *testing.T) {
-	ps := &arc.PhaseState{
-		VerdictsHistory: []arc.VerdictEntry{
-			{State: "impl", Verdict: "approved"},
-			{State: "qa_review", Verdict: "approved"},
-		},
-	}
-	if !isComingFromQAReview(ps) {
-		t.Fatal("expected isComingFromQAReview to return true for last verdict qa_review/approved")
-	}
-}
-
-func TestIsComingFromQAReviewFalseWrongState(t *testing.T) {
-	ps := &arc.PhaseState{
-		VerdictsHistory: []arc.VerdictEntry{
-			{State: "impl_review", Verdict: "approved"},
-		},
-	}
-	if isComingFromQAReview(ps) {
-		t.Fatal("expected isComingFromQAReview to return false for impl_review state")
-	}
-}
-
-func TestIsComingFromQAReviewFalseWrongVerdict(t *testing.T) {
-	ps := &arc.PhaseState{
-		VerdictsHistory: []arc.VerdictEntry{
-			{State: "qa_review", Verdict: "concerns"},
-		},
-	}
-	if isComingFromQAReview(ps) {
-		t.Fatal("expected isComingFromQAReview to return false for concerns verdict")
-	}
-}
-
-func TestIsComingFromQAReviewEmptyHistory(t *testing.T) {
-	ps := &arc.PhaseState{
-		VerdictsHistory: []arc.VerdictEntry{},
-	}
-	if isComingFromQAReview(ps) {
-		t.Fatal("expected isComingFromQAReview to return false for empty history")
-	}
-}
-
-func TestIsComingFromQAReviewNilHistory(t *testing.T) {
-	ps := &arc.PhaseState{}
-	if isComingFromQAReview(ps) {
-		t.Fatal("expected isComingFromQAReview to return false for nil history")
-	}
-}
 
 func TestTruncateShortString(t *testing.T) {
 	got := truncate("hello", 10)

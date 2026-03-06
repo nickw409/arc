@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
-	"github.com/nwiley/arc/internal/resources"
 )
 
 func TestCreatePlanStructure(t *testing.T) {
@@ -75,50 +74,6 @@ func TestCreatePlanDependencies(t *testing.T) {
 	// No auto-deps — phases are parallel by default
 	if len(meta.Dependencies) != 0 {
 		t.Fatalf("Dependencies = %v, want empty (no auto-chaining)", meta.Dependencies)
-	}
-}
-
-func TestCreatePlanCopiesWorkflow(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"fix"},
-		WorkflowType: "bugfix",
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-
-	// For non-feature workflows, workflow.yaml should be copied to plan dir
-	workflowPath := filepath.Join(dir, "my-plan", "workflow.yaml")
-	data, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist for bugfix type: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("workflow.yaml should have content")
-	}
-}
-
-func TestCreatePlanNoWorkflowCopyForFeature(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"impl"},
-		WorkflowType: "feature",
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-
-	// Feature is default, no workflow.yaml copied
-	workflowPath := filepath.Join(dir, "my-plan", "workflow.yaml")
-	if _, err := os.Stat(workflowPath); !os.IsNotExist(err) {
-		t.Fatal("workflow.yaml should NOT exist for feature type")
 	}
 }
 
@@ -310,20 +265,6 @@ func TestCreatePlanVeryLongName(t *testing.T) {
 	}
 }
 
-func TestCreatePlanInvalidWorkflowType(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"impl"},
-		WorkflowType: "nonexistent",
-	})
-	if err == nil {
-		t.Fatal("expected error for invalid workflow type, got nil")
-	}
-}
-
 func TestCreatePlanEmptyWorkflowType(t *testing.T) {
 	dir := t.TempDir()
 
@@ -340,12 +281,6 @@ func TestCreatePlanEmptyWorkflowType(t *testing.T) {
 	// Empty workflow type should default to "feature"
 	if meta.WorkflowType != "feature" {
 		t.Fatalf("WorkflowType = %q, want %q (default)", meta.WorkflowType, "feature")
-	}
-
-	// No workflow.yaml should be copied (feature is default)
-	workflowPath := filepath.Join(dir, "my-plan", "workflow.yaml")
-	if _, err := os.Stat(workflowPath); !os.IsNotExist(err) {
-		t.Fatal("workflow.yaml should NOT exist for empty/feature type")
 	}
 }
 
@@ -378,16 +313,6 @@ func TestCreatePlanInvestigationType(t *testing.T) {
 
 	if meta.WorkflowType != "investigation" {
 		t.Fatalf("WorkflowType = %q, want %q", meta.WorkflowType, "investigation")
-	}
-
-	// Workflow.yaml should exist for non-feature types
-	workflowPath := filepath.Join(dir, "my-investigation", "workflow.yaml")
-	data, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist for investigation type: %v", err)
-	}
-	if !strings.Contains(string(data), "investigation") {
-		t.Fatal("workflow.yaml should contain investigation workflow content")
 	}
 
 	// State.json for "analyze" phase should have investigation workflow type
@@ -434,7 +359,7 @@ func TestCreatePlanStateJsonNonnullSlices(t *testing.T) {
 	}
 }
 
-// --- PlanContent and CustomWorkflow tests ---
+// --- PlanContent tests ---
 
 func TestCreateOptions_PlanContent(t *testing.T) {
 	dir := t.TempDir()
@@ -458,81 +383,6 @@ func TestCreateOptions_PlanContent(t *testing.T) {
 	if string(planMD) != customContent {
 		t.Errorf("plan.md = %q, want %q", string(planMD), customContent)
 	}
-}
-
-func TestCreateOptions_CustomWorkflow(t *testing.T) {
-	dir := t.TempDir()
-
-	workflowYAML := []byte(`name: custom
-version: 1
-description: Custom workflow
-
-states:
-  - name: impl
-    description: Implement
-    prompt: prompts/feature/impl.md
-    next: impl_review
-
-  - name: impl_review
-    description: Review impl
-    prompt: prompts/feature/impl-review.md
-    verdicts:
-      - approved
-      - concerns
-    next:
-      approved: complete
-      concerns: impl
-
-  - name: complete
-    description: Task completed
-    prompt: prompts/common/complete.md
-
-  - name: blocked
-    description: Task blocked
-    prompt: prompts/common/blocked.md
-
-entry_state: impl
-terminal_states: [complete, blocked]
-`)
-
-	// Note: "custom" is not a built-in workflow type, so we must use a
-	// valid workflow type for the validation check. The CustomWorkflow
-	// content overrides whatever built-in workflow would have been copied.
-	// We use "direct" here since it's a valid type.
-	meta, err := Create(CreateOptions{
-		PlansDir:       dir,
-		Name:           "cw-test",
-		Phases:         []string{"impl"},
-		WorkflowType:   "direct",
-		CustomWorkflow: workflowYAML,
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-
-	// workflow.yaml should be written with custom content
-	workflowPath := filepath.Join(dir, "cw-test", "workflow.yaml")
-	data, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist: %v", err)
-	}
-	if !bytes.Equal(data, workflowYAML) {
-		t.Errorf("workflow.yaml content mismatch")
-	}
-
-	// state.json should have the WorkflowType we set
-	stateData, err := os.ReadFile(filepath.Join(dir, "cw-test", "phases", "impl", "state.json"))
-	if err != nil {
-		t.Fatalf("ReadFile state.json error: %v", err)
-	}
-	var state arc.PhaseState
-	if err := json.Unmarshal(stateData, &state); err != nil {
-		t.Fatalf("Unmarshal state.json error: %v", err)
-	}
-	if state.WorkflowType != "direct" {
-		t.Errorf("state.WorkflowType = %q, want %q", state.WorkflowType, "direct")
-	}
-	_ = meta
 }
 
 func TestCreateOptions_PlanContentPartial(t *testing.T) {
@@ -583,34 +433,6 @@ func TestCreateOptions_PlanContentPartial(t *testing.T) {
 	// Should have default template content
 	if !strings.Contains(string(mdC), "Phase:") {
 		t.Errorf("phase-c plan.md should contain default template content")
-	}
-}
-
-func TestCreateOptions_CustomWorkflowInvalidYAML(t *testing.T) {
-	dir := t.TempDir()
-
-	// Invalid YAML — plan.Create should write it without validation
-	invalidYAML := []byte("invalid: yaml: syntax:")
-
-	_, err := Create(CreateOptions{
-		PlansDir:       dir,
-		Name:           "invalid-wf",
-		Phases:         []string{"impl"},
-		WorkflowType:   "feature",
-		CustomWorkflow: invalidYAML,
-	})
-	// Should succeed — validation happens later during workflow loading
-	if err != nil {
-		t.Fatalf("Create should not fail for invalid custom workflow YAML: %v", err)
-	}
-
-	// Verify the file was written as-is
-	data, err := os.ReadFile(filepath.Join(dir, "invalid-wf", "workflow.yaml"))
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist: %v", err)
-	}
-	if !bytes.Equal(data, invalidYAML) {
-		t.Errorf("workflow.yaml content mismatch")
 	}
 }
 
@@ -672,185 +494,5 @@ func TestCreateOptions_PlanContentForNonexistentPhase(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dir, "nonexist-phase", "phases", "cc"))
 	if err == nil {
 		t.Error("phase directory 'cc' should not exist")
-	}
-}
-
-func TestCreatePlanCustomWorkflowType(t *testing.T) {
-	// Create a custom workflow YAML in a temp project dir
-	projDir := t.TempDir()
-	wfDir := filepath.Join(projDir, ".arc", "workflows")
-	if err := os.MkdirAll(wfDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	wfYAML := `name: my-wf
-version: 1
-description: Custom workflow
-entry_state: impl
-terminal_states: [complete, blocked]
-states:
-  - name: impl
-    description: Implement
-    prompt: prompts/feature/impl.md
-    next: complete
-  - name: complete
-    description: Done
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Blocked
-    prompt: prompts/common/blocked.md
-`
-	if err := os.WriteFile(filepath.Join(wfDir, "my-wf.yaml"), []byte(wfYAML), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	plansDir := t.TempDir()
-	resolver := resources.NewResolver(projDir, "")
-
-	meta, err := Create(CreateOptions{
-		PlansDir:     plansDir,
-		Name:         "my-plan",
-		Phases:       []string{"impl"},
-		WorkflowType: "my-wf",
-		Resolver:     resolver,
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-	if meta == nil {
-		t.Fatal("expected non-nil PlanMeta")
-	}
-	if meta.WorkflowType != "my-wf" {
-		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "my-wf")
-	}
-}
-
-func TestCreatePlanNilResolverUsesEmbedded(t *testing.T) {
-	dir := t.TempDir()
-
-	meta, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"fix"},
-		WorkflowType: "bugfix",
-		Resolver:     nil, // explicitly nil — should use embedded
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-	if meta == nil {
-		t.Fatal("expected non-nil PlanMeta")
-	}
-	if meta.WorkflowType != "bugfix" {
-		t.Errorf("WorkflowType = %q, want bugfix", meta.WorkflowType)
-	}
-}
-
-func TestCreatePlanCustomWorkflowTypeSkipsValidation(t *testing.T) {
-	dir := t.TempDir()
-
-	workflowYAML := []byte(`name: inline
-version: 1
-description: Inline workflow
-entry_state: impl
-terminal_states: [complete, blocked]
-states:
-  - name: impl
-    description: Implement
-    prompt: prompts/feature/impl.md
-    next: complete
-  - name: complete
-    description: Done
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Blocked
-    prompt: prompts/common/blocked.md
-`)
-
-	meta, err := Create(CreateOptions{
-		PlansDir:       dir,
-		Name:           "custom-plan",
-		Phases:         []string{"impl"},
-		WorkflowType:   "custom",
-		CustomWorkflow: workflowYAML,
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-	if meta.WorkflowType != "custom" {
-		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "custom")
-	}
-
-	// workflow.yaml should be written
-	data, err := os.ReadFile(filepath.Join(dir, "custom-plan", "workflow.yaml"))
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist: %v", err)
-	}
-	if !bytes.Equal(data, workflowYAML) {
-		t.Error("workflow.yaml content mismatch")
-	}
-
-	// state.json should have "custom" workflow type
-	stateData, err := os.ReadFile(filepath.Join(dir, "custom-plan", "phases", "impl", "state.json"))
-	if err != nil {
-		t.Fatalf("ReadFile state.json: %v", err)
-	}
-	var state arc.PhaseState
-	if err := json.Unmarshal(stateData, &state); err != nil {
-		t.Fatalf("Unmarshal state.json: %v", err)
-	}
-	if state.WorkflowType != "custom" {
-		t.Errorf("state.WorkflowType = %q, want %q", state.WorkflowType, "custom")
-	}
-}
-
-func TestCreatePlanCustomWorkflowDefaultsType(t *testing.T) {
-	dir := t.TempDir()
-
-	workflowYAML := []byte(`name: inline
-version: 1
-description: Inline workflow
-entry_state: impl
-terminal_states: [complete, blocked]
-states:
-  - name: impl
-    description: Implement
-    prompt: prompts/feature/impl.md
-    next: complete
-  - name: complete
-    description: Done
-    prompt: prompts/common/complete.md
-  - name: blocked
-    description: Blocked
-    prompt: prompts/common/blocked.md
-`)
-
-	// WorkflowType left empty — should default to "custom" when CustomWorkflow is provided
-	meta, err := Create(CreateOptions{
-		PlansDir:       dir,
-		Name:           "auto-custom",
-		Phases:         []string{"impl"},
-		CustomWorkflow: workflowYAML,
-	})
-	if err != nil {
-		t.Fatalf("Create error: %v", err)
-	}
-	if meta.WorkflowType != "custom" {
-		t.Errorf("WorkflowType = %q, want %q", meta.WorkflowType, "custom")
-	}
-}
-
-func TestCreatePlanUnknownWorkflowTypeError(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := Create(CreateOptions{
-		PlansDir:     dir,
-		Name:         "my-plan",
-		Phases:       []string{"impl"},
-		WorkflowType: "nonexistent-xyz",
-		Resolver:     nil,
-	})
-	if err == nil {
-		t.Fatal("expected error for unknown workflow type, got nil")
 	}
 }

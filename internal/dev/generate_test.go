@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
-	"github.com/nwiley/arc/internal/workflow"
 )
 
 // --- GenerateSimplePlanMD tests ---
@@ -125,206 +124,6 @@ func TestGeneratePhasePlanMD_EmptyPhaseDescription(t *testing.T) {
 		t.Errorf("expected phase name 'impl' in output, got:\n%s", result)
 	}
 }
-
-// --- BuildCustomWorkflow tests ---
-
-func TestBuildCustomWorkflow_ThreePhases(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "a", Description: "phase a"},
-		{Name: "b", Description: "phase b"},
-		{Name: "c", Description: "phase c"},
-	}
-
-	yamlBytes, err := BuildCustomWorkflow("custom", phases)
-	if err != nil {
-		t.Fatalf("BuildCustomWorkflow error: %v", err)
-	}
-
-	// Must parse without syntax errors
-	w, err := workflow.LoadBytes(yamlBytes)
-	if err != nil {
-		t.Fatalf("generated YAML failed to load: %v\n\nYAML:\n%s", err, string(yamlBytes))
-	}
-
-	// Entry state is "a"
-	if w.EntryState != "a" {
-		t.Errorf("EntryState = %q, want %q", w.EntryState, "a")
-	}
-
-	// Terminal states are [complete, blocked]
-	terminalSet := make(map[string]bool)
-	for _, ts := range w.TerminalStates {
-		terminalSet[ts] = true
-	}
-	if !terminalSet["complete"] || !terminalSet["blocked"] {
-		t.Errorf("TerminalStates = %v, want [complete, blocked]", w.TerminalStates)
-	}
-
-	// 8 total states: a, a_review, b, b_review, c, c_review, complete, blocked
-	if len(w.States) != 8 {
-		t.Errorf("States count = %d, want 8", len(w.States))
-	}
-
-	// Build state lookup
-	stateMap := make(map[string]arc.StateConfig)
-	for _, s := range w.States {
-		stateMap[s.Name] = s
-	}
-
-	expectedStates := []string{"a", "a_review", "b", "b_review", "c", "c_review", "complete", "blocked"}
-	for _, name := range expectedStates {
-		if _, ok := stateMap[name]; !ok {
-			t.Errorf("missing expected state %q", name)
-		}
-	}
-
-	// a_review approved → b
-	aReview := stateMap["a_review"]
-	if aReview.Transition.Branches[arc.Verdict("approved")] != "b" {
-		t.Errorf("a_review approved → %q, want %q", aReview.Transition.Branches[arc.Verdict("approved")], "b")
-	}
-
-	// c_review approved → complete
-	cReview := stateMap["c_review"]
-	if cReview.Transition.Branches[arc.Verdict("approved")] != "complete" {
-		t.Errorf("c_review approved → %q, want %q", cReview.Transition.Branches[arc.Verdict("approved")], "complete")
-	}
-
-	// b_review concerns → b
-	bReview := stateMap["b_review"]
-	if bReview.Transition.Branches[arc.Verdict("concerns")] != "b" {
-		t.Errorf("b_review concerns → %q, want %q", bReview.Transition.Branches[arc.Verdict("concerns")], "b")
-	}
-}
-
-func TestBuildCustomWorkflow_SinglePhase(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "impl", Description: "implement"},
-	}
-
-	yamlBytes, err := BuildCustomWorkflow("custom", phases)
-	if err != nil {
-		t.Fatalf("BuildCustomWorkflow error: %v", err)
-	}
-
-	w, err := workflow.LoadBytes(yamlBytes)
-	if err != nil {
-		t.Fatalf("generated YAML failed to load: %v\n\nYAML:\n%s", err, string(yamlBytes))
-	}
-
-	// States: impl, impl_review, complete, blocked (4 total)
-	if len(w.States) != 4 {
-		t.Errorf("States count = %d, want 4", len(w.States))
-	}
-
-	stateMap := make(map[string]arc.StateConfig)
-	for _, s := range w.States {
-		stateMap[s.Name] = s
-	}
-
-	// impl_review approved → complete
-	implReview := stateMap["impl_review"]
-	if implReview.Transition.Branches[arc.Verdict("approved")] != "complete" {
-		t.Errorf("impl_review approved → %q, want %q", implReview.Transition.Branches[arc.Verdict("approved")], "complete")
-	}
-}
-
-func TestBuildCustomWorkflow_EmptyPhases(t *testing.T) {
-	_, err := BuildCustomWorkflow("custom", []PhaseSpec{})
-	if err == nil {
-		t.Fatal("expected error for empty phases, got nil")
-	}
-}
-
-func TestBuildCustomWorkflow_PhaseNameWithHyphens(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "auth-types", Description: "phase"},
-	}
-
-	yamlBytes, err := BuildCustomWorkflow("custom", phases)
-	if err != nil {
-		t.Fatalf("BuildCustomWorkflow error: %v", err)
-	}
-
-	w, err := workflow.LoadBytes(yamlBytes)
-	if err != nil {
-		t.Fatalf("generated YAML failed to load: %v\n\nYAML:\n%s", err, string(yamlBytes))
-	}
-
-	stateMap := make(map[string]arc.StateConfig)
-	for _, s := range w.States {
-		stateMap[s.Name] = s
-	}
-
-	if _, ok := stateMap["auth-types"]; !ok {
-		t.Error("missing state 'auth-types'")
-	}
-	if _, ok := stateMap["auth-types_review"]; !ok {
-		t.Error("missing state 'auth-types_review'")
-	}
-}
-
-func TestBuildCustomWorkflow_DuplicatePhaseNames(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "impl", Description: "a"},
-		{Name: "impl", Description: "b"},
-	}
-
-	_, err := BuildCustomWorkflow("custom", phases)
-	if err == nil {
-		t.Fatal("expected error for duplicate phase names, got nil")
-	}
-}
-
-func TestBuildCustomWorkflow_PhaseNameConflictsWithTerminalState(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "complete", Description: "my phase"},
-	}
-
-	_, err := BuildCustomWorkflow("custom", phases)
-	if err == nil {
-		t.Fatal("expected error for phase name conflicting with terminal state, got nil")
-	}
-}
-
-func TestBuildCustomWorkflow_PhaseNameWithSpecialChars(t *testing.T) {
-	phases := []PhaseSpec{
-		{Name: "my phase", Description: "has space"},
-	}
-
-	_, err := BuildCustomWorkflow("custom", phases)
-	if err == nil {
-		t.Fatal("expected error for phase name with spaces, got nil")
-	}
-}
-
-// --- BuildCustomWorkflow edge case: WorkflowType "custom" ---
-
-func TestBuildCustomWorkflow_WorkflowTypeCustom(t *testing.T) {
-	// When discovery has WorkflowType "custom", GeneratePlan should use
-	// BuildCustomWorkflow. This test verifies BuildCustomWorkflow produces
-	// valid YAML with WorkflowType=custom that can be used by the loader.
-	phases := []PhaseSpec{
-		{Name: "design", Description: "design the system"},
-		{Name: "implement", Description: "implement the design"},
-	}
-
-	yamlBytes, err := BuildCustomWorkflow("custom", phases)
-	if err != nil {
-		t.Fatalf("BuildCustomWorkflow error: %v", err)
-	}
-
-	w, err := workflow.LoadBytes(yamlBytes)
-	if err != nil {
-		t.Fatalf("custom workflow YAML failed to load: %v\n\nYAML:\n%s", err, string(yamlBytes))
-	}
-
-	if w.EntryState != "design" {
-		t.Errorf("EntryState = %q, want %q", w.EntryState, "design")
-	}
-}
-
-// --- GeneratePlan tests ---
 
 func TestGeneratePlan_SimpleTask(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -474,14 +273,16 @@ func TestGeneratePlan_ComplexTaskWithProposal(t *testing.T) {
 		t.Fatal("GeneratePlan returned nil meta")
 	}
 
-	// Check custom workflow.yaml exists
+	// Complex tasks use a standard per-phase workflow type, not a monolithic
+	// custom workflow. No workflow.yaml should be written at the plan level.
 	workflowPath := filepath.Join(tmpDir, "add-auth", "workflow.yaml")
-	workflowData, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("workflow.yaml should exist for complex task: %v", err)
+	if _, err := os.Stat(workflowPath); err == nil {
+		t.Fatal("workflow.yaml should NOT exist for complex tasks: each phase uses a standard workflow type")
 	}
-	if len(workflowData) == 0 {
-		t.Fatal("workflow.yaml should have content")
+
+	// WorkflowType should be a standard type, not "custom"
+	if meta.WorkflowType == "custom" {
+		t.Errorf("WorkflowType = %q, want a standard type like 'feature' — complex tasks must not use a monolithic custom workflow", meta.WorkflowType)
 	}
 
 	// Check 3 phases

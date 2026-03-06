@@ -9,10 +9,10 @@ AI-powered workflow engine for orchestrating multi-phase software engineering ta
 go test ./...
 
 # Run tests for a specific package
-go test ./internal/runner/
+go test ./internal/gate/
 
 # Run a single test
-go test ./internal/runner/ -run TestName
+go test ./internal/gate/ -run TestName
 
 # Build the CLI binary
 go build -o arc ./cmd/arc/
@@ -26,37 +26,56 @@ go build -o ~/.local/bin/arc ./cmd/arc/
 ```
 cmd/arc/          Entry point (main.go)
 internal/         All Go packages:
+  adapter/        Multi-provider AI adapter (claude, codex, generic)
+  agent/          Agent spawning (claude CLI subprocess)
+  arc/            Core types (PhaseSpec, PhaseState, GateResult, PlanMeta)
   cli/            Cobra command definitions
   config/         .arc.yaml parsing
-  workflow/       Workflow YAML loading & validation
-  state/          Phase state (state.json) management
-  plan/           Plan creation, status & summary generation
-  project/        Project detection & init
-  prompt/         Prompt rendering & extraction
-  runner/         Subprocess runner (claude CLI)
-  agent/          Agent spawning
-  pipeline/       Phase iteration, escalation, hooks, constraints
-  orchestrator/   Top-level orchestrator loop (LaunchResult, stop-on-failure)
-  mcp/            MCP server and tool handlers (arc chat backend)
-  review/         Adversarial plan review (with confidence scoring)
+  daemon/         Background orchestration daemon (persistent, multi-plan)
+  dev/            arc dev pipeline (discovery → architecture → plan generation)
+  gate/           Gate assertion evaluation (file_exists, grep, build_passes, ...)
   gitops/         Git commit operations
-  monitor/        Live TUI (bubbletea)
-  resources/      Embedded resources (prompts, workflows, templates, blocks)
-    prompts/      Agent prompt templates (.md)
-    workflows/    Workflow state machine definitions (.yaml)
+  guide/          Agent-facing reference guide (arc guide)
+  intelligence/   Project intelligence store (test cmds, flaky tests, costs)
+  logging/        Structured JSONL logger (PlanLogger, plan.jsonl)
+  mcp/            MCP server and tool handlers (arc chat / arc serve backend)
+  migrate/        State migration utilities
+  monitor/        Live TUI (bubbletea) for arc status --live
+  orchestrator/   Orchestration engine:
+    orchestrator.go   Launch() entry point, LaunchOptions, lock management
+    launch_gated.go   LaunchGated(): phase scheduling, worktrees, regression suite
+    gated.go          RunPhaseGated(): per-phase session→gate→retry loop
+    phase_types.go    RunPhaseOptions, commitPhase, discoverNewTestFiles
+    strategic.go      RunStrategicIntervention(): AI agent for stuck phases
+    adversary.go      Post-plan adversarial test session
+    classify.go       Error tier classification (Transient/Feedback/Strategic/GiveUp)
+  plan/           Plan creation, status, manage mutations, archival, summaries
+  project/        Project detection & init (.arc.yaml, .plans/)
+  prompt/         Prompt rendering (Handlebars shim over Go templates)
+  resources/      Embedded static assets:
+    prompts/      Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/
     templates/    Plan scaffolding templates (.md)
-    blocks/       Reusable workflow blocks (.yaml)
-  logging/        Structured logger
-  selfupdate/     Self-update mechanism
-  migrate/        State migration
-  guide/          Agent-facing reference guide
+    enforcement/  Hook scripts
+    guides/       Agent-facing reference docs
+    recipes/      Built-in recipe definitions (.yaml)
+  review/         Adversarial plan review (5 adversaries, auto-remediation)
+  selfupdate/     Self-update (GitHub releases, SHA256 verification)
+  state/          Phase state.json read/write/update
+  testcmd/        Test command resolution and execution
   validate/       AI-powered test quality audit
-  arc/            Core types (verdict, result, errors, state)
-  block/          Composable workflow block loading & composition
-  worktree/       Git worktree isolation for parallel execution
-  dev/            Arc dev pipeline (discovery, architecture, plan generation)
-testdata/         Test fixtures
+  worktree/       Git worktree isolation for parallel phase execution
+docs/             Documentation
 ```
+
+## What Is NOT in Arc
+
+Arc does **not** have (do not introduce these):
+- `internal/pipeline/`, `internal/workflow/`, `internal/block/`, `internal/runner/` packages
+- Workflow YAML files or state machine definitions
+- Verdict extraction from agent output (`## Verdict` parsing)
+- `arc iterate` command
+- `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories
+- `IsGatedPlan()` function — all plans are gated, `Launch()` always calls `LaunchGated()`
 
 ## Key Conventions
 
@@ -80,7 +99,6 @@ arc plan --type bugfix <name> <phases...>   # Create with specific workflow type
 arc review <plan-name>                      # Run adversarial review (5 adversaries, max 5 iterations)
 arc review <plan-name> --phase <phase>      # Review a single phase
 arc run <plan-name>                         # Launch orchestrator for all phases
-arc iterate <plan-name> <phase-name>        # Run single iteration for a phase
 arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
@@ -109,14 +127,16 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 
 ### Workflow Types
 
-- **feature** — Audit-style: `impl → check (adversary) → no_bugs_found → complete / bugs_found → impl`
-- **bugfix** — `investigate → regression_tests → test_review → fix → fix_review → complete`
-- **investigation** — Research: `research → draft → review → complete`
-- **refactor** — Preserve behavior: `characterize → char_review → refactor → verify → complete`
-- **performance** — Benchmark-driven: `baseline → analyze → optimize → benchmark → complete`
-- **adversarial** — Composed from blocks: `impl → adversary → complete`
-- **audit** — Adversarial + fix: `adversary → impl → complete`
-- **direct** — Single-phase: `impl → complete` (used by `arc dev` for simple tasks)
+`--type` sets `workflow_type` in `plan.json` and `state.json`. It is metadata only — it does **not** define a state machine or phase sequence. All phases run through the same `session → gate → retry` loop regardless of workflow type.
+
+| Type | Typical use |
+|------|-------------|
+| `feature` | New functionality |
+| `bugfix` | Fixing incorrect behavior |
+| `investigation` | Research / exploration |
+| `refactor` | Restructuring without behavior change |
+| `performance` | Optimization |
+| `direct` | Simple single-phase task (used by `arc dev`) |
 
 ### Phase Roles
 Phases have a `role` that determines their prompt and gate behavior:

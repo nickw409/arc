@@ -59,7 +59,7 @@ func newDaemonStartCmd() *cobra.Command {
 
 			// Handle SIGTERM/SIGINT for graceful shutdown.
 			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 			go func() {
 				sig := <-sigCh
 				slog.Info("received signal, shutting down", "signal", sig)
