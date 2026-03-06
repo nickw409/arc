@@ -138,7 +138,7 @@ func TestGitUncommittedFilesGitRepo(t *testing.T) {
 		}
 	}
 
-	gitRun("git", "init")
+	gitRun("git", "init", "-b", "main")
 	gitRun("git", "config", "user.email", "test@test.com")
 	gitRun("git", "config", "user.name", "Test")
 
@@ -186,7 +186,7 @@ func TestGitDiffFilesGitRepo(t *testing.T) {
 		}
 	}
 
-	gitRun("git", "init")
+	gitRun("git", "init", "-b", "main")
 	gitRun("git", "config", "user.email", "test@test.com")
 	gitRun("git", "config", "user.name", "Test")
 
