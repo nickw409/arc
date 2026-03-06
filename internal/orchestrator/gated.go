@@ -200,20 +200,45 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 				"attempt", attempt, "error", spawnErr)
 		}
 
-		// Run hard gate
-		fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
-		var gateOpts []gate.RunOption
-		if opts.Config != nil {
-			gateOpts = append(gateOpts, gate.WithVerifier(
-				gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
-		}
-		gateResult, gateErr := gate.Run(ctx, specPath, workDir, gateOpts...)
-		if gateErr != nil {
-			opts.Logger.Warn("gate execution error", "error", gateErr)
-			if attempt < MaxGatedAttempts {
-				continue
+		// Run gate — role-based routing
+		role := arc.DefaultRole(spec.Role)
+		var gateResult *arc.GateResult
+		if role != "impl" {
+			// Non-impl roles: run verifier as the primary gate, skip assertions.
+			fmt.Printf("[%s] Running verifier check\n", opts.PhaseName)
+			passed, reasoning, verifyErr := gate.RunVerifier(ctx, spec, workDir)
+			if verifyErr != nil {
+				opts.Logger.Warn("verifier execution error", "error", verifyErr)
+				if attempt < MaxGatedAttempts {
+					continue
+				}
+				return fmt.Errorf("verifier failed on final attempt: %w", verifyErr)
 			}
-			return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
+			gateResult = &arc.GateResult{
+				Passed:            passed,
+				ScopedTestPassed:  passed,
+				ScopedTestSkipped: true,
+			}
+			if !passed {
+				gateResult.ScopedTestOutput = reasoning
+			}
+		} else {
+			// Impl role: run assertion-based gate as before.
+			fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
+			var gateOpts []gate.RunOption
+			if opts.Config != nil {
+				gateOpts = append(gateOpts, gate.WithVerifier(
+					gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
+			}
+			var gateErr error
+			gateResult, gateErr = gate.Run(ctx, specPath, workDir, gateOpts...)
+			if gateErr != nil {
+				opts.Logger.Warn("gate execution error", "error", gateErr)
+				if attempt < MaxGatedAttempts {
+					continue
+				}
+				return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
+			}
 		}
 
 		// Write gate status and increment run count
@@ -451,7 +476,12 @@ func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt 
 	if role == "review" || role == "investigate" || role == "audit" {
 		verifierFeedback := ""
 		if lastGate != nil {
-			verifierFeedback = gate.Format(lastGate)
+			// For verifier-only gate results, use the raw verifier reasoning.
+			if lastGate.ScopedTestOutput != "" {
+				verifierFeedback = lastGate.ScopedTestOutput
+			} else {
+				verifierFeedback = gate.Format(lastGate)
+			}
 		}
 
 		retryData := prompt.ReviewRetryData{

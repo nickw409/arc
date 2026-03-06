@@ -1261,6 +1261,91 @@ gate:
 	}
 }
 
+// ---------------------------------------------------------------------------
+// HasAssertions
+// ---------------------------------------------------------------------------
+
+func TestHasAssertions_WithAssertions(t *testing.T) {
+	dir := t.TempDir()
+	spec := `
+name: test-phase
+gate:
+  assertions:
+    - description: "file exists"
+      file_exists: main.go
+`
+	specPath := writeSpec(t, dir, spec)
+
+	has, err := HasAssertions(specPath)
+	if err != nil {
+		t.Fatalf("HasAssertions: %v", err)
+	}
+	if !has {
+		t.Error("expected HasAssertions=true when assertions are defined")
+	}
+}
+
+func TestHasAssertions_WithCheckpointTests(t *testing.T) {
+	dir := t.TempDir()
+	spec := `
+name: test-phase
+gate:
+  assertions: []
+checkpoints:
+  - name: cp1
+    description: "A checkpoint"
+    test: "go test ./..."
+`
+	specPath := writeSpec(t, dir, spec)
+
+	has, err := HasAssertions(specPath)
+	if err != nil {
+		t.Fatalf("HasAssertions: %v", err)
+	}
+	if !has {
+		t.Error("expected HasAssertions=true when checkpoints have test commands")
+	}
+}
+
+func TestHasAssertions_Empty(t *testing.T) {
+	dir := t.TempDir()
+	spec := `
+name: test-phase
+gate:
+  assertions: []
+`
+	specPath := writeSpec(t, dir, spec)
+
+	has, err := HasAssertions(specPath)
+	if err != nil {
+		t.Fatalf("HasAssertions: %v", err)
+	}
+	if has {
+		t.Error("expected HasAssertions=false when no assertions or checkpoint tests")
+	}
+}
+
+func TestHasAssertions_CheckpointsWithoutTests(t *testing.T) {
+	dir := t.TempDir()
+	spec := `
+name: test-phase
+gate:
+  assertions: []
+checkpoints:
+  - name: cp1
+    description: "No test command"
+`
+	specPath := writeSpec(t, dir, spec)
+
+	has, err := HasAssertions(specPath)
+	if err != nil {
+		t.Fatalf("HasAssertions: %v", err)
+	}
+	if has {
+		t.Error("expected HasAssertions=false when checkpoints have no test commands")
+	}
+}
+
 func TestShouldRunVerifier(t *testing.T) {
 	tr := true
 	fa := false

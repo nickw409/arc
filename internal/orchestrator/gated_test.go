@@ -772,6 +772,202 @@ func TestBuildRetryPrompt_Review(t *testing.T) {
 	}
 }
 
+func TestRunPhaseGated_ReviewRole_VerifierOnly(t *testing.T) {
+	// A review-role phase with a file_exists assertion should skip the assertion
+	// and use the verifier as the primary gate instead.
+	spec := &arc.PhaseSpec{
+		Spec:       "Review the auth module for security issues",
+		Role:       "review",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				// This file will NOT exist — but it shouldn't matter because
+				// non-impl roles skip assertions entirely.
+				{Type: "file_exists", Target: "nonexistent.go", FileExists: "nonexistent.go"},
+			},
+		},
+	}
+	plansDir, phaseDir := setupGatedTest(t, spec)
+	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
+
+	// Mock adapter for the main agent (review role).
+	// The workFn stages a file so RunVerifier sees a diff.
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{{ExitCode: 0, Duration: time.Second}},
+		workFn: func(_ string) {
+			os.WriteFile(filepath.Join(workDir, "findings-test-phase.md"), []byte("# Findings\nNo issues found.\n"), 0o644)
+			exec.Command("git", "-C", workDir, "add", "findings-test-phase.md").Run()
+		},
+	}
+	registerMockAdapter(t, "test-mock-review", mock)
+
+	// Mock adapter for the verifier (RunVerifier uses adapter.Get("claude")).
+	// Return PASS so the phase completes.
+	verifierMock := &mockAdapter{
+		results: []*arc.AgentResult{{ExitCode: 0, Duration: time.Second, Output: "PASS\nAll looks good."}},
+	}
+	registerMockAdapter(t, "claude", verifierMock)
+
+	err := RunPhaseGated(context.Background(), RunPhaseOptions{
+		PlanName:   "test-plan",
+		PhaseName:  "test-phase",
+		PlansDir:   plansDir,
+		Config:     &config.Config{Agents: config.AgentsConfig{Default: "test-mock-review"}},
+		Logger:     slog.Default(),
+		WorkingDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("RunPhaseGated: %v", err)
+	}
+
+	// Verify state is complete (verifier passed).
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+	ps, err := sf.Read()
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+	if ps.PhaseStatus != "complete" {
+		t.Errorf("phase status: got %q, want %q", ps.PhaseStatus, "complete")
+	}
+
+	// Verify the verifier was called (the "claude" adapter was spawned).
+	if len(verifierMock.calls) == 0 {
+		t.Error("verifier should have been called for review role")
+	}
+
+	// The main agent should have been called once.
+	if len(mock.calls) != 1 {
+		t.Errorf("main agent spawn calls: got %d, want 1", len(mock.calls))
+	}
+}
+
+func TestRunPhaseGated_ReviewRole_VerifierFails(t *testing.T) {
+	// When verifier fails for a non-impl role, the phase should retry
+	// with verifier feedback in the prompt.
+	spec := &arc.PhaseSpec{
+		Spec:       "Review the auth module",
+		Role:       "review",
+		Complexity: "simple",
+		Gate:       arc.GateSpec{},
+	}
+	plansDir, phaseDir := setupGatedTest(t, spec)
+	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
+
+	// Main agent mock — called multiple times (retries).
+	// The workFn stages a file so RunVerifier sees a diff.
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+			{ExitCode: 0, Duration: time.Second},
+		},
+		workFn: func(_ string) {
+			os.WriteFile(filepath.Join(workDir, "findings-test-phase.md"), []byte("# Findings\n"), 0o644)
+			exec.Command("git", "-C", workDir, "add", "findings-test-phase.md").Run()
+		},
+	}
+	registerMockAdapter(t, "test-mock-review-fail", mock)
+
+	// Verifier mock — FAIL then PASS on second attempt.
+	verifierCallCount := 0
+	verifierMock := &mockAdapter{
+		results: []*arc.AgentResult{
+			{ExitCode: 0, Duration: time.Second, Output: "FAIL\nFindings file is incomplete. Missing analysis of SQL injection risks."},
+			{ExitCode: 0, Duration: time.Second, Output: "PASS\nFindings are comprehensive."},
+		},
+	}
+	verifierMock.workFn = func(_ string) {
+		verifierCallCount++
+	}
+	registerMockAdapter(t, "claude", verifierMock)
+
+	err := RunPhaseGated(context.Background(), RunPhaseOptions{
+		PlanName:   "test-plan",
+		PhaseName:  "test-phase",
+		PlansDir:   plansDir,
+		Config:     &config.Config{Agents: config.AgentsConfig{Default: "test-mock-review-fail"}},
+		Logger:     slog.Default(),
+		WorkingDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("RunPhaseGated: %v", err)
+	}
+
+	// Should have completed on second attempt.
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+	ps, _ := sf.Read()
+	if ps.PhaseStatus != "complete" {
+		t.Errorf("phase status: got %q, want %q", ps.PhaseStatus, "complete")
+	}
+
+	// Main agent should have been called twice (first attempt + retry).
+	if len(mock.calls) != 2 {
+		t.Errorf("main agent spawn calls: got %d, want 2", len(mock.calls))
+	}
+
+	// Second call should contain verifier feedback in the retry prompt.
+	if len(mock.calls) >= 2 {
+		retryPrompt := mock.calls[1].Prompt
+		if !strings.Contains(retryPrompt, "SQL injection") {
+			t.Error("retry prompt should contain verifier feedback about SQL injection")
+		}
+		if !strings.Contains(retryPrompt, "verifier rejected") {
+			t.Error("retry prompt should use review-retry template with 'verifier rejected'")
+		}
+	}
+}
+
+func TestRunPhaseGated_ImplRole_GateStillRuns(t *testing.T) {
+	// Regression test: impl role (default) should still run assertion-based gates.
+	spec := &arc.PhaseSpec{
+		Spec:       "Create hello.go",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{Type: "file_exists", Target: "hello.go", FileExists: "hello.go"},
+			},
+		},
+	}
+	plansDir, phaseDir := setupGatedTest(t, spec)
+	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
+
+	mock := &mockAdapter{
+		results: []*arc.AgentResult{{ExitCode: 0, Duration: time.Second}},
+		workFn: func(_ string) {
+			os.WriteFile(filepath.Join(workDir, "hello.go"), []byte("package main\n"), 0o644)
+		},
+	}
+	registerMockAdapter(t, "test-mock-impl-gate", mock)
+
+	err := RunPhaseGated(context.Background(), RunPhaseOptions{
+		PlanName:   "test-plan",
+		PhaseName:  "test-phase",
+		PlansDir:   plansDir,
+		Config:     &config.Config{Agents: config.AgentsConfig{Default: "test-mock-impl-gate"}},
+		Logger:     slog.Default(),
+		WorkingDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("RunPhaseGated: %v", err)
+	}
+
+	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
+	ps, _ := sf.Read()
+	if ps.PhaseStatus != "complete" {
+		t.Errorf("phase status: got %q, want %q", ps.PhaseStatus, "complete")
+	}
+
+	// Impl role should NOT have called the verifier adapter
+	// (no "claude" adapter calls expected since we didn't register one).
+	if len(mock.calls) != 1 {
+		t.Errorf("spawn calls: got %d, want 1", len(mock.calls))
+	}
+}
+
 // readGateStatus reads gate-status.json from a phase directory.
 func readGateStatus(phaseDir string) (*arc.GateStatus, error) {
 	data, err := os.ReadFile(filepath.Join(phaseDir, "gate-status.json"))
