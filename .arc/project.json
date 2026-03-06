@@ -69,7 +69,14 @@
       "cost_usd": 0.903411,
       "turns": 1,
       "timestamp": "2026-03-06T02:40:18.470871927Z"
+    },
+    {
+      "plan_name": "daemon-audit",
+      "complexity": "medium",
+      "cost_usd": 1.8654865,
+      "turns": 1,
+      "timestamp": "2026-03-06T20:40:23.834506449Z"
     }
   ],
-  "last_updated": "2026-03-06T02:40:18.471263982Z"
+  "last_updated": "2026-03-06T20:40:23.834533511Z"
 }
