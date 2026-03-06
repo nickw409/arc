@@ -151,6 +151,9 @@ func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {
 	if err := sched.Register(reg); err != nil {
 		cancel()
 		releaseLock()
+		if wt != nil {
+			_ = worktree.Remove(wt)
+		}
 		return Response{OK: false, Error: fmt.Sprintf("registering plan: %v", err)}
 	}
 

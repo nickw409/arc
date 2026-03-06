@@ -143,20 +143,20 @@ func (d *Daemon) Shutdown() error {
 	d.removePIDFile()
 
 	// 3. Wait up to 10s for running phases to drain.
-	done := make(chan struct{})
+	persistErr := make(chan error, 1)
 	go func() {
 		if d.sched != nil {
-			if err := d.sched.PersistState(); err != nil {
-				d.mu.Lock()
-				errs = append(errs, fmt.Errorf("persisting state: %w", err))
-				d.mu.Unlock()
-			}
+			persistErr <- d.sched.PersistState()
+		} else {
+			persistErr <- nil
 		}
-		close(done)
 	}()
 
 	select {
-	case <-done:
+	case err := <-persistErr:
+		if err != nil {
+			errs = append(errs, fmt.Errorf("persisting state: %w", err))
+		}
 	case <-time.After(10 * time.Second):
 		errs = append(errs, fmt.Errorf("timed out waiting for scheduler to persist"))
 	}
