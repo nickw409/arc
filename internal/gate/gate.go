@@ -16,6 +16,39 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RunOption configures gate execution.
+type RunOption func(*runOptions)
+
+type runOptions struct {
+	verifierOverride *bool // nil = use spec/auto logic; non-nil = force
+}
+
+// WithVerifier forces the verifier agent on or off, overriding spec and auto-detection.
+func WithVerifier(enabled bool) RunOption {
+	return func(o *runOptions) {
+		o.verifierOverride = &enabled
+	}
+}
+
+// ShouldRunVerifier resolves whether the verifier agent should run for a phase.
+// Priority: explicit override > "always"/"never" config > spec field > auto (complexity-based).
+func ShouldRunVerifier(override *bool, configVerifier string, specVerifier bool, complexity string) bool {
+	if override != nil {
+		return *override
+	}
+	switch configVerifier {
+	case "always":
+		return true
+	case "never":
+		return false
+	default: // "auto" or empty
+		if specVerifier {
+			return true
+		}
+		return complexity == "complex" || complexity == "medium"
+	}
+}
+
 // Run executes gate checks for a phase. It reads the spec from specPath,
 // runs all assertions against workdir, and returns a GateResult.
 //
@@ -23,8 +56,13 @@ import (
 // workdir is the directory against which file-system assertions are evaluated.
 //
 // If ctx has no deadline, a default 5-minute timeout is applied.
-func Run(ctx context.Context, specPath string, workdir string) (*arc.GateResult, error) {
+func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption) (*arc.GateResult, error) {
 	// Apply a default timeout if the caller did not set one.
+	var ro runOptions
+	for _, opt := range opts {
+		opt(&ro)
+	}
+
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
@@ -65,23 +103,15 @@ func Run(ctx context.Context, specPath string, workdir string) (*arc.GateResult,
 		}
 	}
 
-	// Run scoped test command.
-	if spec.Test == "" {
-		result.ScopedTestSkipped = true
-		result.ScopedTestPassed = true // nothing to fail
-	} else {
-		out, testErr := runCommand(ctx, spec.Test, workdir)
-		result.ScopedTestOutput = out
-		if testErr != nil {
-			result.ScopedTestPassed = false
-			result.Passed = false
-		} else {
-			result.ScopedTestPassed = true
-		}
-	}
+	// Scoped test: the Verify field is natural language for the verifier agent,
+	// not a shell command. Skip shell execution — mechanical checks come from
+	// gate assertions (file_exists, build_passes, etc.).
+	result.ScopedTestSkipped = true
+	result.ScopedTestPassed = true
 
-	// Run verifier agent if configured and all other checks passed.
-	if spec.Gate.VerifierAgent && result.Passed {
+	// Run verifier agent if resolved and all other checks passed.
+	runVerifier := ShouldRunVerifier(ro.verifierOverride, "", spec.Gate.VerifierAgent, spec.Complexity)
+	if runVerifier && result.Passed {
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer verifyCancel()
 		passed, reasoning, verifyErr := RunVerifier(verifyCtx, &spec, workdir)

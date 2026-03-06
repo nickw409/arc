@@ -14,7 +14,7 @@ phases:
       - Implement the RunE body: validate arguments, call the appropriate internal API, and print results.
       - Register the command under the appropriate parent command.
       - Follow the existing cobra command patterns in the codebase.
-    test: go test ./{{.package}}/...
+    verify: go test ./{{.package}}/...
     complexity: medium
     files:
       - "{{.package}}/{{.command_name}}.go"
@@ -26,7 +26,7 @@ phases:
       - Test flag defaults and overrides.
       - Test successful execution paths.
       - Use the cobra command's Execute() or RunE directly where possible to avoid spawning subprocesses.
-    test: go test ./{{.package}}/...
+    verify: go test ./{{.package}}/...
     complexity: medium
     files:
       - "{{.package}}/{{.command_name}}_test.go"

@@ -15,6 +15,7 @@ import (
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/testcmd"
 	"github.com/spf13/cobra"
 )
 
@@ -94,19 +95,16 @@ Examples:
 			cfg, _ := config.Load(projectRoot)
 
 			adapterName := "claude"
-			testCmd := "go test ./..."
 			if cfg != nil {
 				adapterName = cfg.AgentForRole("adversary")
-				if cfg.TestCommand != "" {
-					testCmd = cfg.TestCommand
-				}
 			}
 
+			tenv := testcmd.NewEnv(testcmd.WithConfig(cfg), testcmd.WithProjectDir(projectRoot))
 			projectCtx := prompt.LoadProjectContext(projectRoot)
 
 			adversaryPrompt, err := prompt.RenderGatePrompt("adversary", prompt.AdversaryData{
 				ChangedFiles:   files,
-				TestCommand:    testCmd,
+				TestCommand:    tenv.Command,
 				ProjectContext: projectCtx,
 			})
 			if err != nil {
@@ -149,12 +147,12 @@ Examples:
 			if format == "text" {
 				fmt.Println("[audit] Running test suite...")
 			}
-			testOutput, testErr := runAuditTestCommand(testCmd, projectRoot)
-			if testErr != nil {
+			testResult, _ := tenv.RunAll(context.Background())
+			if !testResult.Passed {
 				if format == "github" {
-					printGitHubTestFailure(testOutput)
+					printGitHubTestFailure(testResult.Output)
 				} else {
-					fmt.Printf("[audit] BUGS FOUND — tests failed:\n%s\n", testOutput)
+					fmt.Printf("[audit] BUGS FOUND — tests failed:\n%s\n", testResult.Output)
 				}
 				cmd.SilenceUsage = true
 				return fmt.Errorf("audit found bugs: tests failed")
@@ -331,10 +329,3 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// runAuditTestCommand runs the test command and returns combined output.
-func runAuditTestCommand(testCmd, dir string) (string, error) {
-	c := exec.Command("sh", "-c", testCmd)
-	c.Dir = dir
-	out, err := c.CombinedOutput()
-	return string(out), err
-}

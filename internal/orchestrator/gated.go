@@ -202,7 +202,12 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 		// Run hard gate
 		fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
-		gateResult, gateErr := gate.Run(ctx, specPath, workDir)
+		var gateOpts []gate.RunOption
+		if opts.Config != nil {
+			gateOpts = append(gateOpts, gate.WithVerifier(
+				gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
+		}
+		gateResult, gateErr := gate.Run(ctx, specPath, workDir, gateOpts...)
 		if gateErr != nil {
 			opts.Logger.Warn("gate execution error", "error", gateErr)
 			if attempt < MaxGatedAttempts {
@@ -334,8 +339,18 @@ func gatedPhaseComplete(opts RunPhaseOptions, sf *state.StateFile, spec *arc.Pha
 
 	hash, commitErr := commitPhase(opts, "feat", desc, workDir)
 	if commitErr != nil {
-		opts.Logger.Warn("commit failed", "error", commitErr)
-	} else if hash != "" {
+		// Mark the phase as blocked so the scheduler doesn't re-launch it.
+		reason := fmt.Sprintf("commit failed: %v", commitErr)
+		if updateErr := sf.Update(func(s *arc.PhaseState) error {
+			s.PhaseStatus = "blocked"
+			s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+			return nil
+		}); updateErr != nil {
+			opts.Logger.Warn("failed to persist blocked state after commit failure", "error", updateErr)
+		}
+		return fmt.Errorf("commit failed for phase %s (work may be in worktree %s): %w", opts.PhaseName, workDir, commitErr)
+	}
+	if hash != "" {
 		fmt.Printf("[%s] Committed: %s\n", opts.PhaseName, shortHash(hash))
 		if updateErr := sf.Update(func(s *arc.PhaseState) error {
 			s.LastCommit = hash
@@ -374,7 +389,7 @@ func buildImplPrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, 
 		Checkpoints:    checkpoints,
 		Plan:           planName, // used in arc gate command
 		Phase:          spec.Name,
-		TestCommand:    spec.Test,
+		TestCommand:    "",
 		ProjectContext: projectCtx,
 	}
 

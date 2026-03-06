@@ -35,7 +35,7 @@ func TestHandlePlanAddPhase(t *testing.T) {
 		"plan_name":  "my-plan",
 		"phase_name": "verify",
 		"spec":       "Verify all tests pass",
-		"test":       "go test ./...",
+		"verify":     "go test ./...",
 		"complexity": "simple",
 	})
 	if err != nil {
@@ -465,7 +465,7 @@ func TestHandlePlanShowSpec(t *testing.T) {
 		"plan_name":  "my-plan",
 		"phase_name": "verify",
 		"spec":       "Verify all tests pass",
-		"test":       "go test ./...",
+		"verify":     "go test ./...",
 		"complexity": "simple",
 	})
 
@@ -484,7 +484,7 @@ func TestHandlePlanShowSpec(t *testing.T) {
 		t.Fatalf("expected spec text in output, got: %s", text)
 	}
 	if !strings.Contains(text, "go test") {
-		t.Fatalf("expected test text in output, got: %s", text)
+		t.Fatalf("expected verify text in output, got: %s", text)
 	}
 }
 
@@ -534,7 +534,7 @@ func TestGatedPhaseRoundTrip(t *testing.T) {
 		"plan_name":  "my-plan",
 		"phase_name": "verify",
 		"spec":       "Run the full test suite",
-		"test":       "go test ./...",
+		"verify":     "go test ./...",
 		"complexity": "simple",
 		"files":      []any{"internal/runner/runner.go"},
 		"deps":       []any{"impl"},

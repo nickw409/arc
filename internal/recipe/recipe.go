@@ -24,7 +24,7 @@ type Param struct {
 type PhaseTemplate struct {
 	Name       string              `yaml:"name"`
 	Spec       string              `yaml:"spec,omitempty"`
-	Test       string              `yaml:"test,omitempty"`
+	Verify     string              `yaml:"verify,omitempty"`
 	Complexity string              `yaml:"complexity,omitempty"`
 	Files      []string            `yaml:"files,omitempty"`
 	Deps       []string            `yaml:"deps,omitempty"`
@@ -306,9 +306,9 @@ func substitutePhase(pt PhaseTemplate, params map[string]string) (*arc.PhaseSpec
 	if err != nil {
 		return nil, fmt.Errorf("spec field: %w", err)
 	}
-	testCmd, err := substituteString(pt.Test, params)
+	testCmd, err := substituteString(pt.Verify, params)
 	if err != nil {
-		return nil, fmt.Errorf("test field: %w", err)
+		return nil, fmt.Errorf("verify field: %w", err)
 	}
 	complexity, err := substituteString(pt.Complexity, params)
 	if err != nil {
@@ -361,7 +361,7 @@ func substitutePhase(pt PhaseTemplate, params map[string]string) (*arc.PhaseSpec
 
 	spec := &arc.PhaseSpec{
 		Spec:       specText,
-		Test:       testCmd,
+		Verify:     testCmd,
 		Complexity: complexity,
 		Files:      files,
 		Deps:       deps,

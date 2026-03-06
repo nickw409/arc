@@ -25,24 +25,30 @@ func RunVerifier(ctx context.Context, spec *arc.PhaseSpec, workdir string) (pass
 		diff = diff[:8000] + "\n... (truncated)"
 	}
 
+	verifyCriteria := ""
+	if spec.Verify != "" {
+		verifyCriteria = fmt.Sprintf("\n## Acceptance Criteria\n%s\n", spec.Verify)
+	}
+
 	prompt := fmt.Sprintf(`You are a code reviewer verifying that an implementation matches its specification.
 
 ## Specification
 %s
-
+%s
 ## Code Changes
 %s
 
 ## Instructions
-Review the changes and determine if they satisfy the specification.
+Review the changes and determine if they satisfy the specification and acceptance criteria.
 Respond with either PASS or FAIL on the first line, followed by your reasoning.
 Focus on:
 - Does the implementation match what was asked for?
 - Are there obvious bugs or missing pieces?
 - Are the required files and functions present?
+- Do the changes meet the acceptance criteria (if provided)?
 
 Do NOT nitpick style, naming, or minor issues. Focus on correctness and completeness.
-`, spec.Spec, diff)
+`, spec.Spec, verifyCriteria, diff)
 
 	agentAdapter := adapter.Get("claude")
 

@@ -80,7 +80,7 @@ func isPhaseReady(phase string, meta *arc.PlanMeta, phaseStates map[string]*arc.
 	if !ok || ps == nil {
 		return false
 	}
-	if ps.PhaseStatus == "complete" || ps.PhaseStatus == "blocked" {
+	if ps.PhaseStatus == "complete" || ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred" {
 		return false
 	}
 	for _, dep := range meta.Dependencies[phase] {

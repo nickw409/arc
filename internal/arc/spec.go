@@ -19,7 +19,7 @@ type PhaseSpec struct {
 	Spec        string       `json:"spec,omitempty" yaml:"spec,omitempty"`
 	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
 	Files       []string     `json:"files,omitempty" yaml:"files,omitempty"`
-	Test        string       `json:"test,omitempty" yaml:"test,omitempty"`
+	Verify      string       `json:"verify,omitempty" yaml:"verify,omitempty"`
 	Deps        []string     `json:"deps,omitempty" yaml:"deps,omitempty"`
 	Complexity  string       `json:"complexity,omitempty" yaml:"complexity,omitempty"`
 	Checkpoints []Checkpoint `json:"checkpoints,omitempty" yaml:"checkpoints,omitempty"`

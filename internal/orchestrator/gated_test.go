@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +18,23 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// initTestGitRepo initializes a git repo in dir with an initial commit.
+func initTestGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+		{"commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+}
 
 // mockAdapter is a test adapter that records calls and returns configured results.
 type mockAdapter struct {
@@ -146,6 +164,7 @@ func TestRunPhaseGated_GatePassFirstAttempt(t *testing.T) {
 	// WorkingDir = phaseDir so gate can find the file there
 	// But we need a separate workdir since gate checks files there
 	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
 	mock.workFn = func(_ string) {
 		os.WriteFile(filepath.Join(workDir, "hello.go"), []byte("package main\n"), 0o644)
 	}
@@ -190,6 +209,7 @@ func TestRunPhaseGated_GateFailThenPass(t *testing.T) {
 	}
 	plansDir, phaseDir := setupGatedTest(t, spec)
 	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
 
 	callCount := 0
 	mock := &mockAdapter{
@@ -349,6 +369,7 @@ func TestRunPhaseGated_TransientRetry(t *testing.T) {
 	}
 	plansDir, phaseDir := setupGatedTest(t, spec)
 	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
 
 	callIdx := 0
 	mock := &mockAdapter{
@@ -453,6 +474,7 @@ func TestRunPhaseGated_UsageAccumulation(t *testing.T) {
 	}
 	plansDir, phaseDir := setupGatedTest(t, spec)
 	workDir := t.TempDir()
+	initTestGitRepo(t, workDir)
 
 	mock := &mockAdapter{
 		results: []*arc.AgentResult{
@@ -552,7 +574,7 @@ func TestBuildImplPrompt(t *testing.T) {
 		Spec:  "Add a new API endpoint",
 		Files: []string{"internal/api/handler.go"},
 		Name:  "api-endpoint",
-		Test:  "go test ./internal/api/",
+		Verify: "go test ./internal/api/",
 		Checkpoints: []arc.Checkpoint{
 			{Name: "handler", Description: "Handler function exists", Test: "go test -run TestHandler"},
 		},
@@ -569,7 +591,6 @@ func TestBuildImplPrompt(t *testing.T) {
 		"handler",
 		"Handler function exists",
 		"arc gate",
-		"go test ./internal/api/",
 		"Go 1.24 project",
 	}
 	for _, check := range checks {

@@ -12,7 +12,7 @@ func TestPhaseSpecJSON(t *testing.T) {
 		Name:       "api-auth",
 		Spec:       "Add JWT authentication middleware",
 		Files:      []string{"internal/api/auth.go", "internal/api/middleware.go"},
-		Test:       "go test ./internal/api/ -count=1",
+		Verify:     "go test ./internal/api/ -count=1",
 		Deps:       []string{"core-types"},
 		Complexity: "medium",
 		Checkpoints: []Checkpoint{
@@ -53,7 +53,7 @@ name: api-auth
 spec: Add JWT authentication middleware
 files:
   - internal/api/auth.go
-test: go test ./internal/api/ -count=1
+verify: go test ./internal/api/ -count=1
 complexity: simple
 checkpoints:
   - name: handler

@@ -13,7 +13,7 @@ phases:
       - Implement the primary exported functions/methods.
       - Add a package-level doc comment explaining the package purpose.
       - Keep the public API minimal and consistent with other packages in this codebase.
-    test: go build ./{{.package_path}}/{{.package_name}}/...
+    verify: go build ./{{.package_path}}/{{.package_name}}/...
     complexity: medium
     files:
       - "{{.package_path}}/{{.package_name}}/{{.package_name}}.go"
@@ -25,7 +25,7 @@ phases:
       - Use table-driven tests for functions with multiple input/output cases.
       - Test error paths as well as happy paths.
       - Aim for meaningful coverage of the core logic.
-    test: go test ./{{.package_path}}/{{.package_name}}/...
+    verify: go test ./{{.package_path}}/{{.package_name}}/...
     complexity: medium
     files:
       - "{{.package_path}}/{{.package_name}}/{{.package_name}}_test.go"
@@ -38,7 +38,7 @@ phases:
       - Import and use the package from the appropriate call sites.
       - Update any registries, factory functions, or init logic that need to know about the new package.
       - Verify the full build and test suite still pass after integration.
-    test: go test ./...
+    verify: go test ./...
     complexity: low
     deps:
       - tests

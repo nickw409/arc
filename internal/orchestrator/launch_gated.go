@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/state"
+	"github.com/nwiley/arc/internal/testcmd"
 	"github.com/nwiley/arc/internal/worktree"
 )
 
@@ -457,16 +457,17 @@ func gatedPlanComplete(
 	}
 
 	// --- Run full regression suite after merge ---
-	if opts.Config != nil && opts.Config.TestCommand != "" {
+	tenv := testcmd.NewEnv(testcmd.WithConfig(opts.Config), testcmd.WithProjectDir(opts.ProjectDir))
+	if tenv.Command != "" {
 		fmt.Println("\nRunning full regression suite...")
-		regressionOutput, regressionErr := runRegressionSuite(opts.Config.TestCommand, opts.ProjectDir)
-		if regressionErr != nil {
-			fmt.Printf("Regression suite FAILED:\n%s\n", regressionOutput)
-			opts.Logger.Warn("regression suite failed", "output", regressionOutput)
+		regressionResult, _ := tenv.RunAll(context.Background())
+		if !regressionResult.Passed {
+			fmt.Printf("Regression suite FAILED:\n%s\n", regressionResult.Output)
+			opts.Logger.Warn("regression suite failed", "output", regressionResult.Output)
 
 			// --- Task 2: Route regression failures to responsible phases ---
 			phaseStates = loadAllPhaseStates(planDir, meta.Phases)
-			if routeErr := routeRegressionFailure(context.Background(), opts, meta, phaseStates, regressionOutput, opts.ProjectDir); routeErr != nil {
+			if routeErr := routeRegressionFailure(context.Background(), opts, meta, phaseStates, regressionResult.Output, opts.ProjectDir); routeErr != nil {
 				opts.Logger.Warn("regression failure routing failed", "error", routeErr)
 			}
 		} else {
@@ -584,7 +585,7 @@ func routeRegressionFailure(
 	}
 
 	// Parse failing tests from the regression output.
-	allFailing := parseFailingTestsFromOutput(regressionOutput)
+	allFailing := testcmd.ParseFailures(regressionOutput)
 	if len(allFailing) == 0 {
 		// Could not identify specific test names — nothing to route.
 		return nil
@@ -651,19 +652,17 @@ func routeRegressionFailure(
 	}
 
 	// Re-run regression suite up to 2 times after fixes.
+	rtenv := testcmd.NewEnv(testcmd.WithConfig(opts.Config), testcmd.WithProjectDir(workDir))
 	for attempt := 1; attempt <= 2; attempt++ {
-		if opts.Config == nil || opts.Config.TestCommand == "" {
-			break
-		}
 		fmt.Printf("Re-running regression suite (attempt %d/2)...\n", attempt)
-		rerunOutput, rerunErr := runRegressionSuite(opts.Config.TestCommand, workDir)
-		if rerunErr == nil {
+		rerunResult, _ := rtenv.RunAll(ctx)
+		if rerunResult.Passed {
 			fmt.Println("Regression suite PASSED after fix")
 			return nil
 		}
 
 		// Check if remaining failures are all flaky.
-		rerunFailing := parseFailingTestsFromOutput(rerunOutput)
+		rerunFailing := testcmd.ParseFailures(rerunResult.Output)
 		stillFailing := intelligence.FilterFlakyTests(intel, rerunFailing)
 
 		// Record tests that failed before but passed now as potentially flaky.
@@ -700,10 +699,7 @@ func routeRegressionFailure(
 
 // buildRegressionFixPrompt constructs a prompt for fixing regression test failures.
 func buildRegressionFixPrompt(phase string, tests []string, regressionOutput string, opts LaunchOptions) string {
-	testCmd := "go test ./..."
-	if opts.Config != nil && opts.Config.TestCommand != "" {
-		testCmd = opts.Config.TestCommand
-	}
+	tenv := testcmd.NewEnv(testcmd.WithConfig(opts.Config), testcmd.WithProjectDir(opts.ProjectDir))
 	return fmt.Sprintf(`You are fixing regression test failures in phase %q.
 
 ## Failing Tests
@@ -721,14 +717,8 @@ func buildRegressionFixPrompt(phase string, tests []string, regressionOutput str
 		phase,
 		strings.Join(tests, "\n"),
 		regressionOutput,
-		testCmd,
+		tenv.Command,
 	)
-}
-
-// parseFailingTestsFromOutput extracts test names from Go test output.
-// Delegates to parseFailingTests (defined in adversary.go).
-func parseFailingTestsFromOutput(output string) []string {
-	return parseFailingTests(output)
 }
 
 // buildFileToPhaseMap creates a mapping from file path to phase name using phase specs.
@@ -851,15 +841,6 @@ func rerunPhaseInTree(
 
 // runRegressionSuite runs the given shell command in dir with a 10-minute timeout.
 // Returns the combined stdout+stderr output and any execution error.
-func runRegressionSuite(testCmd, dir string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", testCmd)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
 // killStaleAgents scans all phase state files for non-zero AgentPID values.
 // For each, it checks if the process is still alive (via signal 0). If alive,
 // it sends SIGTERM, waits up to 5 seconds, then SIGKILLs. After termination

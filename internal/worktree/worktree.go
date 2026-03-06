@@ -35,10 +35,24 @@ func sanitizeBranch(s string) string {
 // a new worktree (1 GiB).
 const defaultMinDiskBytes int64 = 1 << 30
 
-// Create creates a new worktree branch and checks it out in a temp directory.
-// Branch is created from current HEAD. If the branch already exists from a
-// previous run, Create detects and reuses the existing worktree (preserving
-// agent work) or creates a new worktree on the existing branch.
+// worktreeDir returns a stable directory for worktrees inside the project.
+// Uses .arc/worktrees/<planName>[/<phaseName>] so work survives /tmp cleanup.
+func worktreeDir(projectDir, planName, phaseName string) (string, error) {
+	base := filepath.Join(projectDir, ".arc", "worktrees", sanitizeBranch(planName))
+	if phaseName != "" {
+		base = filepath.Join(base, sanitizeBranch(phaseName))
+	}
+	if err := os.MkdirAll(filepath.Dir(base), 0755); err != nil {
+		return "", fmt.Errorf("creating worktree parent dir: %w", err)
+	}
+	return base, nil
+}
+
+// Create creates a new worktree branch and checks it out in a directory under
+// .arc/worktrees/ in the project root. This ensures work survives /tmp cleanup
+// and system reboots. If the branch already exists from a previous run, Create
+// detects and reuses the existing worktree (preserving agent work) or creates
+// a new worktree on the existing branch.
 func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 	if err := CheckDiskSpace(defaultMinDiskBytes); err != nil {
 		return nil, err
@@ -48,19 +62,17 @@ func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 		branch += "/" + sanitizeBranch(phaseName)
 	}
 
-	dir, err := os.MkdirTemp("", "arc-worktree-*")
+	dir, err := worktreeDir(projectDir, planName, phaseName)
 	if err != nil {
-		return nil, fmt.Errorf("creating temp dir: %w", err)
+		return nil, err
 	}
 
 	cmd := exec.Command("git", "worktree", "add", "-b", branch, dir)
 	cmd.Dir = projectDir
 	if _, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
-
 		// Branch already exists — check if a worktree is still attached
 		if existingDir := findWorktreeDir(projectDir, branch); existingDir != "" {
-			// Scenario A: worktree still exists, reuse it
+			// Scenario A: worktree still exists, reuse it (preserves agent work)
 			return &Worktree{
 				Branch:     branch,
 				Dir:        existingDir,
@@ -69,20 +81,15 @@ func Create(projectDir, planName, phaseName string) (*Worktree, error) {
 		}
 
 		// Scenario B: branch exists but worktree was removed — create
-		// worktree on the existing branch (without -b)
-		dir2, err2 := os.MkdirTemp("", "arc-worktree-*")
-		if err2 != nil {
-			return nil, fmt.Errorf("creating temp dir: %w", err2)
-		}
-		cmd2 := exec.Command("git", "worktree", "add", dir2, branch)
+		// worktree on the existing branch (without -b).
+		cmd2 := exec.Command("git", "worktree", "add", dir, branch)
 		cmd2.Dir = projectDir
 		if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
-			os.RemoveAll(dir2)
 			return nil, fmt.Errorf("git worktree add (existing branch): %s: %w", strings.TrimSpace(string(out2)), err2)
 		}
 		return &Worktree{
 			Branch:     branch,
-			Dir:        dir2,
+			Dir:        dir,
 			ProjectDir: projectDir,
 		}, nil
 	}
@@ -301,7 +308,7 @@ func worktreeAge(dir string) time.Duration {
 // is below minBytes.
 func CheckDiskSpace(minBytes int64) error {
 	var stat syscall.Statfs_t
-	dir := os.TempDir()
+	dir := "."
 	if err := syscall.Statfs(dir, &stat); err != nil {
 		return fmt.Errorf("statfs %s: %w", dir, err)
 	}

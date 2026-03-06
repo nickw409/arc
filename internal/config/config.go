@@ -30,6 +30,7 @@ type Config struct {
 	Agents      AgentsConfig `yaml:"agents"`
 	MaxParallel int          `yaml:"max_parallel"`
 	Budget      BudgetConfig `yaml:"budget"`
+	Verifier    string       `yaml:"verifier"` // "always", "never", or "auto" (default: auto — enabled for medium/complex phases)
 }
 
 // AgentsConfig maps role names to agent adapter names.
@@ -106,6 +107,9 @@ func Load(projectRoot string) (*Config, error) {
 	if cfg.MaxParallel == 0 {
 		cfg.MaxParallel = 3
 	}
+	if cfg.Verifier == "" {
+		cfg.Verifier = "auto"
+	}
 	return &cfg, nil
 }
 
@@ -136,6 +140,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Budget.WarnCost < 0 {
 		errs = append(errs, fmt.Sprintf("budget.warn_cost must be >= 0, got %g", c.Budget.WarnCost))
+	}
+	if c.Verifier != "" && c.Verifier != "always" && c.Verifier != "never" && c.Verifier != "auto" {
+		errs = append(errs, fmt.Sprintf("verifier must be always, never, or auto; got %q", c.Verifier))
 	}
 	if c.Budget.MaxCost > 0 && c.Budget.WarnCost > c.Budget.MaxCost {
 		errs = append(errs, fmt.Sprintf("budget.warn_cost (%g) must be <= budget.max_cost (%g)", c.Budget.WarnCost, c.Budget.MaxCost))

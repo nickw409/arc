@@ -32,7 +32,7 @@ params:
 phases:
   - name: handler
     spec: "Create {{.http_method}} handler for /{{.endpoint_name}}"
-    test: go test ./internal/api/
+    verify: go test ./internal/api/
     complexity: medium
 `
 	path := writeRecipeFile(t, dir, "api-endpoint.yaml", yaml)
@@ -159,7 +159,7 @@ func TestInstantiateBasic(t *testing.T) {
 			{
 				Name:       "handler",
 				Spec:       "Create {{.http_method}} handler for /{{.endpoint_name}} in {{.package}}.",
-				Test:       "go test ./{{.package}}/ -count=1",
+				Verify:     "go test ./{{.package}}/ -count=1",
 				Complexity: "medium",
 				Files:      []string{"{{.package}}/{{.endpoint_name}}.go"},
 			},
@@ -183,8 +183,8 @@ func TestInstantiateBasic(t *testing.T) {
 	if !strings.Contains(p.Spec.Spec, "GET handler for /users") {
 		t.Errorf("Spec = %q, should contain 'GET handler for /users'", p.Spec.Spec)
 	}
-	if !strings.Contains(p.Spec.Test, "go test ./internal/api/") {
-		t.Errorf("Test = %q, should contain 'go test ./internal/api/'", p.Spec.Test)
+	if !strings.Contains(p.Spec.Verify, "go test ./internal/api/") {
+		t.Errorf("Test = %q, should contain 'go test ./internal/api/'", p.Spec.Verify)
 	}
 	if len(p.Spec.Files) != 1 || p.Spec.Files[0] != "internal/api/users.go" {
 		t.Errorf("Files = %v, want [internal/api/users.go]", p.Spec.Files)
@@ -367,7 +367,7 @@ func TestToPlanCreatesFiles(t *testing.T) {
 			{Name: "pkg", Default: "internal/api"},
 		},
 		Phases: []PhaseTemplate{
-			{Name: "handler", Spec: "create handler", Test: "go test ./internal/api/", Complexity: "medium"},
+			{Name: "handler", Spec: "create handler", Verify: "go test ./internal/api/", Complexity: "medium"},
 			{Name: "integration", Spec: "add integration test", Deps: []string{"handler"}},
 		},
 	}
@@ -406,8 +406,8 @@ func TestToPlanCreatesFiles(t *testing.T) {
 	if spec.Spec != "create handler" {
 		t.Errorf("handler spec.Spec = %q, want %q", spec.Spec, "create handler")
 	}
-	if spec.Test != "go test ./internal/api/" {
-		t.Errorf("handler spec.Test = %q, want %q", spec.Test, "go test ./internal/api/")
+	if spec.Verify != "go test ./internal/api/" {
+		t.Errorf("handler spec.Verify = %q, want %q", spec.Verify, "go test ./internal/api/")
 	}
 	if spec.Complexity != "medium" {
 		t.Errorf("handler spec.Complexity = %q, want %q", spec.Complexity, "medium")

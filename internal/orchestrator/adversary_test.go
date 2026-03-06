@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
+	"github.com/nwiley/arc/internal/testcmd"
 
 	"gopkg.in/yaml.v3"
 )
@@ -155,7 +156,7 @@ func TestParseFailingTests_Basic(t *testing.T) {
 --- FAIL: TestBar (0.01s)
 FAIL
 `
-	tests := parseFailingTests(output)
+	tests := testcmd.ParseFailures(output)
 	if len(tests) != 2 {
 		t.Fatalf("expected 2 failing tests, got %d: %v", len(tests), tests)
 	}
@@ -176,14 +177,14 @@ func TestParseFailingTests_Deduplication(t *testing.T) {
 --- FAIL: TestFoo (0.00s)
 --- FAIL: TestBar (0.01s)
 `
-	tests := parseFailingTests(output)
+	tests := testcmd.ParseFailures(output)
 	if len(tests) != 2 {
 		t.Errorf("expected 2 unique tests (deduped), got %d: %v", len(tests), tests)
 	}
 }
 
 func TestParseFailingTests_Empty(t *testing.T) {
-	tests := parseFailingTests("ok  \tgithub.com/example/pkg\t0.001s\n")
+	tests := testcmd.ParseFailures("ok  \tgithub.com/example/pkg\t0.001s\n")
 	if len(tests) != 0 {
 		t.Errorf("expected 0 tests from passing output, got %d", len(tests))
 	}
@@ -194,7 +195,7 @@ func TestParseFailingTests_SubTests(t *testing.T) {
 --- FAIL: TestFoo/sub2 (0.00s)
 --- FAIL: TestBar (0.01s)
 `
-	tests := parseFailingTests(output)
+	tests := testcmd.ParseFailures(output)
 	// Should capture each as separate failing test names.
 	if len(tests) < 2 {
 		t.Errorf("expected at least 2 failing tests, got %d: %v", len(tests), tests)

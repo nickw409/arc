@@ -28,7 +28,7 @@ func TestWriteReadSpec(t *testing.T) {
 
 	spec := &arc.PhaseSpec{
 		Spec:       "Implement the feature",
-		Test:       "go test ./...",
+		Verify:     "go test ./...",
 		Complexity: "medium",
 		Files:      []string{"internal/foo/bar.go", "internal/foo/baz.go"},
 		Deps:       []string{"phase-b"},
@@ -52,8 +52,8 @@ func TestWriteReadSpec(t *testing.T) {
 	if got.Spec != spec.Spec {
 		t.Errorf("Spec mismatch: got %q, want %q", got.Spec, spec.Spec)
 	}
-	if got.Test != spec.Test {
-		t.Errorf("Test mismatch: got %q, want %q", got.Test, spec.Test)
+	if got.Verify != spec.Verify {
+		t.Errorf("Verify mismatch: got %q, want %q", got.Verify, spec.Verify)
 	}
 	if got.Complexity != spec.Complexity {
 		t.Errorf("Complexity mismatch: got %q, want %q", got.Complexity, spec.Complexity)
@@ -451,5 +451,133 @@ func TestAddPhaseWithDeps(t *testing.T) {
 	}
 	if deps[0] != "phase-a" || deps[1] != "phase-b" {
 		t.Errorf("Dependencies[phase-c]: got %v, want [phase-a phase-b]", deps)
+	}
+}
+
+func TestUpdateSpecMergesFields(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	// Write initial spec with all fields populated
+	initial := &arc.PhaseSpec{
+		Spec:       "original spec",
+		Verify:     "go test ./...",
+		Complexity: "complex",
+		Files:      []string{"main.go", "lib.go"},
+		Gate: arc.GateSpec{
+			VerifierAgent: true,
+			Assertions: []arc.GateAssertion{
+				{Type: "file_exists", FileExists: "main.go", Target: "main.go"},
+			},
+		},
+	}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	// Update only spec text — everything else should survive
+	update := &arc.PhaseSpec{Spec: "updated spec"}
+	if err := UpdateSpec(plansDir, "my-plan", "phase-a", update); err != nil {
+		t.Fatalf("UpdateSpec: %v", err)
+	}
+
+	got, err := ReadSpec(plansDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if got.Spec != "updated spec" {
+		t.Errorf("Spec: got %q, want %q", got.Spec, "updated spec")
+	}
+	if got.Verify != "go test ./..." {
+		t.Errorf("Verify was wiped: got %q, want %q", got.Verify, "go test ./...")
+	}
+	if got.Complexity != "complex" {
+		t.Errorf("Complexity was wiped: got %q, want %q", got.Complexity, "complex")
+	}
+	if len(got.Files) != 2 {
+		t.Errorf("Files was wiped: got %v, want [main.go lib.go]", got.Files)
+	}
+	if !got.Gate.VerifierAgent {
+		t.Error("Gate.VerifierAgent was wiped")
+	}
+	if len(got.Gate.Assertions) != 1 {
+		t.Errorf("Gate.Assertions was wiped: got %v", got.Gate.Assertions)
+	}
+}
+
+func TestValidateSpec_NumberedListTest(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Verify: "1. Check this\n2. Check that",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "verify" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about numbered list in test field")
+	}
+}
+
+func TestValidateSpec_DescriptionTest(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Verify: "Recovery with no state file returns nil",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "verify" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about description-like test field")
+	}
+}
+
+func TestValidateSpec_ValidTest(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Verify:     "go test ./... && go build ./...",
+		Complexity: "medium",
+	}
+	warnings := ValidateSpec(spec)
+	for _, w := range warnings {
+		if w.Field == "verify" {
+			t.Errorf("unexpected verify warning: %s", w)
+		}
+	}
+}
+
+func TestValidateSpec_MissingComplexity(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Verify: "go test ./...",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "complexity" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about missing complexity")
+	}
+}
+
+func TestValidateSpec_FilesNoGate(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Files:      []string{"main.go"},
+		Complexity: "simple",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "gate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about files with no gate assertions")
 	}
 }

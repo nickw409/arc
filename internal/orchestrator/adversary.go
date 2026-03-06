@@ -14,6 +14,7 @@ import (
 	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/prompt"
+	"github.com/nwiley/arc/internal/testcmd"
 )
 
 const (
@@ -47,17 +48,18 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string, planL
 	// Load project context
 	projectCtx := prompt.LoadProjectContext(workDir)
 
-	// Determine test command
-	testCmd := "go test ./..."
-	if opts.Config != nil && opts.Config.TestCommand != "" {
-		testCmd = opts.Config.TestCommand
-	}
-
-	// Open intelligence store for flaky test filtering (best-effort).
+	// Resolve test environment
 	projectDir := opts.ProjectDir
 	if projectDir == "" {
 		projectDir = workDir
 	}
+	tenv := testcmd.NewEnv(
+		testcmd.WithConfig(opts.Config),
+		testcmd.WithProjectDir(projectDir),
+	)
+	testCmd := tenv.Command
+
+	// Open intelligence store for flaky test filtering (best-effort).
 	var intel *intelligence.Store
 	if s, openErr := intelligence.Open(projectDir); openErr == nil {
 		intel = s
@@ -106,10 +108,11 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string, planL
 		}
 
 		// Run the test suite to check for new failures
-		testOutput, testErr := runTestCommand(testCmd, workDir)
-		if testErr != nil {
+		testResult, _ := tenv.RunAll(ctx)
+		testOutput := testResult.Output
+		if !testResult.Passed {
 			// Parse failing tests from output
-			rawFailing := parseFailingTests(testOutput)
+			rawFailing := testcmd.ParseFailures(testOutput)
 
 			// Filter out known-flaky tests — don't count flaky failures as adversary bugs.
 			// Also record second-run outcomes for flaky detection.
@@ -161,14 +164,14 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string, planL
 
 				// After fix attempt, re-run to detect any new flakiness.
 				if intel != nil {
-					retestOutput, retestErr := runTestCommand(testCmd, workDir)
-					retestFailing := parseFailingTests(retestOutput)
+					retestResult, _ := tenv.RunAll(ctx)
+					retestFailing := testcmd.ParseFailures(retestResult.Output)
 					retestFailSet := make(map[string]bool, len(retestFailing))
 					for _, name := range retestFailing {
 						retestFailSet[name] = true
 					}
 					// Tests that failed before the fix but now pass → potentially flaky.
-					if retestErr == nil {
+					if retestResult.Passed {
 						for _, name := range rawFailing {
 							if !retestFailSet[name] {
 								intel.RecordFlakyTest(name, true)
@@ -288,14 +291,6 @@ func gitChangedFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-// runTestCommand runs a test command and returns output.
-func runTestCommand(cmd, dir string) (string, error) {
-	c := exec.Command("sh", "-c", cmd)
-	c.Dir = dir
-	out, err := c.CombinedOutput()
-	return string(out), err
-}
-
 // routeAdversaryFix identifies the responsible phase for a test failure
 // and spawns a fix session.
 func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, round AdversaryRound, changedFiles []string) error {
@@ -356,7 +351,7 @@ func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, 
 `,
 		bestPhase,
 		round.TestOutput,
-		testCmdForFix(opts),
+		testcmd.NewEnv(testcmd.WithConfig(opts.Config), testcmd.WithProjectDir(workDir)).Command,
 	)
 
 	adapterName := "claude"
@@ -374,34 +369,3 @@ func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, 
 	return err
 }
 
-// parseFailingTests extracts test names from Go test output by scanning for
-// lines matching "--- FAIL: TestName" patterns.
-func parseFailingTests(output string) []string {
-	var tests []string
-	seen := make(map[string]bool)
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		// Match "--- FAIL: TestFoo (0.00s)" or "FAIL\t<pkg>" lines.
-		if strings.HasPrefix(line, "--- FAIL: ") {
-			// Extract test name (up to first space after the name)
-			rest := strings.TrimPrefix(line, "--- FAIL: ")
-			name := rest
-			if idx := strings.Index(rest, " "); idx >= 0 {
-				name = rest[:idx]
-			}
-			if name != "" && !seen[name] {
-				seen[name] = true
-				tests = append(tests, name)
-			}
-		}
-	}
-	return tests
-}
-
-// testCmdForFix returns the test command from config, or "go test ./..." as fallback.
-func testCmdForFix(opts LaunchOptions) string {
-	if opts.Config != nil && opts.Config.TestCommand != "" {
-		return opts.Config.TestCommand
-	}
-	return "go test ./..."
-}

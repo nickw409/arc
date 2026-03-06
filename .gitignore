@@ -19,6 +19,9 @@ __pycache__/
 # Arc orchestration plans
 .plans/
 
+# Arc worktrees (agent working directories)
+.arc/worktrees/
+
 # Bench suite runtime artifacts
 bench/.work/
 bench/results/

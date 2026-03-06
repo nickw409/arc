@@ -19,7 +19,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan")),
 		mcp.WithString("phase_name", mcp.Required(), mcp.Description("Name of the new phase")),
 		mcp.WithString("spec", mcp.Required(), mcp.Description("What this phase must accomplish")),
-		mcp.WithString("test", mcp.Description("How to verify completion")),
+		mcp.WithString("verify", mcp.Description("Acceptance criteria for the verifier agent (natural language, not a shell command)")),
 		mcp.WithString("complexity", mcp.Description("Estimated complexity: simple, medium, or complex")),
 		mcp.WithArray("files", mcp.WithStringItems(), mcp.Description("Key files relevant to this phase")),
 		mcp.WithArray("deps", mcp.WithStringItems(), mcp.Description("Phase names this phase depends on")),
@@ -36,7 +36,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan")),
 		mcp.WithString("phase_name", mcp.Required(), mcp.Description("Name of the phase")),
 		mcp.WithString("spec", mcp.Description("Updated description of what the phase must accomplish")),
-		mcp.WithString("test", mcp.Description("Updated verification criteria")),
+		mcp.WithString("verify", mcp.Description("Updated acceptance criteria for the verifier agent")),
 		mcp.WithString("complexity", mcp.Description("Updated complexity: simple, medium, or complex")),
 	), h.handlePlanUpdatePhase)
 
@@ -75,7 +75,7 @@ func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolR
 		return mcp.NewToolResultError("spec is required"), nil
 	}
 
-	test, _ := args["test"].(string)
+	test, _ := args["verify"].(string)
 	complexity, _ := args["complexity"].(string)
 
 	var files []string
@@ -102,17 +102,35 @@ func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolR
 
 	spec := &arc.PhaseSpec{
 		Spec:       specText,
-		Test:       test,
+		Verify:     test,
 		Complexity: complexity,
 		Files:      files,
 		Deps:       deps,
+	}
+
+	// Auto-generate gate assertions from files list.
+	if len(spec.Files) > 0 && len(spec.Gate.Assertions) == 0 {
+		for _, f := range spec.Files {
+			spec.Gate.Assertions = append(spec.Gate.Assertions, arc.GateAssertion{
+				Type:       "file_exists",
+				FileExists: f,
+				Target:     f,
+			})
+		}
 	}
 
 	if err := plan.AddPhase(h.plansDir(), planName, phaseName, spec); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Added phase %q to plan %q", phaseName, planName)), nil
+	msg := fmt.Sprintf("Added phase %q to plan %q", phaseName, planName)
+	if warnings := plan.ValidateSpec(spec); len(warnings) > 0 {
+		msg += "\n\nWarnings:"
+		for _, w := range warnings {
+			msg += fmt.Sprintf("\n  - %s", w)
+		}
+	}
+	return mcp.NewToolResultText(msg), nil
 }
 
 func (h *handlerContext) handlePlanRemovePhase(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -141,11 +159,11 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	}
 
 	specText, _ := args["spec"].(string)
-	test, _ := args["test"].(string)
+	test, _ := args["verify"].(string)
 	complexity, _ := args["complexity"].(string)
 
 	if specText == "" && test == "" && complexity == "" {
-		return mcp.NewToolResultError("at least one of spec, test, or complexity must be provided"), nil
+		return mcp.NewToolResultError("at least one of spec, verify, or complexity must be provided"), nil
 	}
 
 	if complexity != "" && complexity != "simple" && complexity != "medium" && complexity != "complex" {
@@ -154,7 +172,7 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 
 	update := &arc.PhaseSpec{
 		Spec:       specText,
-		Test:       test,
+		Verify:     test,
 		Complexity: complexity,
 	}
 
@@ -167,13 +185,25 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 		updated = append(updated, "spec")
 	}
 	if test != "" {
-		updated = append(updated, "test")
+		updated = append(updated, "verify")
 	}
 	if complexity != "" {
 		updated = append(updated, "complexity")
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Updated %s for phase %q in plan %q", strings.Join(updated, ", "), phaseName, planName)), nil
+	msg := fmt.Sprintf("Updated %s for phase %q in plan %q", strings.Join(updated, ", "), phaseName, planName)
+
+	// Re-read merged spec and validate.
+	if merged, err := plan.ReadSpec(h.plansDir(), planName, phaseName); err == nil {
+		if warnings := plan.ValidateSpec(merged); len(warnings) > 0 {
+			msg += "\n\nWarnings:"
+			for _, w := range warnings {
+				msg += fmt.Sprintf("\n  - %s", w)
+			}
+		}
+	}
+
+	return mcp.NewToolResultText(msg), nil
 }
 
 func (h *handlerContext) handlePlanUpdateGate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

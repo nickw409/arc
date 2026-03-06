@@ -57,7 +57,7 @@ func newPlanAddPhaseCmd() *cobra.Command {
 
 			spec := &arc.PhaseSpec{
 				Spec:       specText,
-				Test:       testCmd,
+				Verify:     testCmd,
 				Complexity: complexity,
 			}
 
@@ -84,7 +84,7 @@ func newPlanAddPhaseCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&specText, "spec", "", "Phase description/objective (required)")
-	cmd.Flags().StringVar(&testCmd, "test", "", "Scoped test command")
+	cmd.Flags().StringVar(&testCmd, "verify", "", "Acceptance criteria for the verifier agent")
 	cmd.Flags().StringVar(&complexity, "complexity", "medium", "Task complexity: simple, medium, or complex")
 	cmd.Flags().StringVar(&deps, "deps", "", "Comma-separated dependency phases")
 	cmd.Flags().StringVar(&files, "file", "", "Comma-separated relevant file paths")
@@ -138,8 +138,8 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 			if specText != "" {
 				existing.Spec = specText
 			}
-			if cmd.Flags().Changed("test") {
-				existing.Test = testCmd
+			if cmd.Flags().Changed("verify") {
+				existing.Verify = testCmd
 			}
 			if cmd.Flags().Changed("complexity") {
 				existing.Complexity = complexity
@@ -162,7 +162,7 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&specText, "spec", "", "New phase description")
-	cmd.Flags().StringVar(&testCmd, "test", "", "Scoped test command")
+	cmd.Flags().StringVar(&testCmd, "verify", "", "Acceptance criteria for the verifier agent")
 	cmd.Flags().StringVar(&complexity, "complexity", "", "Task complexity: simple, medium, or complex")
 	cmd.Flags().StringArrayVar(&checkpoints, "checkpoint", nil, `Named milestone in format "name:description:test_command" (repeatable)`)
 

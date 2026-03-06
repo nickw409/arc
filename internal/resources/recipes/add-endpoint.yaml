@@ -14,7 +14,7 @@ phases:
       - Add the handler function in the {{.package}} package.
       - Register the route so the endpoint is reachable.
       - Keep the implementation focused and consistent with existing handler patterns.
-    test: go test ./{{.package}}/...
+    verify: go test ./{{.package}}/...
     complexity: medium
     files:
       - "{{.package}}/{{.endpoint_name}}.go"
@@ -25,7 +25,7 @@ phases:
       - Cover success cases, error cases, and edge cases.
       - Use table-driven tests where appropriate.
       - Ensure the handler returns correct HTTP status codes and response bodies.
-    test: go test ./{{.package}}/...
+    verify: go test ./{{.package}}/...
     complexity: medium
     files:
       - "{{.package}}/{{.endpoint_name}}_test.go"

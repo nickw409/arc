@@ -712,13 +712,16 @@ gate:
 // Run — scoped test command
 // ---------------------------------------------------------------------------
 
-func TestRun_ScopedTest_Pass(t *testing.T) {
+func TestRun_ScopedTest_AlwaysSkipped(t *testing.T) {
+	// Scoped test execution was removed — verify field is now acceptance criteria
+	// for the verifier agent, not a shell command. Gate always marks scoped test
+	// as skipped+passed regardless of verify content.
 	workdir := t.TempDir()
 	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
-test: "true"
+verify: "Ensure all API endpoints return 200"
 gate:
   assertions: []
 `
@@ -732,34 +735,10 @@ gate:
 		t.Errorf("expected Passed=true")
 	}
 	if !result.ScopedTestPassed {
-		t.Errorf("expected ScopedTestPassed=true")
+		t.Errorf("expected ScopedTestPassed=true (always true when skipped)")
 	}
-	if result.ScopedTestSkipped {
-		t.Errorf("expected ScopedTestSkipped=false")
-	}
-}
-
-func TestRun_ScopedTest_Fail(t *testing.T) {
-	workdir := t.TempDir()
-	phaseDir := t.TempDir()
-
-	spec := `
-name: test-phase
-test: "false"
-gate:
-  assertions: []
-`
-	specPath := writeSpec(t, phaseDir, spec)
-
-	result, err := Run(context.Background(), specPath, workdir)
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if result.Passed {
-		t.Errorf("expected Passed=false when scoped test fails")
-	}
-	if result.ScopedTestPassed {
-		t.Errorf("expected ScopedTestPassed=false")
+	if !result.ScopedTestSkipped {
+		t.Errorf("expected ScopedTestSkipped=true")
 	}
 }
 
@@ -1279,5 +1258,39 @@ gate:
 	}
 	if !strings.Contains(out, "[ ] NewMiddleware function") {
 		t.Errorf("expected failing assertion in output, got:\n%s", out)
+	}
+}
+
+func TestShouldRunVerifier(t *testing.T) {
+	tr := true
+	fa := false
+	tests := []struct {
+		name           string
+		override       *bool
+		configVerifier string
+		specVerifier   bool
+		complexity     string
+		want           bool
+	}{
+		{"override true wins", &tr, "never", false, "simple", true},
+		{"override false wins", &fa, "always", true, "complex", false},
+		{"config always", nil, "always", false, "simple", true},
+		{"config never", nil, "never", true, "complex", false},
+		{"auto + complex", nil, "auto", false, "complex", true},
+		{"auto + medium", nil, "auto", false, "medium", true},
+		{"auto + simple", nil, "auto", false, "simple", false},
+		{"auto + spec true", nil, "auto", true, "simple", true},
+		{"auto + empty complexity", nil, "auto", false, "", false},
+		{"empty config + complex", nil, "", false, "complex", true},
+		{"empty config + simple", nil, "", false, "simple", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ShouldRunVerifier(tt.override, tt.configVerifier, tt.specVerifier, tt.complexity)
+			if got != tt.want {
+				t.Errorf("ShouldRunVerifier(%v, %q, %v, %q) = %v, want %v",
+					tt.override, tt.configVerifier, tt.specVerifier, tt.complexity, got, tt.want)
+			}
+		})
 	}
 }

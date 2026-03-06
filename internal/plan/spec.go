@@ -5,11 +5,84 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/state"
 	"gopkg.in/yaml.v3"
 )
+
+// numberedListRe matches lines that start with a number followed by a dot/paren,
+// which indicates someone wrote a human-readable list instead of a shell command.
+var numberedListRe = regexp.MustCompile(`(?m)^\s*\d+[\.\)]\s`)
+
+// SpecWarning is a non-fatal issue detected during spec validation.
+type SpecWarning struct {
+	Field   string
+	Message string
+}
+
+func (w SpecWarning) String() string {
+	return fmt.Sprintf("%s: %s", w.Field, w.Message)
+}
+
+// ValidateSpec checks a PhaseSpec for common mistakes and returns warnings.
+// It does not return errors — all issues are advisory so the caller can decide.
+func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
+	var warnings []SpecWarning
+
+	// Test field: should be a shell command, not a human-readable description.
+	if spec.Verify != "" {
+		if numberedListRe.MatchString(spec.Verify) {
+			warnings = append(warnings, SpecWarning{
+				Field:   "verify",
+				Message: "looks like a numbered list, not a shell command — the gate executes this as 'sh -c <test>'",
+			})
+		}
+		// Check for lines that are clearly not commands (contain ":" followed by prose)
+		for _, line := range strings.Split(spec.Verify, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Lines starting with a capital letter and containing spaces but no path separators
+			// are likely descriptions, not commands
+			if len(line) > 0 && line[0] >= 'A' && line[0] <= 'Z' && !strings.ContainsAny(line, "/\\$|&;") {
+				warnings = append(warnings, SpecWarning{
+					Field:   "verify",
+					Message: fmt.Sprintf("line %q looks like a description, not a shell command", truncate(line, 60)),
+				})
+				break // one warning is enough
+			}
+		}
+	}
+
+	// Complexity: should be set.
+	if spec.Complexity == "" {
+		warnings = append(warnings, SpecWarning{
+			Field:   "complexity",
+			Message: "not set — verifier agent auto-detection requires complexity (simple/medium/complex)",
+		})
+	}
+
+	// Files listed but no file_exists gate assertions.
+	if len(spec.Files) > 0 && len(spec.Gate.Assertions) == 0 {
+		warnings = append(warnings, SpecWarning{
+			Field:   "gate",
+			Message: fmt.Sprintf("%d files listed but no gate assertions — consider adding file_exists assertions", len(spec.Files)),
+		})
+	}
+
+	return warnings
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
 
 // specPath returns the path to spec.yaml for a phase.
 func specPath(plansDir, planName, phaseName string) string {
@@ -182,9 +255,9 @@ func RemovePhase(plansDir, planName, phaseName string) error {
 	return state.WritePlan(planDir, meta)
 }
 
-// UpdateSpec updates the spec.yaml for a phase.
+// UpdateSpec merges the non-zero fields of update into the existing spec.yaml for a phase.
 // Only works on phases in "pending" or "blocked" status.
-func UpdateSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error {
+func UpdateSpec(plansDir, planName, phaseName string, update *arc.PhaseSpec) error {
 	planDir := filepath.Join(plansDir, planName)
 	statePath := filepath.Join(planDir, "phases", phaseName, "state.json")
 	sf := state.NewStateFile(statePath)
@@ -200,12 +273,37 @@ func UpdateSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error
 		return fmt.Errorf("phase %q has status %q; only pending or blocked phases can have their spec updated", phaseName, phaseState.PhaseStatus)
 	}
 
-	if err := WriteSpec(plansDir, planName, phaseName, spec); err != nil {
+	// Read existing spec and merge — only overwrite fields that are non-zero in update.
+	existing, err := ReadSpec(plansDir, planName, phaseName)
+	if err != nil {
+		existing = &arc.PhaseSpec{}
+	}
+	if update.Spec != "" {
+		existing.Spec = update.Spec
+	}
+	if update.Verify != "" {
+		existing.Verify = update.Verify
+	}
+	if update.Complexity != "" {
+		existing.Complexity = update.Complexity
+	}
+	if len(update.Files) > 0 {
+		existing.Files = update.Files
+	}
+	if len(update.Deps) > 0 {
+		existing.Deps = update.Deps
+	}
+	if len(update.Checkpoints) > 0 {
+		existing.Checkpoints = update.Checkpoints
+	}
+	// Gate is only updated via UpdateGate — not merged here.
+
+	if err := WriteSpec(plansDir, planName, phaseName, existing); err != nil {
 		return err
 	}
 
 	// Also update plan.md for backward compatibility
-	planMDContent := spec.Spec
+	planMDContent := existing.Spec
 	if planMDContent == "" {
 		planMDContent = "## Objective\n\n(no spec provided)\n"
 	}
