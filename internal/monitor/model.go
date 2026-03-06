@@ -1,6 +1,9 @@
 package monitor
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -78,6 +81,86 @@ func (m Model) firstPlan() PlanView {
 	return PlanView{}
 }
 
+// totalPhases returns the total number of phases across all plans.
+func (m Model) totalPhases() int {
+	total := 0
+	for _, p := range m.plans {
+		total += len(p.Phases)
+	}
+	return total
+}
+
+// selectedPhase maps flat selectedIdx to (plan index, phase index within that plan).
+// Returns (-1, -1) if out of bounds.
+func (m Model) selectedPhase() (planIdx, phaseIdx int) {
+	flat := m.selectedIdx
+	for i, p := range m.plans {
+		if flat < len(p.Phases) {
+			return i, flat
+		}
+		flat -= len(p.Phases)
+	}
+	return -1, -1
+}
+
+// refresh reads all plan dirs under m.plansDir, builds PlanView list, and returns a refreshMsg.
+func (m Model) refresh() tea.Msg {
+	entries, err := os.ReadDir(m.plansDir)
+	if err != nil {
+		return refreshMsg{plans: m.plans}
+	}
+
+	var plans []PlanView
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if m.planFilter != "" && name != m.planFilter {
+			continue
+		}
+
+		planDir := filepath.Join(m.plansDir, name)
+		planJSON, err := os.ReadFile(filepath.Join(planDir, "plan.json"))
+		if err != nil {
+			continue
+		}
+
+		var meta arc.PlanMeta
+		if err := json.Unmarshal(planJSON, &meta); err != nil {
+			continue
+		}
+
+		var views []PhaseView
+		for _, phase := range meta.Phases {
+			statePath := filepath.Join(planDir, "phases", phase, "state.json")
+			data, err := os.ReadFile(statePath)
+			if err != nil {
+				views = append(views, PhaseView{Name: phase, Status: "unknown", Icon: "[?]"})
+				continue
+			}
+
+			var ps arc.PhaseState
+			if err := json.Unmarshal(data, &ps); err != nil {
+				views = append(views, PhaseView{Name: phase, Status: "error", Icon: "[?]"})
+				continue
+			}
+
+			views = append(views, PhaseViewFromState(&ps))
+		}
+
+		summary := planSummaryFromViews(views, meta.WorkflowType)
+		plans = append(plans, PlanView{
+			Name:         meta.Name,
+			WorkflowType: meta.WorkflowType,
+			Phases:       views,
+			Meta:         summary,
+		})
+	}
+
+	return refreshMsg{plans: plans}
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(tick(), m.refresh)
 }
@@ -97,9 +180,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m.plans = msg.plans
 		m.lastUpdate = time.Now()
-		phases := m.firstPlan().Phases
-		if m.selectedIdx >= len(phases) && len(phases) > 0 {
-			m.selectedIdx = len(phases) - 1
+		total := m.totalPhases()
+		if total == 0 {
+			m.selectedIdx = 0
+		} else if m.selectedIdx >= total {
+			m.selectedIdx = total - 1
 		}
 		return m, tick()
 	}
@@ -123,21 +208,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOverviewKey(key string) (tea.Model, tea.Cmd) {
-	phases := m.firstPlan().Phases
+	total := m.totalPhases()
 	switch key {
 	case "q", "esc":
 		m.quitting = true
 		return m, tea.Quit
 	case "down":
-		if len(phases) > 0 && m.selectedIdx < len(phases)-1 {
+		if total > 0 && m.selectedIdx < total-1 {
 			m.selectedIdx++
 		}
 	case "up":
-		if m.selectedIdx > 0 {
+		if total > 0 && m.selectedIdx > 0 {
 			m.selectedIdx--
 		}
 	case "enter", " ":
-		if len(phases) > 0 {
+		if total > 0 {
 			m.showDetail = true
 			m.detailScroll = 0
 		}
