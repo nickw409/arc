@@ -86,8 +86,8 @@ func setupReviewPlan(t *testing.T, planName string, phases []string) string {
 
 func TestReviewDefaultAdversaries(t *testing.T) {
 	advs := DefaultAdversaries()
-	if len(advs) != 5 {
-		t.Fatalf("expected 5 adversaries, got %d", len(advs))
+	if len(advs) != 6 {
+		t.Fatalf("expected 6 adversaries, got %d", len(advs))
 	}
 
 	expected := map[string]struct {
@@ -99,6 +99,7 @@ func TestReviewDefaultAdversaries(t *testing.T) {
 		"scope":         {required: false, failVerdict: "scope_too_large"},
 		"consistency":   {required: true, failVerdict: "inconsistent"},
 		"executability": {required: true, failVerdict: "blocked"},
+		"integration":   {required: true, failVerdict: "integration_gaps"},
 	}
 
 	for _, adv := range advs {
@@ -132,8 +133,8 @@ func TestReviewRunBasic(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if len(result.Verdicts) != 5 {
-		t.Fatalf("expected 5 verdicts, got %d", len(result.Verdicts))
+	if len(result.Verdicts) != 6 {
+		t.Fatalf("expected 6 verdicts, got %d", len(result.Verdicts))
 	}
 }
 
@@ -576,7 +577,7 @@ func TestReviewAutoRemediation(t *testing.T) {
 	// The mock agent uses MOCK_SCRIPT_DIR for sequential responses.
 	scriptDir := t.TempDir()
 
-	// We have 5 adversaries running in parallel, and each uses the same mock binary.
+	// We have 6 adversaries running in parallel, and each uses the same mock binary.
 	// Since we can't control which adversary gets which script call, we use
 	// MOCK_OUTPUT to return a consistent passing response with a suggestion.
 	// The first run: all agents return failure with a suggestion
@@ -586,15 +587,15 @@ func TestReviewAutoRemediation(t *testing.T) {
 	failOutput := "## Coverage Analysis\n\nMissing error return.\n\n## Suggestions\n\n<<<ORIGINAL\nfunc Foo() {\n>>>\n<<<SUGGESTED\nfunc Foo() error {\n>>>\n\n## Verdict\ncoverage_gaps\n"
 
 	// For this test, use scripted responses:
-	// call_0 through call_4 (first run, 5 adversaries): all fail with suggestions
-	// call_5 through call_9 (second run, 5 adversaries): all pass
-	for i := 0; i < 5; i++ {
+	// call_0 through call_5 (first run, 6 adversaries): all fail with suggestions
+	// call_6 through call_11 (second run, 6 adversaries): all pass
+	for i := 0; i < 6; i++ {
 		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(failOutput), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	passOutput := "## Coverage Analysis\n\nAll good.\n\n## Verdict\ncoverage_sufficient\n"
-	for i := 5; i < 10; i++ {
+	for i := 6; i < 12; i++ {
 		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(passOutput), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -691,8 +692,8 @@ func TestReviewIterationDetails(t *testing.T) {
 	if detail.Iteration != 1 {
 		t.Fatalf("expected first iteration to be 1, got %d", detail.Iteration)
 	}
-	if len(detail.Verdicts) != 5 {
-		t.Fatalf("expected 5 verdict entries, got %d", len(detail.Verdicts))
+	if len(detail.Verdicts) != 6 {
+		t.Fatalf("expected 6 verdict entries, got %d", len(detail.Verdicts))
 	}
 }
 
@@ -718,7 +719,7 @@ func TestReviewHistoryFirstRun(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if len(result.Verdicts) != 5 {
-		t.Fatalf("expected 5 verdicts, got %d", len(result.Verdicts))
+	if len(result.Verdicts) != 6 {
+		t.Fatalf("expected 6 verdicts, got %d", len(result.Verdicts))
 	}
 }

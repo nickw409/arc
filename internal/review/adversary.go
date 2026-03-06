@@ -34,7 +34,7 @@ type Adversary struct {
 	Required    bool
 }
 
-// DefaultAdversaries returns the 5 standard adversarial reviewers.
+// DefaultAdversaries returns the 6 standard adversarial reviewers.
 func DefaultAdversaries() []Adversary {
 	return []Adversary{
 		{Name: "coverage", PromptPath: "adversaries/coverage.md", PassVerdict: "coverage_sufficient", FailVerdict: "coverage_gaps", Required: true},
@@ -42,6 +42,7 @@ func DefaultAdversaries() []Adversary {
 		{Name: "scope", PromptPath: "adversaries/scope.md", PassVerdict: "scope_appropriate", FailVerdict: "scope_too_large", Required: false},
 		{Name: "consistency", PromptPath: "adversaries/consistency.md", PassVerdict: "consistent", FailVerdict: "inconsistent", Required: true},
 		{Name: "executability", PromptPath: "adversaries/executability.md", PassVerdict: "executable", FailVerdict: "blocked", Required: true},
+		{Name: "integration", PromptPath: "adversaries/integration.md", PassVerdict: "integration_complete", FailVerdict: "integration_gaps", Required: true},
 	}
 }
 

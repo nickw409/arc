@@ -275,13 +275,15 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"gate/", // gate prompts are loaded programmatically via RenderGatePrompt, not by workflow states
 	}
 	exemptFiles := map[string]bool{
-		"direct/multi-phase.md": true, // loaded by orchestrator for direct multi-phase plans
-		"blocks/act.md":         true, // default prompt for act block
-		"blocks/adversary.md":   true, // default prompt for adversary block
-		"blocks/tests.md":       true, // default prompt for tests block
-		"blocks/test-review.md": true, // default prompt for test-review block
-		"blocks/review.md":      true, // default prompt for review block
-		"blocks/scout.md":       true, // default prompt for scout block
+		"direct/multi-phase.md":         true, // loaded by orchestrator for direct multi-phase plans
+		"blocks/act.md":                 true, // default prompt for act block
+		"blocks/adversary.md":           true, // default prompt for adversary block
+		"blocks/tests.md":               true, // default prompt for tests block
+		"blocks/test-review.md":         true, // default prompt for test-review block
+		"blocks/review.md":              true, // default prompt for review block
+		"blocks/scout.md":               true, // default prompt for scout block
+		"commitment-audit/audit.md":     true, // loaded programmatically by orchestrator commitment audit
+		"commitment-audit/fix.md":       true, // loaded programmatically by orchestrator commitment audit
 	}
 
 	refs := allWorkflowPromptRefs(t)
