@@ -1342,3 +1342,361 @@ func TestRefreshReadsFiles(t *testing.T) {
 		t.Errorf("meta.TotalTokens=%d, want 24000", rm.meta.TotalTokens)
 	}
 }
+
+func TestRefreshMissingPlanJSON(t *testing.T) {
+	// When plan.json is absent, refresh returns existing phases unchanged.
+	m := NewModel("test-plan", t.TempDir())
+	m.phases = []PhaseView{{Name: "old", Status: "pending"}}
+	msg := m.refresh()
+	rm, ok := msg.(refreshMsg)
+	if !ok {
+		t.Fatalf("expected refreshMsg, got %T", msg)
+	}
+	if len(rm.phases) != 1 || rm.phases[0].Name != "old" {
+		t.Error("expected existing phases preserved when plan.json missing")
+	}
+}
+
+func TestRefreshInvalidPlanJSON(t *testing.T) {
+	// When plan.json contains invalid JSON, refresh returns existing phases unchanged.
+	planDir := t.TempDir()
+	os.WriteFile(filepath.Join(planDir, "plan.json"), []byte("not json"), 0644)
+
+	m := NewModel("test-plan", planDir)
+	m.phases = []PhaseView{{Name: "old", Status: "pending"}}
+	msg := m.refresh()
+	rm, ok := msg.(refreshMsg)
+	if !ok {
+		t.Fatalf("expected refreshMsg, got %T", msg)
+	}
+	if len(rm.phases) != 1 || rm.phases[0].Name != "old" {
+		t.Error("expected existing phases preserved when plan.json invalid")
+	}
+}
+
+func TestRefreshMissingStateFile(t *testing.T) {
+	// A phase with no state.json gets status "unknown" and icon "[?]".
+	planDir := t.TempDir()
+	meta := arc.NewPlanMeta("test-plan", "feature", []string{"missing-phase"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+	// Do NOT create phases/missing-phase/state.json
+
+	m := NewModel("test-plan", planDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.phases) != 1 {
+		t.Fatalf("phases=%d, want 1", len(rm.phases))
+	}
+	if rm.phases[0].Status != "unknown" {
+		t.Errorf("status=%q, want 'unknown'", rm.phases[0].Status)
+	}
+	if rm.phases[0].Icon != "[?]" {
+		t.Errorf("icon=%q, want '[?]'", rm.phases[0].Icon)
+	}
+}
+
+func TestRefreshInvalidStateFile(t *testing.T) {
+	// A phase with invalid state.json gets status "error" and icon "[?]".
+	planDir := t.TempDir()
+	meta := arc.NewPlanMeta("test-plan", "feature", []string{"bad-phase"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+	phaseDir := filepath.Join(planDir, "phases", "bad-phase")
+	os.MkdirAll(phaseDir, 0755)
+	os.WriteFile(filepath.Join(phaseDir, "state.json"), []byte("not json"), 0644)
+
+	m := NewModel("test-plan", planDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.phases) != 1 {
+		t.Fatalf("phases=%d, want 1", len(rm.phases))
+	}
+	if rm.phases[0].Status != "error" {
+		t.Errorf("status=%q, want 'error'", rm.phases[0].Status)
+	}
+	if rm.phases[0].Icon != "[?]" {
+		t.Errorf("icon=%q, want '[?]'", rm.phases[0].Icon)
+	}
+}
+
+// --- formatIter ---
+
+func TestFormatIter(t *testing.T) {
+	tests := []struct {
+		pv   PhaseView
+		want string
+	}{
+		{PhaseView{Iteration: 0, MaxIteration: 0}, "—"},
+		{PhaseView{Iteration: 3, MaxIteration: 25}, "3/25"},
+		{PhaseView{Iteration: 0, MaxIteration: 25}, "0/25"},
+		{PhaseView{Iteration: 5, MaxIteration: 25, StuckIterations: 2}, "~5/25"},
+		{PhaseView{MaxIteration: 25}, "0/25"},
+	}
+	for _, tc := range tests {
+		got := formatIter(tc.pv)
+		if got != tc.want {
+			t.Errorf("formatIter(%+v)=%q, want %q", tc.pv, got, tc.want)
+		}
+	}
+}
+
+// --- formatTests ---
+
+func TestFormatTests(t *testing.T) {
+	tests := []struct {
+		pv   PhaseView
+		want string
+	}{
+		{PhaseView{TestsTotal: 0}, "—"},
+		{PhaseView{TestsPassing: 7, TestsTotal: 12}, "7/12"},
+		{PhaseView{TestsPassing: 0, TestsTotal: 5}, "0/5"},
+	}
+	for _, tc := range tests {
+		got := formatTests(tc.pv)
+		if got != tc.want {
+			t.Errorf("formatTests(%+v)=%q, want %q", tc.pv, got, tc.want)
+		}
+	}
+}
+
+// --- isActiveStatus ---
+
+func TestIsActiveStatus(t *testing.T) {
+	inactive := []string{"", "pending", "complete", "blocked", "deferred", "split", "disputed"}
+	for _, s := range inactive {
+		if isActiveStatus(s) {
+			t.Errorf("isActiveStatus(%q) = true, want false", s)
+		}
+	}
+	active := []string{"implementing", "running", "qa_review", "act", "tests"}
+	for _, s := range active {
+		if !isActiveStatus(s) {
+			t.Errorf("isActiveStatus(%q) = false, want true", s)
+		}
+	}
+}
+
+// --- renderPhaseRow activity line ---
+
+func TestRenderPhaseRowActivityShownForActive(t *testing.T) {
+	// Activity line is appended only when status is active.
+	pv := PhaseView{
+		Name:     "core",
+		Status:   "implementing",
+		Icon:     "[>]",
+		Activity: "writing tests",
+	}
+	row := renderPhaseRow(pv, 100, false)
+	if !strings.Contains(row, "writing tests") {
+		t.Error("activity line should appear for active phases on wide terminal")
+	}
+	if !strings.Contains(row, "↳") {
+		t.Error("activity line should include arrow indicator")
+	}
+}
+
+func TestRenderPhaseRowActivityHiddenForInactive(t *testing.T) {
+	// Activity line must NOT appear for non-active statuses.
+	for _, status := range []string{"pending", "complete", "blocked", "deferred"} {
+		pv := PhaseView{
+			Name:     "core",
+			Status:   status,
+			Icon:     "[ ]",
+			Activity: "some activity",
+		}
+		row := renderPhaseRow(pv, 100, false)
+		if strings.Contains(row, "some activity") {
+			t.Errorf("activity should be hidden for status=%q", status)
+		}
+	}
+}
+
+func TestRenderPhaseRowActivityTruncated(t *testing.T) {
+	// Very long activity strings are capped to terminal width.
+	pv := PhaseView{
+		Name:     "core",
+		Status:   "implementing",
+		Icon:     "[>]",
+		Activity: strings.Repeat("x", 200),
+	}
+	row := renderPhaseRow(pv, 80, false)
+	if strings.Contains(row, strings.Repeat("x", 100)) {
+		t.Error("activity should be truncated to fit terminal width")
+	}
+	if !strings.Contains(row, "...") {
+		t.Error("truncated activity should end with '...'")
+	}
+}
+
+// --- renderPhaseRow narrow (< 80) ---
+
+func TestRenderPhaseRowVeryNarrow(t *testing.T) {
+	// Width < 80: shows icon, name, and state only.
+	pv := PhaseView{
+		Name:         "core",
+		Status:       "implementing",
+		Icon:         "[>]",
+		CurrentState: "impl",
+		Iteration:    5, MaxIteration: 25,
+		TestsPassing: 7, TestsTotal: 12,
+	}
+	row := renderPhaseRow(pv, 70, false)
+	if !strings.Contains(row, "[>]") {
+		t.Error("narrow: missing icon")
+	}
+	if !strings.Contains(row, "core") {
+		t.Error("narrow: missing name")
+	}
+	if !strings.Contains(row, "impl") {
+		t.Error("narrow: missing state")
+	}
+	// Iter and tests columns should not appear.
+	if strings.Contains(row, "5/25") {
+		t.Error("narrow: iter column should be hidden")
+	}
+	if strings.Contains(row, "7/12") {
+		t.Error("narrow: tests column should be hidden")
+	}
+}
+
+func TestRenderPhaseRowNarrowNoCurrentState(t *testing.T) {
+	// When CurrentState is empty in narrow mode, falls back to Status.
+	pv := PhaseView{
+		Name:         "core",
+		Status:       "pending",
+		Icon:         "[ ]",
+		CurrentState: "",
+	}
+	row := renderPhaseRow(pv, 70, false)
+	if !strings.Contains(row, "pending") {
+		t.Error("narrow: should show status when CurrentState is empty")
+	}
+}
+
+// --- renderPhaseRow state dash for terminal statuses ---
+
+func TestRenderPhaseRowStateDashForTerminal(t *testing.T) {
+	// "pending", "complete", "blocked", "deferred" with no CurrentState show "—".
+	for _, status := range []string{"pending", "complete", "blocked", "deferred"} {
+		pv := PhaseView{
+			Name:         "phase",
+			Status:       status,
+			Icon:         "[ ]",
+			CurrentState: "",
+		}
+		row := renderPhaseRow(pv, 100, false)
+		if !strings.Contains(row, "—") {
+			t.Errorf("status=%q: state column should be '—' when CurrentState empty", status)
+		}
+	}
+}
+
+// --- stateColWidth / phaseNameWidth breakpoints ---
+
+func TestStateColWidthBreakpoints(t *testing.T) {
+	if w := stateColWidth(90); w != 16 {
+		t.Errorf("stateColWidth(90)=%d, want 16", w)
+	}
+	if w := stateColWidth(100); w != 20 {
+		t.Errorf("stateColWidth(100)=%d, want 20", w)
+	}
+	if w := stateColWidth(120); w != 28 {
+		t.Errorf("stateColWidth(120)=%d, want 28", w)
+	}
+}
+
+func TestPhaseNameWidthBreakpoints(t *testing.T) {
+	if w := phaseNameWidth(50); w != 15 {
+		t.Errorf("phaseNameWidth(50)=%d, want 15", w)
+	}
+	if w := phaseNameWidth(80); w != 20 {
+		t.Errorf("phaseNameWidth(80)=%d, want 20", w)
+	}
+	if w := phaseNameWidth(100); w != 24 {
+		t.Errorf("phaseNameWidth(100)=%d, want 24", w)
+	}
+}
+
+// --- renderDetailPanel edge cases ---
+
+func TestRenderDetailPanelOutOfBounds(t *testing.T) {
+	// selectedIdx >= len(phases) returns empty string.
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.phases = []PhaseView{}
+	m.selectedIdx = 0
+	view := m.renderDetailPanel()
+	if view != "" {
+		t.Errorf("expected empty string for out-of-bounds selectedIdx, got %q", view)
+	}
+}
+
+func TestRenderDetailPanelDeferredReason(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.phases = []PhaseView{{
+		Name:           "deferred-phase",
+		Status:         "deferred",
+		DeferredReason: "waiting on dependency",
+	}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "waiting on dependency") {
+		t.Error("detail panel should show deferred reason")
+	}
+}
+
+func TestRenderDetailPanelActivity(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.phases = []PhaseView{{
+		Name:              "active-phase",
+		Status:            "implementing",
+		Activity:          "running test suite",
+		ActivityUpdatedAt: "2025-01-15T14:02:30Z",
+	}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "running test suite") {
+		t.Error("detail panel should show activity")
+	}
+	if !strings.Contains(view, "14:02:30") {
+		t.Error("detail panel should show activity timestamp")
+	}
+}
+
+func TestRenderDetailPanelActivityDashForActive(t *testing.T) {
+	// Active phase with no activity shows "Activity: —".
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.phases = []PhaseView{{
+		Name:     "active-phase",
+		Status:   "implementing",
+		Activity: "",
+	}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "Activity: —") {
+		t.Error("detail panel should show 'Activity: —' for active phase with no activity")
+	}
+}
+
+func TestRenderDetailPanelScrollClamp(t *testing.T) {
+	// When detailScroll exceeds content, it's clamped to a valid offset.
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.phases = []PhaseView{{Name: "phase", Status: "pending"}}
+	m.showDetail = true
+	m.detailScroll = 9999 // way beyond content
+
+	// Should not panic and should render something.
+	view := m.renderDetailPanel()
+	if view == "" {
+		t.Error("expected non-empty view even with scroll past end")
+	}
+}

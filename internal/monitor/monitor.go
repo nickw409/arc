@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -15,8 +14,7 @@ type StartOptions struct {
 
 // Start launches the bubbletea TUI monitor.
 func Start(opts StartOptions) error {
-	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
-	model := NewModel(opts.PlanName, planDir)
+	model := NewModel(opts.PlanName, opts.PlansDir)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

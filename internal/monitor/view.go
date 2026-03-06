@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -21,16 +20,17 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%dk", n/1000)
 }
 
-// renderHeader renders plan name, workflow type, overall progress, token usage, and last update time.
+// renderHeader renders plan name, workflow type, overall progress, and last update time.
 func (m Model) renderHeader() string {
-	meta := m.planMeta
+	plan := m.firstPlan()
+	meta := plan.Meta
 
 	// First line: plan name, workflow type, progress, update time
-	line1 := fmt.Sprintf("Arc Monitor: %s", m.planName)
-	if meta.WorkflowType != "" {
-		line1 += fmt.Sprintf("  [%s]", meta.WorkflowType)
+	line1 := fmt.Sprintf("Arc Monitor: %s", m.planFilter)
+	if plan.WorkflowType != "" {
+		line1 += fmt.Sprintf("  [%s]", plan.WorkflowType)
 	}
-	line1 += fmt.Sprintf("  %d/%d phases", meta.PhasesComplete, meta.PhasesTotal)
+	line1 += fmt.Sprintf("  %d/%d phases", meta.CompletedCount, len(plan.Phases))
 	if !m.lastUpdate.IsZero() {
 		line1 += fmt.Sprintf("  updated %s", m.lastUpdate.Format("15:04:05"))
 	}
@@ -40,23 +40,11 @@ func (m Model) renderHeader() string {
 	if meta.TotalIterations > 0 {
 		parts = append(parts, fmt.Sprintf("%d iter", meta.TotalIterations))
 	}
-	if meta.TotalTests > 0 {
-		parts = append(parts, fmt.Sprintf("%d/%d tests", meta.TotalTestsPassing, meta.TotalTests))
+	if meta.RunningCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d active", meta.RunningCount))
 	}
-	if meta.TotalTokens > 0 {
-		parts = append(parts, fmt.Sprintf("%s tokens", formatTokens(meta.TotalTokens)))
-	}
-	if meta.PhasesActive > 0 {
-		parts = append(parts, fmt.Sprintf("%d active", meta.PhasesActive))
-	}
-	if meta.InterventionCount > 0 {
-		parts = append(parts, alertStyle.Render(fmt.Sprintf("%d intervention", meta.InterventionCount)))
-	}
-	if meta.BlockedCount > 0 {
-		parts = append(parts, blockedStyle.Render(fmt.Sprintf("%d blocked", meta.BlockedCount)))
-	}
-	if meta.StuckCount > 0 {
-		parts = append(parts, verdictWarnStyle.Render(fmt.Sprintf("%d stuck", meta.StuckCount)))
+	if meta.FailedCount > 0 {
+		parts = append(parts, blockedStyle.Render(fmt.Sprintf("%d blocked", meta.FailedCount)))
 	}
 
 	header := headerStyle.Render(line1)
@@ -68,30 +56,15 @@ func (m Model) renderHeader() string {
 }
 
 // renderInterventionAlerts renders alerts for phases with intervention requests.
+// Intervention is no longer tracked in PhaseView; this is a no-op.
 func (m Model) renderInterventionAlerts() string {
-	var alerts []string
-	for _, pv := range m.phases {
-		if pv.HasIntervention {
-			line := fmt.Sprintf("  [!] INTERVENTION: %s", pv.Name)
-			if pv.InterventionReason != "" {
-				reason := pv.InterventionReason
-				if len(reason) > 70 {
-					reason = reason[:67] + "..."
-				}
-				line += fmt.Sprintf(" — %q", reason)
-			}
-			alerts = append(alerts, alertStyle.Render(line))
-		}
-	}
-	if len(alerts) == 0 {
-		return ""
-	}
-	return "\n" + strings.Join(alerts, "\n") + "\n"
+	return ""
 }
 
 // renderPhaseTable renders the column-header and all phase rows.
 func (m Model) renderPhaseTable() string {
-	if len(m.phases) == 0 {
+	phases := m.firstPlan().Phases
+	if len(phases) == 0 {
 		return "\n  No phases found.\n"
 	}
 
@@ -107,7 +80,7 @@ func (m Model) renderPhaseTable() string {
 	b.WriteString(dimStyle.Render(renderColumnHeader(width)))
 	b.WriteString("\n")
 
-	for i, pv := range m.phases {
+	for i, pv := range phases {
 		selected := i == m.selectedIdx
 		b.WriteString(renderPhaseRow(pv, width, selected))
 		b.WriteString("\n")
@@ -127,9 +100,6 @@ func renderColumnHeader(width int) string {
 	header := fmt.Sprintf("  %s %-*s  %-*s %-7s %-9s", "   ", nameW, "PHASE", stateW, "STATE", "ITER", "TESTS")
 	if width >= 90 {
 		header += fmt.Sprintf(" %-9s", "TOKENS")
-	}
-	if width >= 90 {
-		header += fmt.Sprintf(" %s", "VERDICT")
 	}
 	return header
 }
@@ -162,11 +132,7 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 
 	nameW := phaseNameWidth(width)
 
-	// Phase name with model override indicator
 	name := pv.Name
-	if pv.ModelOverride != "" {
-		name += "*"
-	}
 	if len(name) > nameW {
 		name = name[:nameW-1] + "~"
 	}
@@ -194,36 +160,24 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 
 	// Narrow terminal: just icon, name, state
 	if width < 80 {
-		state := pv.CurrentState
-		if state == "" {
-			state = pv.Status
-		}
-		row := fmt.Sprintf("%s%s %-*s  %s", cursor, icon, nameW, name, state)
+		row := fmt.Sprintf("%s%s %-*s  %s", cursor, icon, nameW, name, pv.Status)
 		if selected {
 			return selectedStyle.Render(style.Render(row))
 		}
 		return style.Render(row)
 	}
 
-	// State column
-	state := pv.CurrentState
-	if state == "" {
-		switch pv.Status {
-		case "pending", "complete", "blocked", "deferred":
-			state = "—"
-		default:
-			state = pv.Status
-		}
+	// State column: use Status
+	state := pv.Status
+	switch pv.Status {
+	case "pending", "complete", "blocked", "deferred":
+		state = "—"
 	}
 
 	// Iter column
 	var iter string
 	if pv.Iteration > 0 || pv.MaxIteration > 0 {
-		prefix := ""
-		if pv.StuckIterations > 0 {
-			prefix = "~"
-		}
-		iter = fmt.Sprintf("%s%d/%d", prefix, pv.Iteration, pv.MaxIteration)
+		iter = fmt.Sprintf("%d/%d", pv.Iteration, pv.MaxIteration)
 	} else {
 		iter = "—"
 	}
@@ -252,20 +206,6 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 		}
 	}
 
-	// Verdict column (wide terminal)
-	if width >= 90 {
-		if pv.LastVerdict != "" {
-			row += " " + VerdictStyle(pv.LastVerdict).Render(pv.LastVerdict)
-		} else {
-			row += " " + dimStyle.Render("—")
-		}
-
-		// Completed timestamp
-		if pv.Status == "complete" && pv.CompletedAt != "" {
-			row += "  " + dimStyle.Render(pv.CompletedAt)
-		}
-	}
-
 	// Activity line: dim second line shown only for active phases on wide terminals
 	if width >= 80 && pv.Activity != "" && isActiveStatus(pv.Status) {
 		activityLine := fmt.Sprintf("      ↳ %s", pv.Activity)
@@ -286,10 +226,11 @@ func renderPhaseRow(pv PhaseView, width int, selected bool) string {
 
 // renderDetailPanel renders a full-screen detail view for the selected phase.
 func (m Model) renderDetailPanel() string {
-	if m.selectedIdx >= len(m.phases) {
+	phases := m.firstPlan().Phases
+	if m.selectedIdx >= len(phases) {
 		return ""
 	}
-	pv := m.phases[m.selectedIdx]
+	pv := phases[m.selectedIdx]
 
 	var lines []string
 
@@ -300,23 +241,15 @@ func (m Model) renderDetailPanel() string {
 	lines = append(lines, "")
 
 	// Status row
-	statusLine := fmt.Sprintf("  Status: %-14s Workflow: %-12s", pv.Status, pv.WorkflowType)
-	if pv.ModelOverride != "" {
-		statusLine += fmt.Sprintf(" Model: %s", pv.ModelOverride)
-	}
-	lines = append(lines, statusLine)
+	lines = append(lines, fmt.Sprintf("  Status: %s", pv.Status))
 
-	// State/iter row
-	stateLine := fmt.Sprintf("  State:  %-28s Iter: %-14s", pv.CurrentState, formatIter(pv))
-	if pv.GlobalIterations > 0 {
-		stateLine += fmt.Sprintf(" Global iters: %d", pv.GlobalIterations)
-	}
-	lines = append(lines, stateLine)
+	// Iter row
+	lines = append(lines, fmt.Sprintf("  Iter:   %s", formatIter(pv)))
 
-	// Tests/rollback row
-	testsLine := fmt.Sprintf("  Tests:  %-14s Rollbacks: %-9d Stuck: %-8d Hangs: %d",
-		formatTests(pv), pv.RollbackCount, pv.StuckIterations, pv.HangCount)
-	lines = append(lines, testsLine)
+	// Tests row
+	if pv.TestsTotal > 0 {
+		lines = append(lines, fmt.Sprintf("  Tests:  %s", formatTests(pv)))
+	}
 
 	// Commit/tokens row
 	commitLine := "  Commit: "
@@ -361,76 +294,6 @@ func (m Model) renderDetailPanel() string {
 		lines = append(lines, dimStyle.Render("  Activity: —"))
 	}
 
-	// Chunks
-	if pv.ChunksTotal > 0 {
-		lines = append(lines, "")
-		chunkLine := fmt.Sprintf("  Chunks: %d/%d complete", pv.ChunksDone, pv.ChunksTotal)
-		if pv.ChunkCurrent != "" {
-			chunkLine += fmt.Sprintf("   Current: %q", pv.ChunkCurrent)
-		}
-		lines = append(lines, chunkLine)
-	}
-
-	// Intervention
-	if pv.HasIntervention {
-		lines = append(lines, "")
-		lines = append(lines, alertStyle.Render("  INTERVENTION REQUIRED"))
-		lines = append(lines, alertStyle.Render(fmt.Sprintf("  %s", pv.InterventionReason)))
-		if len(pv.InterventionOptions) > 0 {
-			lines = append(lines, fmt.Sprintf("  Options: %s", strings.Join(pv.InterventionOptions, " | ")))
-		}
-	}
-
-	// Verdict history
-	if len(pv.VerdictHistory) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sectionHeaderStyle.Render("  Verdict History"))
-		for _, v := range pv.VerdictHistory {
-			verdictText := VerdictStyle(v.Verdict).Render(v.Verdict)
-			lines = append(lines, fmt.Sprintf("    iter %-3d %-14s %s  %s",
-				v.Iteration, v.State, verdictText, dimStyle.Render(v.Timestamp)))
-		}
-	}
-
-	// Escalations
-	if len(pv.ExecutedEscalations) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sectionHeaderStyle.Render("  Escalations"))
-		for _, e := range pv.ExecutedEscalations {
-			lines = append(lines, fmt.Sprintf("    %s", e))
-		}
-	}
-
-	// Disputes
-	if len(pv.DisputeDetails) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sectionHeaderStyle.Render(fmt.Sprintf("  Disputes (%d)", len(pv.DisputeDetails))))
-		for _, d := range pv.DisputeDetails {
-			lines = append(lines, fmt.Sprintf("    %s — %q", d.TestName, d.Reason))
-		}
-	}
-
-	// Parallel execution
-	if pv.HasParallel {
-		lines = append(lines, "")
-		header := "  Parallel Execution"
-		if pv.ParallelVerdict != "" {
-			header += fmt.Sprintf("  verdict: %s", pv.ParallelVerdict)
-		}
-		lines = append(lines, sectionHeaderStyle.Render(header))
-
-		// Sort branch names for stable display
-		names := make([]string, 0, len(pv.ParallelBranches))
-		for name := range pv.ParallelBranches {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			status := pv.ParallelBranches[name]
-			lines = append(lines, fmt.Sprintf("    %s: %s", name, status))
-		}
-	}
-
 	// Apply scroll offset
 	visibleHeight := m.height - 2 // leave room for scroll indicator
 	if visibleHeight <= 0 {
@@ -463,11 +326,7 @@ func (m Model) renderDetailPanel() string {
 
 func formatIter(pv PhaseView) string {
 	if pv.Iteration > 0 || pv.MaxIteration > 0 {
-		prefix := ""
-		if pv.StuckIterations > 0 {
-			prefix = "~"
-		}
-		return fmt.Sprintf("%s%d/%d", prefix, pv.Iteration, pv.MaxIteration)
+		return fmt.Sprintf("%d/%d", pv.Iteration, pv.MaxIteration)
 	}
 	return "—"
 }

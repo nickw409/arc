@@ -9,16 +9,13 @@ import (
 
 // Model is the bubbletea model for the monitor TUI.
 type Model struct {
-	planName    string
-	planDir     string
-	phases      []PhaseView
-	planMeta    planSummary
-	activePhase string
-	lastUpdate  time.Time
-	width       int
-	height      int
-	quitting    bool
-	err         error
+	plansDir   string
+	planFilter string
+	plans      []PlanView
+	lastUpdate time.Time
+	width      int
+	height     int
+	quitting   bool
 
 	selectedIdx  int
 	showDetail   bool
@@ -27,89 +24,58 @@ type Model struct {
 
 // planSummary holds aggregate stats computed during refresh.
 type planSummary struct {
-	WorkflowType      string
-	TotalTokens       int
-	TotalIterations   int
-	TotalTests        int
-	TotalTestsPassing int
-	PhasesComplete    int
-	PhasesTotal       int
-	PhasesActive      int
-	InterventionCount int
-	BlockedCount      int
-	StuckCount        int
+	CompletedCount  int
+	RunningCount    int
+	PendingCount    int
+	FailedCount     int
+	TotalIterations int
+}
+
+// PlanView holds the display state for a single plan.
+type PlanView struct {
+	Name         string
+	WorkflowType string
+	Phases       []PhaseView
+	Meta         planSummary
 }
 
 // PhaseView is the display state for a single phase.
 type PhaseView struct {
-	Name           string
-	Status         string
-	Icon           string
-	Iteration      int
-	MaxIteration   int
-	TestsPassing   int
-	TestsTotal     int
-	Disputes       int
-	LastVerdict    string
-	AdversaryRound int
-
-	CurrentState        string
-	WorkflowType        string
-	GlobalIterations    int
-	StuckIterations     int
-	RollbackCount       int
-	HangCount           int
-	InputTokens         int
-	OutputTokens        int
-	LastCommit          string
-	ModelOverride       string
-	CompletedAt         string
-	BlockedReason       string
-	DeferredReason      string
-	Notes               string
-	ExecutedEscalations []string
-
+	PlanName          string
+	Name              string
+	Status            string
+	Icon              string
+	Iteration         int
+	MaxIteration      int
+	TestsPassing      int
+	TestsTotal        int
+	InputTokens       int
+	OutputTokens      int
+	LastCommit        string
+	CompletedAt       string
+	BlockedReason     string
+	DeferredReason    string
+	Notes             string
 	Activity          string
 	ActivityUpdatedAt string
-
-	ChunksTotal  int
-	ChunksDone   int
-	ChunkCurrent string
-
-	HasIntervention     bool
-	InterventionReason  string
-	InterventionOptions []string
-
-	VerdictHistory []VerdictRow
-
-	HasParallel      bool
-	ParallelBranches map[string]string
-	ParallelVerdict  string
-
-	DisputeDetails []DisputeRow
-}
-
-// VerdictRow is a single entry in the verdict history for display.
-type VerdictRow struct {
-	Iteration int
-	State     string
-	Verdict   string
-	Timestamp string
-}
-
-// DisputeRow is a single dispute for display.
-type DisputeRow struct {
-	TestName string
-	Reason   string
+	AdversaryRound    int
 }
 
 // NewModel creates a monitor model.
-func NewModel(planName, planDir string) Model {
+func NewModel(planFilter, plansDir string) Model {
 	return Model{
-		planName: planName,
-		planDir:  planDir,
-		phases:   []PhaseView{},
+		planFilter: planFilter,
+		plansDir:   plansDir,
+		plans:      []PlanView{},
 	}
+}
+
+// firstPlan returns the first PlanView or a zero value if none.
+func (m Model) firstPlan() PlanView {
+	if len(m.plans) > 0 {
+		return m.plans[0]
+	}
+	return PlanView{}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -129,11 +95,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refresh
 
 	case refreshMsg:
-		m.phases = msg.phases
-		m.planMeta = msg.meta
+		m.plans = msg.plans
 		m.lastUpdate = time.Now()
-		if m.selectedIdx >= len(m.phases) && len(m.phases) > 0 {
-			m.selectedIdx = len(m.phases) - 1
+		phases := m.firstPlan().Phases
+		if m.selectedIdx >= len(phases) && len(phases) > 0 {
+			m.selectedIdx = len(phases) - 1
 		}
 		return m, tick()
 	}
@@ -157,12 +123,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleOverviewKey(key string) (tea.Model, tea.Cmd) {
+	phases := m.firstPlan().Phases
 	switch key {
 	case "q", "esc":
 		m.quitting = true
 		return m, tea.Quit
 	case "down":
-		if len(m.phases) > 0 && m.selectedIdx < len(m.phases)-1 {
+		if len(phases) > 0 && m.selectedIdx < len(phases)-1 {
 			m.selectedIdx++
 		}
 	case "up":
@@ -170,7 +137,7 @@ func (m Model) handleOverviewKey(key string) (tea.Model, tea.Cmd) {
 			m.selectedIdx--
 		}
 	case "enter", " ":
-		if len(m.phases) > 0 {
+		if len(phases) > 0 {
 			m.showDetail = true
 			m.detailScroll = 0
 		}
@@ -201,7 +168,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	if m.showDetail && m.selectedIdx < len(m.phases) {
+	if m.showDetail && m.selectedIdx < len(m.firstPlan().Phases) {
 		return m.renderDetailPanel()
 	}
 
@@ -227,32 +194,21 @@ func PhaseViewFromState(state *arc.PhaseState) PhaseView {
 	icon := statusIcon(state.PhaseStatus)
 
 	pv := PhaseView{
-		Name:           state.Phase,
-		Status:         state.PhaseStatus,
-		Icon:           icon,
-		Iteration:      state.StateIterations[state.CurrentState],
-		MaxIteration:   state.Iteration.Max,
-		TestsPassing:   state.TestsPassing,
-		TestsTotal:     state.TestsTotal,
-		Disputes:       len(state.Disputes),
-		LastVerdict:    state.LastVerdict,
-		AdversaryRound: state.AdversaryRound,
-
-		CurrentState:        state.CurrentState,
-		WorkflowType:        state.WorkflowType,
-		GlobalIterations:    state.GlobalIterations,
-		StuckIterations:     state.StuckIterations,
-		RollbackCount:       state.RollbackCount,
-		HangCount:           state.HangCount,
-		InputTokens:         state.Usage.InputTokens,
-		OutputTokens:        state.Usage.OutputTokens,
-		ModelOverride:       state.ModelOverride,
-		BlockedReason:       state.BlockedReason,
-		DeferredReason:      state.DeferredReason,
-		Notes:               state.Notes,
-		ExecutedEscalations: state.ExecutedEscalations,
-		Activity:            state.Activity,
-		ActivityUpdatedAt:   state.ActivityUpdatedAt,
+		Name:              state.Phase,
+		Status:            state.PhaseStatus,
+		Icon:              icon,
+		Iteration:         state.Iteration.Current,
+		MaxIteration:      state.Iteration.Max,
+		TestsPassing:      state.TestsPassing,
+		TestsTotal:        state.TestsTotal,
+		AdversaryRound:    state.AdversaryRound,
+		InputTokens:       state.Usage.InputTokens,
+		OutputTokens:      state.Usage.OutputTokens,
+		BlockedReason:     state.BlockedReason,
+		DeferredReason:    state.DeferredReason,
+		Notes:             state.Notes,
+		Activity:          state.Activity,
+		ActivityUpdatedAt: state.ActivityUpdatedAt,
 	}
 
 	// Last commit: truncate to 7 chars
@@ -276,87 +232,25 @@ func PhaseViewFromState(state *arc.PhaseState) PhaseView {
 		pv.BlockedReason = *state.Blocked.Reason
 	}
 
-	// Chunks
-	pv.ChunksTotal = state.Chunks.Total
-	pv.ChunksDone = len(state.Chunks.Completed)
-	if state.Chunks.Current != nil {
-		pv.ChunkCurrent = state.Chunks.Current.Name
-	}
-
-	// Intervention
-	if state.InterventionRequest != nil {
-		pv.HasIntervention = true
-		pv.InterventionReason = state.InterventionRequest.Reason
-		pv.InterventionOptions = state.InterventionRequest.Options
-	}
-
-	// Verdict history: last 10, most recent first
-	if len(state.VerdictsHistory) > 0 {
-		start := 0
-		if len(state.VerdictsHistory) > 10 {
-			start = len(state.VerdictsHistory) - 10
-		}
-		for i := len(state.VerdictsHistory) - 1; i >= start; i-- {
-			ve := state.VerdictsHistory[i]
-			ts := ve.Timestamp
-			if t, err := time.Parse(time.RFC3339, ve.Timestamp); err == nil {
-				ts = t.Format("15:04")
-			}
-			pv.VerdictHistory = append(pv.VerdictHistory, VerdictRow{
-				Iteration: ve.Iteration,
-				State:     ve.State,
-				Verdict:   ve.Verdict,
-				Timestamp: ts,
-			})
-		}
-	}
-
-	// Parallel execution
-	if state.ParallelExecution != nil {
-		pv.HasParallel = true
-		pv.ParallelBranches = make(map[string]string, len(state.ParallelExecution.Branches))
-		for name, bs := range state.ParallelExecution.Branches {
-			pv.ParallelBranches[name] = bs.Status
-		}
-		pv.ParallelVerdict = state.ParallelExecution.Verdict
-	}
-
-	// Dispute details
-	for _, d := range state.Disputes {
-		pv.DisputeDetails = append(pv.DisputeDetails, DisputeRow{
-			TestName: d.TestName,
-			Reason:   d.Reason,
-		})
-	}
-
 	return pv
 }
 
 // planSummaryFromViews computes aggregate stats from phase views.
 func planSummaryFromViews(views []PhaseView, workflowType string) planSummary {
-	s := planSummary{
-		WorkflowType: workflowType,
-		PhasesTotal:  len(views),
-	}
-	for _, pv := range views {
-		s.TotalTokens += pv.InputTokens + pv.OutputTokens
-		s.TotalIterations += pv.GlobalIterations
-		s.TotalTests += pv.TestsTotal
-		s.TotalTestsPassing += pv.TestsPassing
-		if pv.Status == "complete" {
-			s.PhasesComplete++
-		}
-		if isActiveStatus(pv.Status) {
-			s.PhasesActive++
-		}
-		if pv.HasIntervention {
-			s.InterventionCount++
-		}
-		if pv.Status == "blocked" {
-			s.BlockedCount++
-		}
-		if pv.StuckIterations > 0 {
-			s.StuckCount++
+	s := planSummary{}
+	for _, v := range views {
+		s.TotalIterations += v.Iteration
+		switch v.Status {
+		case "complete":
+			s.CompletedCount++
+		case "blocked":
+			s.FailedCount++
+		case "pending", "":
+			s.PendingCount++
+		default:
+			if isActiveStatus(v.Status) {
+				s.RunningCount++
+			}
 		}
 	}
 	return s

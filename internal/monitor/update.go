@@ -12,8 +12,7 @@ import (
 
 type tickMsg struct{}
 type refreshMsg struct {
-	phases []PhaseView
-	meta   planSummary
+	plans []PlanView
 }
 
 // tick returns a command that sends a tickMsg after 3 seconds.
@@ -25,20 +24,22 @@ func tick() tea.Cmd {
 
 // refresh reads all phase state.json files from disk and returns a refreshMsg.
 func (m Model) refresh() tea.Msg {
+	planDir := filepath.Join(m.plansDir, m.planFilter)
+
 	// Read plan.json to get phase order
-	planJSON, err := os.ReadFile(filepath.Join(m.planDir, "plan.json"))
+	planJSON, err := os.ReadFile(filepath.Join(planDir, "plan.json"))
 	if err != nil {
-		return refreshMsg{phases: m.phases, meta: m.planMeta}
+		return refreshMsg{plans: m.plans}
 	}
 
 	var meta arc.PlanMeta
 	if err := json.Unmarshal(planJSON, &meta); err != nil {
-		return refreshMsg{phases: m.phases, meta: m.planMeta}
+		return refreshMsg{plans: m.plans}
 	}
 
 	var views []PhaseView
 	for _, phase := range meta.Phases {
-		statePath := filepath.Join(m.planDir, "phases", phase, "state.json")
+		statePath := filepath.Join(planDir, "phases", phase, "state.json")
 		data, err := os.ReadFile(statePath)
 		if err != nil {
 			views = append(views, PhaseView{Name: phase, Status: "unknown", Icon: "[?]"})
@@ -56,5 +57,12 @@ func (m Model) refresh() tea.Msg {
 
 	summary := planSummaryFromViews(views, meta.WorkflowType)
 
-	return refreshMsg{phases: views, meta: summary}
+	plan := PlanView{
+		Name:         meta.Name,
+		WorkflowType: meta.WorkflowType,
+		Phases:       views,
+		Meta:         summary,
+	}
+
+	return refreshMsg{plans: []PlanView{plan}}
 }
