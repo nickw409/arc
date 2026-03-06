@@ -82,6 +82,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name for the plan (used as directory name)")),
 		mcp.WithString("workflow_type", mcp.Description("Workflow type: feature, bugfix, investigation, refactor, performance, audit, direct. Defaults to 'custom' when workflow is provided.")),
 		mcp.WithArray("phases", mcp.Required(), mcp.WithStringItems(), mcp.Description("Ordered list of phase names")),
+		mcp.WithString("role", mcp.Description("Default role for all phases: impl, review, investigate, or audit (default: impl)")),
 		mcp.WithString("workflow", mcp.Description("Custom workflow YAML (pipeline format). When provided, workflow_type defaults to 'custom'.")),
 		mcp.WithString("save_workflow_as", mcp.Description("Optional name to save the workflow for reuse in future plans.")),
 	), h.handlePlan)
@@ -202,6 +203,7 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 	args := req.GetArguments()
 	name, _ := args["name"].(string)
 	workflowType, _ := args["workflow_type"].(string)
+	role, _ := args["role"].(string)
 	inlineWorkflow, _ := args["workflow"].(string)
 	saveWorkflowAs, _ := args["save_workflow_as"].(string)
 
@@ -219,6 +221,9 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 	}
 	if len(phases) == 0 {
 		return mcp.NewToolResultError("at least one phase is required"), nil
+	}
+	if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+		return mcp.NewToolResultError(fmt.Sprintf("role must be impl, review, investigate, or audit; got %q", role)), nil
 	}
 
 	homeDir, _ := os.UserHomeDir()
@@ -252,6 +257,14 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError("workflow_type is required when workflow is not provided"), nil
 	}
 
+	var phaseRoles map[string]string
+	if role != "" {
+		phaseRoles = make(map[string]string, len(phases))
+		for _, p := range phases {
+			phaseRoles[p] = role
+		}
+	}
+
 	meta, err := plan.Create(plan.CreateOptions{
 		PlansDir:       h.plansDir(),
 		Name:           name,
@@ -259,6 +272,7 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 		WorkflowType:   workflowType,
 		CustomWorkflow: customWorkflow,
 		Resolver:       resolver,
+		PhaseRoles:     phaseRoles,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

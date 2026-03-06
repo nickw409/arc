@@ -40,6 +40,7 @@ func newPlanAddPhaseCmd() *cobra.Command {
 		complexity  string
 		deps        string
 		files       string
+		role        string
 		checkpoints []string
 	)
 
@@ -55,10 +56,15 @@ func newPlanAddPhaseCmd() *cobra.Command {
 				return fmt.Errorf("--spec is required")
 			}
 
+			if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+				return fmt.Errorf("role must be impl, review, investigate, or audit; got %q", role)
+			}
+
 			spec := &arc.PhaseSpec{
 				Spec:       specText,
 				Verify:     testCmd,
 				Complexity: complexity,
+				Role:       role,
 			}
 
 			if files != "" {
@@ -88,6 +94,7 @@ func newPlanAddPhaseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&complexity, "complexity", "medium", "Task complexity: simple, medium, or complex")
 	cmd.Flags().StringVar(&deps, "deps", "", "Comma-separated dependency phases")
 	cmd.Flags().StringVar(&files, "file", "", "Comma-separated relevant file paths")
+	cmd.Flags().StringVar(&role, "role", "", "Phase role: impl, review, investigate, or audit (default: impl)")
 	cmd.Flags().StringArrayVar(&checkpoints, "checkpoint", nil, `Named milestone in format "name:description:test_command" (repeatable)`)
 
 	return cmd
@@ -117,6 +124,7 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 		specText    string
 		testCmd     string
 		complexity  string
+		role        string
 		checkpoints []string
 	)
 
@@ -127,6 +135,10 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planName := args[0]
 			phaseName := args[1]
+
+			if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+				return fmt.Errorf("role must be impl, review, investigate, or audit; got %q", role)
+			}
 
 			// Read existing spec and overlay the provided flags
 			existing, err := plan.ReadSpec(plansDir(), planName, phaseName)
@@ -143,6 +155,9 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("complexity") {
 				existing.Complexity = complexity
+			}
+			if cmd.Flags().Changed("role") {
+				existing.Role = role
 			}
 			if cmd.Flags().Changed("checkpoint") {
 				parsed, err := parseCheckpoints(checkpoints)
@@ -164,6 +179,7 @@ func newPlanUpdatePhaseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&specText, "spec", "", "New phase description")
 	cmd.Flags().StringVar(&testCmd, "verify", "", "Acceptance criteria for the verifier agent")
 	cmd.Flags().StringVar(&complexity, "complexity", "", "Task complexity: simple, medium, or complex")
+	cmd.Flags().StringVar(&role, "role", "", "Phase role: impl, review, investigate, or audit (default: impl)")
 	cmd.Flags().StringArrayVar(&checkpoints, "checkpoint", nil, `Named milestone in format "name:description:test_command" (repeatable)`)
 
 	return cmd

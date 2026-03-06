@@ -11,7 +11,10 @@ import (
 )
 
 func newPlanCmd() *cobra.Command {
-	var workflowType string
+	var (
+		workflowType string
+		role         string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "plan <name> <phase1> [phase2...]",
@@ -26,6 +29,10 @@ func newPlanCmd() *cobra.Command {
 				workflowType = "feature"
 			}
 
+			if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+				return fmt.Errorf("role must be impl, review, investigate, or audit; got %q", role)
+			}
+
 			projectRoot, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
@@ -36,12 +43,21 @@ func newPlanCmd() *cobra.Command {
 			}
 			resolver := resources.NewResolver(projectRoot, homeDir)
 
+			var phaseRoles map[string]string
+			if role != "" {
+				phaseRoles = make(map[string]string, len(phases))
+				for _, p := range phases {
+					phaseRoles[p] = role
+				}
+			}
+
 			meta, err := plan.Create(plan.CreateOptions{
 				PlansDir:     plansDir,
 				Name:         name,
 				Phases:       phases,
 				WorkflowType: workflowType,
 				Resolver:     resolver,
+				PhaseRoles:   phaseRoles,
 			})
 			if err != nil {
 				return err
@@ -53,6 +69,7 @@ func newPlanCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&workflowType, "type", "feature", "Workflow type (feature, bugfix, investigation, refactor, performance, audit)")
+	cmd.Flags().StringVar(&role, "role", "", "Phase Roles: impl, review, investigate, or audit (default: impl)")
 
 	// Register spec subcommands
 	addPlanSpecSubcommands(cmd)
