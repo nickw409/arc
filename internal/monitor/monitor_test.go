@@ -14,12 +14,12 @@ import (
 // --- Model creation ---
 
 func TestNewModel(t *testing.T) {
-	m := NewModel("my-plan", "/tmp/plans/my-plan")
-	if m.planName != "my-plan" {
-		t.Errorf("planName=%q, want 'my-plan'", m.planName)
+	m := NewModel("my-plan", "/tmp/plans")
+	if m.planFilter != "my-plan" {
+		t.Errorf("planFilter=%q, want 'my-plan'", m.planFilter)
 	}
-	if m.phases == nil {
-		t.Error("phases is nil, want empty slice")
+	if m.plans == nil {
+		t.Error("plans is nil, want empty slice")
 	}
 	if m.quitting {
 		t.Error("quitting should be false")
@@ -32,10 +32,13 @@ func TestNewModel(t *testing.T) {
 	}
 }
 
-func TestNewModelEmptyPlanName(t *testing.T) {
-	m := NewModel("", "/tmp/plans/empty")
-	if m.planName != "" {
-		t.Errorf("planName=%q, want empty", m.planName)
+func TestNewModelEmptyFilter(t *testing.T) {
+	m := NewModel("", "/tmp/plans")
+	if m.planFilter != "" {
+		t.Errorf("planFilter=%q, want empty", m.planFilter)
+	}
+	if m.plans == nil {
+		t.Error("plans is nil, want empty slice")
 	}
 	_ = m.View()
 }
@@ -51,8 +54,6 @@ func TestPhaseViewFromState(t *testing.T) {
 		StateIterations: map[string]int{"impl": 5},
 		TestsPassing:    3,
 		TestsTotal:      10,
-		Disputes:        []arc.Dispute{{TestName: "t1", Reason: "r"}},
-		LastVerdict:     "concerns",
 	}
 
 	pv := PhaseViewFromState(ps)
@@ -63,22 +64,13 @@ func TestPhaseViewFromState(t *testing.T) {
 		t.Errorf("Icon=%q, want '[>]'", pv.Icon)
 	}
 	if pv.Iteration != 5 {
-		t.Errorf("Iteration=%d", pv.Iteration)
+		t.Errorf("Iteration=%d, want 5", pv.Iteration)
 	}
 	if pv.TestsPassing != 3 {
 		t.Errorf("TestsPassing=%d", pv.TestsPassing)
 	}
 	if pv.TestsTotal != 10 {
 		t.Errorf("TestsTotal=%d", pv.TestsTotal)
-	}
-	if pv.Disputes != 1 {
-		t.Errorf("Disputes=%d", pv.Disputes)
-	}
-	if pv.LastVerdict != "concerns" {
-		t.Errorf("LastVerdict=%q", pv.LastVerdict)
-	}
-	if pv.CurrentState != "impl" {
-		t.Errorf("CurrentState=%q", pv.CurrentState)
 	}
 }
 
@@ -106,7 +98,6 @@ func TestPhaseViewFromStateAllStatuses(t *testing.T) {
 		{"complete", "[x]"},
 		{"act", "[>]"},
 		{"tests", "[>]"},
-		{"qa_review", "[>]"},
 		{"adversary", "[!]"},
 		{"disputed", "[!]"},
 		{"blocked", "[X]"},
@@ -132,11 +123,40 @@ func TestPhaseViewZeroIteration(t *testing.T) {
 	}
 }
 
-func TestPhaseViewLastVerdictPopulated(t *testing.T) {
-	ps := &arc.PhaseState{LastVerdict: "approved"}
+func TestPhaseViewIterationFromGateSystem(t *testing.T) {
+	// Iteration is sourced from state.Iteration.Current (gate system field).
+	ps := &arc.PhaseState{
+		Iteration: arc.Iteration{Current: 8, Max: 20},
+	}
 	pv := PhaseViewFromState(ps)
-	if pv.LastVerdict != "approved" {
-		t.Errorf("LastVerdict=%q, want 'approved'", pv.LastVerdict)
+	if pv.Iteration != 8 {
+		t.Errorf("Iteration=%d, want 8", pv.Iteration)
+	}
+	if pv.MaxIteration != 20 {
+		t.Errorf("MaxIteration=%d, want 20", pv.MaxIteration)
+	}
+}
+
+func TestPhaseViewIterationEdgeCases(t *testing.T) {
+	// Max set but current 0.
+	ps := &arc.PhaseState{
+		Iteration: arc.Iteration{Current: 0, Max: 25},
+	}
+	pv := PhaseViewFromState(ps)
+	if pv.Iteration != 0 {
+		t.Errorf("Iteration=%d, want 0", pv.Iteration)
+	}
+	if pv.MaxIteration != 25 {
+		t.Errorf("MaxIteration=%d, want 25", pv.MaxIteration)
+	}
+
+	// Both zero.
+	ps2 := &arc.PhaseState{
+		Iteration: arc.Iteration{Current: 0, Max: 0},
+	}
+	pv2 := PhaseViewFromState(ps2)
+	if pv2.Iteration != 0 || pv2.MaxIteration != 0 {
+		t.Error("expected both zero")
 	}
 }
 
@@ -156,122 +176,6 @@ func TestPhaseViewFromStateUsage(t *testing.T) {
 	}
 }
 
-func TestPhaseViewFromStateChunks(t *testing.T) {
-	ps := &arc.PhaseState{
-		Chunks: arc.Chunks{
-			Total:     5,
-			Completed: []arc.ChunkResult{{ID: 1}, {ID: 2}, {ID: 3}},
-			Current:   &arc.ChunkCurrent{ID: 4, Name: "write service tests", Status: "running"},
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if pv.ChunksTotal != 5 {
-		t.Errorf("ChunksTotal=%d, want 5", pv.ChunksTotal)
-	}
-	if pv.ChunksDone != 3 {
-		t.Errorf("ChunksDone=%d, want 3", pv.ChunksDone)
-	}
-	if pv.ChunkCurrent != "write service tests" {
-		t.Errorf("ChunkCurrent=%q", pv.ChunkCurrent)
-	}
-}
-
-func TestPhaseViewFromStateChunksNoCurrent(t *testing.T) {
-	ps := &arc.PhaseState{
-		Chunks: arc.Chunks{
-			Total:     3,
-			Completed: []arc.ChunkResult{{ID: 1}},
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if pv.ChunkCurrent != "" {
-		t.Errorf("ChunkCurrent=%q, want empty", pv.ChunkCurrent)
-	}
-}
-
-func TestPhaseViewFromStateIntervention(t *testing.T) {
-	ps := &arc.PhaseState{
-		InterventionRequest: &arc.Intervention{
-			Reason:  "Tests keep regressing",
-			Options: []string{"continue", "rollback"},
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if !pv.HasIntervention {
-		t.Error("HasIntervention should be true")
-	}
-	if pv.InterventionReason != "Tests keep regressing" {
-		t.Errorf("InterventionReason=%q", pv.InterventionReason)
-	}
-	if len(pv.InterventionOptions) != 2 {
-		t.Errorf("InterventionOptions len=%d", len(pv.InterventionOptions))
-	}
-}
-
-func TestPhaseViewFromStateNoIntervention(t *testing.T) {
-	ps := &arc.PhaseState{}
-	pv := PhaseViewFromState(ps)
-	if pv.HasIntervention {
-		t.Error("HasIntervention should be false")
-	}
-}
-
-func TestPhaseViewFromStateVerdictHistory(t *testing.T) {
-	ps := &arc.PhaseState{
-		VerdictsHistory: []arc.VerdictEntry{
-			{Iteration: 1, State: "impl", Verdict: "approved", Timestamp: "2025-01-01T10:00:00Z"},
-			{Iteration: 2, State: "qa_review", Verdict: "concerns", Timestamp: "2025-01-01T10:30:00Z"},
-			{Iteration: 3, State: "impl", Verdict: "approved", Timestamp: "2025-01-01T11:00:00Z"},
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if len(pv.VerdictHistory) != 3 {
-		t.Fatalf("VerdictHistory len=%d, want 3", len(pv.VerdictHistory))
-	}
-	// Most recent first
-	if pv.VerdictHistory[0].Iteration != 3 {
-		t.Errorf("first entry iter=%d, want 3", pv.VerdictHistory[0].Iteration)
-	}
-	if pv.VerdictHistory[0].Timestamp != "11:00" {
-		t.Errorf("first entry timestamp=%q, want '11:00'", pv.VerdictHistory[0].Timestamp)
-	}
-	if pv.VerdictHistory[2].Iteration != 1 {
-		t.Errorf("last entry iter=%d, want 1", pv.VerdictHistory[2].Iteration)
-	}
-}
-
-func TestPhaseViewFromStateVerdictHistoryCapped(t *testing.T) {
-	var entries []arc.VerdictEntry
-	for i := 0; i < 15; i++ {
-		entries = append(entries, arc.VerdictEntry{Iteration: i + 1, State: "impl", Verdict: "approved", Timestamp: "2025-01-01T10:00:00Z"})
-	}
-	ps := &arc.PhaseState{VerdictsHistory: entries}
-	pv := PhaseViewFromState(ps)
-	if len(pv.VerdictHistory) != 10 {
-		t.Errorf("VerdictHistory len=%d, want 10 (capped)", len(pv.VerdictHistory))
-	}
-	// Most recent first: should be iteration 15
-	if pv.VerdictHistory[0].Iteration != 15 {
-		t.Errorf("first entry iter=%d, want 15", pv.VerdictHistory[0].Iteration)
-	}
-}
-
-func TestPhaseViewFromStateDisputeDetails(t *testing.T) {
-	ps := &arc.PhaseState{
-		Disputes: []arc.Dispute{
-			{TestName: "TestAuth", Reason: "401 error"},
-			{TestName: "TestToken", Reason: "expired"},
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if len(pv.DisputeDetails) != 2 {
-		t.Fatalf("DisputeDetails len=%d, want 2", len(pv.DisputeDetails))
-	}
-	if pv.DisputeDetails[0].TestName != "TestAuth" {
-		t.Errorf("first dispute=%q", pv.DisputeDetails[0].TestName)
-	}
-}
-
 func TestPhaseViewFromStateLastCommitTruncated(t *testing.T) {
 	ps := &arc.PhaseState{LastCommit: "abc1234567890"}
 	pv := PhaseViewFromState(ps)
@@ -285,39 +189,6 @@ func TestPhaseViewFromStateLastCommitShort(t *testing.T) {
 	pv := PhaseViewFromState(ps)
 	if pv.LastCommit != "abc" {
 		t.Errorf("LastCommit=%q, want 'abc'", pv.LastCommit)
-	}
-}
-
-func TestPhaseViewFromStateParallelExecution(t *testing.T) {
-	ps := &arc.PhaseState{
-		ParallelExecution: &arc.ParallelExec{
-			Branches: map[string]arc.BranchStatus{
-				"branch-a": {Status: "complete"},
-				"branch-b": {Status: "running"},
-			},
-			Verdict: "pending",
-		},
-	}
-	pv := PhaseViewFromState(ps)
-	if !pv.HasParallel {
-		t.Error("HasParallel should be true")
-	}
-	if len(pv.ParallelBranches) != 2 {
-		t.Errorf("ParallelBranches len=%d", len(pv.ParallelBranches))
-	}
-	if pv.ParallelBranches["branch-a"] != "complete" {
-		t.Errorf("branch-a=%q", pv.ParallelBranches["branch-a"])
-	}
-	if pv.ParallelVerdict != "pending" {
-		t.Errorf("ParallelVerdict=%q", pv.ParallelVerdict)
-	}
-}
-
-func TestPhaseViewFromStateModelOverride(t *testing.T) {
-	ps := &arc.PhaseState{ModelOverride: "sonnet"}
-	pv := PhaseViewFromState(ps)
-	if pv.ModelOverride != "sonnet" {
-		t.Errorf("ModelOverride=%q", pv.ModelOverride)
 	}
 }
 
@@ -354,28 +225,6 @@ func TestPhaseViewFromStateCompletedAtInvalid(t *testing.T) {
 	}
 }
 
-func TestPhaseViewFromStateStuckAndRollback(t *testing.T) {
-	ps := &arc.PhaseState{
-		StuckIterations:  3,
-		RollbackCount:    2,
-		HangCount:        1,
-		GlobalIterations: 12,
-	}
-	pv := PhaseViewFromState(ps)
-	if pv.StuckIterations != 3 {
-		t.Errorf("StuckIterations=%d", pv.StuckIterations)
-	}
-	if pv.RollbackCount != 2 {
-		t.Errorf("RollbackCount=%d", pv.RollbackCount)
-	}
-	if pv.HangCount != 1 {
-		t.Errorf("HangCount=%d", pv.HangCount)
-	}
-	if pv.GlobalIterations != 12 {
-		t.Errorf("GlobalIterations=%d", pv.GlobalIterations)
-	}
-}
-
 func TestPhaseViewFromStateNotes(t *testing.T) {
 	ps := &arc.PhaseState{Notes: "investigating flaky test"}
 	pv := PhaseViewFromState(ps)
@@ -384,11 +233,30 @@ func TestPhaseViewFromStateNotes(t *testing.T) {
 	}
 }
 
-func TestPhaseViewFromStateEscalations(t *testing.T) {
-	ps := &arc.PhaseState{ExecutedEscalations: []string{"switch_model", "analyze_stuck"}}
-	pv := PhaseViewFromState(ps)
-	if len(pv.ExecutedEscalations) != 2 {
-		t.Errorf("ExecutedEscalations len=%d", len(pv.ExecutedEscalations))
+// --- PlanView construction ---
+
+func TestPlanViewConstruction(t *testing.T) {
+	phases := []PhaseView{
+		{Name: "a", Status: "complete", Iteration: 3},
+		{Name: "b", Status: "implementing", Iteration: 5},
+	}
+	pv := PlanView{
+		Name:         "my-plan",
+		WorkflowType: "feature",
+		Phases:       phases,
+		Meta:         planSummaryFromViews(phases, "feature"),
+	}
+	if pv.Name != "my-plan" {
+		t.Errorf("Name=%q", pv.Name)
+	}
+	if len(pv.Phases) != 2 {
+		t.Errorf("Phases len=%d", len(pv.Phases))
+	}
+	if pv.Meta.CompletedCount != 1 {
+		t.Errorf("CompletedCount=%d, want 1", pv.Meta.CompletedCount)
+	}
+	if pv.Meta.TotalIterations != 8 {
+		t.Errorf("TotalIterations=%d, want 8", pv.Meta.TotalIterations)
 	}
 }
 
@@ -396,50 +264,64 @@ func TestPhaseViewFromStateEscalations(t *testing.T) {
 
 func TestPlanSummaryFromViews(t *testing.T) {
 	views := []PhaseView{
-		{Status: "complete", InputTokens: 10000, OutputTokens: 5000, GlobalIterations: 5, TestsTotal: 10, TestsPassing: 10},
-		{Status: "implementing", InputTokens: 20000, OutputTokens: 3000, GlobalIterations: 7, TestsTotal: 15, TestsPassing: 12, StuckIterations: 1},
-		{Status: "blocked", InputTokens: 5000, OutputTokens: 1000, HasIntervention: true},
+		{Status: "complete", Iteration: 5, TestsTotal: 10, TestsPassing: 10},
+		{Status: "implementing", Iteration: 7, TestsTotal: 15, TestsPassing: 12},
+		{Status: "blocked"},
 	}
 	s := planSummaryFromViews(views, "feature")
-	if s.WorkflowType != "feature" {
-		t.Errorf("WorkflowType=%q", s.WorkflowType)
-	}
-	if s.TotalTokens != 44000 {
-		t.Errorf("TotalTokens=%d, want 44000", s.TotalTokens)
-	}
 	if s.TotalIterations != 12 {
 		t.Errorf("TotalIterations=%d, want 12", s.TotalIterations)
 	}
-	if s.TotalTests != 25 {
-		t.Errorf("TotalTests=%d, want 25", s.TotalTests)
+	if s.CompletedCount != 1 {
+		t.Errorf("CompletedCount=%d, want 1", s.CompletedCount)
 	}
-	if s.TotalTestsPassing != 22 {
-		t.Errorf("TotalTestsPassing=%d, want 22", s.TotalTestsPassing)
+	if s.RunningCount != 1 {
+		t.Errorf("RunningCount=%d, want 1", s.RunningCount)
 	}
-	if s.PhasesComplete != 1 {
-		t.Errorf("PhasesComplete=%d, want 1", s.PhasesComplete)
+	if s.FailedCount != 1 {
+		t.Errorf("FailedCount=%d, want 1", s.FailedCount)
 	}
-	if s.PhasesTotal != 3 {
-		t.Errorf("PhasesTotal=%d, want 3", s.PhasesTotal)
-	}
-	if s.PhasesActive != 1 {
-		t.Errorf("PhasesActive=%d, want 1", s.PhasesActive)
-	}
-	if s.InterventionCount != 1 {
-		t.Errorf("InterventionCount=%d, want 1", s.InterventionCount)
-	}
-	if s.BlockedCount != 1 {
-		t.Errorf("BlockedCount=%d, want 1", s.BlockedCount)
-	}
-	if s.StuckCount != 1 {
-		t.Errorf("StuckCount=%d, want 1", s.StuckCount)
+	if s.PendingCount != 0 {
+		t.Errorf("PendingCount=%d, want 0", s.PendingCount)
 	}
 }
 
 func TestPlanSummaryFromViewsEmpty(t *testing.T) {
 	s := planSummaryFromViews(nil, "")
-	if s.PhasesTotal != 0 || s.TotalTokens != 0 {
+	if s.TotalIterations != 0 || s.CompletedCount != 0 {
 		t.Error("expected zero summary for nil views")
+	}
+}
+
+// --- totalPhases ---
+
+func TestTotalPhasesEmpty(t *testing.T) {
+	m := NewModel("", "/tmp")
+	if m.totalPhases() != 0 {
+		t.Errorf("totalPhases=%d, want 0", m.totalPhases())
+	}
+}
+
+func TestTotalPhasesMixed(t *testing.T) {
+	m := NewModel("", "/tmp")
+	m.plans = []PlanView{
+		{Name: "a", Phases: []PhaseView{{Name: "p1"}, {Name: "p2"}}},
+		{Name: "b", Phases: []PhaseView{{Name: "p3"}}},
+	}
+	if m.totalPhases() != 3 {
+		t.Errorf("totalPhases=%d, want 3", m.totalPhases())
+	}
+}
+
+func TestTotalPhasesMultiplePlans(t *testing.T) {
+	m := NewModel("", "/tmp")
+	m.plans = []PlanView{
+		{Name: "a", Phases: []PhaseView{{Name: "p1"}}},
+		{Name: "b", Phases: []PhaseView{{Name: "p2"}, {Name: "p3"}}},
+		{Name: "c", Phases: []PhaseView{{Name: "p4"}, {Name: "p5"}, {Name: "p6"}}},
+	}
+	if m.totalPhases() != 6 {
+		t.Errorf("totalPhases=%d, want 6", m.totalPhases())
 	}
 }
 
@@ -477,7 +359,7 @@ func TestMonitorUpdateQuitEsc(t *testing.T) {
 
 func TestUpdateSelectDown(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}, {Name: "b"}, {Name: "c"}}}}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model := updated.(Model)
@@ -488,7 +370,7 @@ func TestUpdateSelectDown(t *testing.T) {
 
 func TestUpdateSelectUp(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}, {Name: "b"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}, {Name: "b"}}}}
 	m.selectedIdx = 1
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -500,7 +382,7 @@ func TestUpdateSelectUp(t *testing.T) {
 
 func TestUpdateSelectClampLow(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.selectedIdx = 0
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -512,7 +394,7 @@ func TestUpdateSelectClampLow(t *testing.T) {
 
 func TestUpdateSelectClampHigh(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}, {Name: "b"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}, {Name: "b"}}}}
 	m.selectedIdx = 1
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -524,7 +406,7 @@ func TestUpdateSelectClampHigh(t *testing.T) {
 
 func TestUpdateOpenDetail(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model := updated.(Model)
@@ -538,7 +420,7 @@ func TestUpdateOpenDetail(t *testing.T) {
 
 func TestUpdateOpenDetailEmptyPhases(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{}
+	m.plans = []PlanView{}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model := updated.(Model)
@@ -549,7 +431,7 @@ func TestUpdateOpenDetailEmptyPhases(t *testing.T) {
 
 func TestUpdateCloseDetailWithEsc(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.showDetail = true
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
@@ -564,7 +446,7 @@ func TestUpdateCloseDetailWithEsc(t *testing.T) {
 
 func TestUpdateCloseDetailWithQ(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.showDetail = true
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
@@ -590,7 +472,7 @@ func TestUpdateCtrlCAlwaysQuits(t *testing.T) {
 
 func TestUpdateScrollDetailDown(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.showDetail = true
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -602,7 +484,7 @@ func TestUpdateScrollDetailDown(t *testing.T) {
 
 func TestUpdateScrollDetailUpClamped(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.showDetail = true
 	m.detailScroll = 0
 
@@ -623,11 +505,62 @@ func TestUpdateForceRefresh(t *testing.T) {
 
 func TestUpdateForceRefreshInDetail(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "a"}}
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{{Name: "a"}}}}
 	m.showDetail = true
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if cmd == nil {
 		t.Error("expected non-nil command from force refresh in detail")
+	}
+}
+
+func TestNavigationWhenTotalPhasesZero(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.plans = []PlanView{}
+
+	// Down on empty does nothing.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model := updated.(Model)
+	if model.selectedIdx != 0 {
+		t.Errorf("selectedIdx=%d, want 0", model.selectedIdx)
+	}
+
+	// Up on empty does nothing.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(Model)
+	if model.selectedIdx != 0 {
+		t.Errorf("selectedIdx=%d, want 0", model.selectedIdx)
+	}
+}
+
+func TestNavigationClampWhenTotalPhasesZero(t *testing.T) {
+	// If plans go from having phases to being empty, selectedIdx is clamped.
+	m := NewModel("test", "/tmp")
+	m.selectedIdx = 5
+	updated, _ := m.Update(refreshMsg{plans: []PlanView{}})
+	model := updated.(Model)
+	if model.selectedIdx != 0 {
+		t.Errorf("selectedIdx=%d, want 0 (clamped to zero for empty)", model.selectedIdx)
+	}
+}
+
+func TestNavigationAcrossPlanBoundaries(t *testing.T) {
+	m := NewModel("", "/tmp")
+	m.plans = []PlanView{
+		{Name: "plan-a", Phases: []PhaseView{{Name: "p1"}, {Name: "p2"}}},
+		{Name: "plan-b", Phases: []PhaseView{{Name: "p3"}}},
+	}
+	// Navigate from last phase of plan-a (idx=1) to first phase of plan-b (idx=2).
+	m.selectedIdx = 1
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model := updated.(Model)
+	if model.selectedIdx != 2 {
+		t.Errorf("selectedIdx=%d, want 2 (cross plan boundary)", model.selectedIdx)
+	}
+
+	// Verify which plan/phase that maps to.
+	planIdx, phaseIdx := model.selectedPhase()
+	if planIdx != 1 || phaseIdx != 0 {
+		t.Errorf("selectedPhase=(%d,%d), want (1,0)", planIdx, phaseIdx)
 	}
 }
 
@@ -651,17 +584,16 @@ func TestMonitorUpdateRefreshMsg(t *testing.T) {
 		{Name: "b", Status: "implementing"},
 		{Name: "c", Status: "complete"},
 	}
-	meta := planSummary{PhasesTotal: 3, PhasesComplete: 1}
-	updated, _ := m.Update(refreshMsg{phases: phases, meta: meta})
+	updated, _ := m.Update(refreshMsg{plans: []PlanView{{Name: "p", Phases: phases}}})
 	model := updated.(Model)
-	if len(model.phases) != 3 {
-		t.Errorf("phases count=%d, want 3", len(model.phases))
+	if len(model.plans) != 1 {
+		t.Fatalf("plans count=%d, want 1", len(model.plans))
+	}
+	if len(model.plans[0].Phases) != 3 {
+		t.Errorf("phases count=%d, want 3", len(model.plans[0].Phases))
 	}
 	if model.lastUpdate.IsZero() {
 		t.Error("lastUpdate not set")
-	}
-	if model.planMeta.PhasesTotal != 3 {
-		t.Errorf("planMeta.PhasesTotal=%d, want 3", model.planMeta.PhasesTotal)
 	}
 }
 
@@ -669,7 +601,7 @@ func TestMonitorUpdateRefreshClampsSelection(t *testing.T) {
 	m := NewModel("test", "/tmp")
 	m.selectedIdx = 5
 	phases := []PhaseView{{Name: "a"}, {Name: "b"}}
-	updated, _ := m.Update(refreshMsg{phases: phases})
+	updated, _ := m.Update(refreshMsg{plans: []PlanView{{Name: "p", Phases: phases}}})
 	model := updated.(Model)
 	if model.selectedIdx != 1 {
 		t.Errorf("selectedIdx=%d, want 1 (clamped)", model.selectedIdx)
@@ -688,11 +620,11 @@ func TestMonitorUpdateTick(t *testing.T) {
 
 func TestMonitorViewRendersAllPhases(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
+	m.plans = []PlanView{{Name: "p", Phases: []PhaseView{
 		{Name: "a", Status: "pending", Icon: "[ ]"},
 		{Name: "b", Status: "implementing", Icon: "[>]"},
 		{Name: "c", Status: "complete", Icon: "[x]"},
-	}
+	}}}
 	m.width = 100
 
 	view := m.View()
@@ -706,7 +638,7 @@ func TestMonitorViewRendersAllPhases(t *testing.T) {
 
 func TestMonitorViewNoPhases(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{}
+	m.plans = []PlanView{}
 	view := m.View()
 	if !strings.Contains(view, "No phases") {
 		t.Error("expected 'No phases' message")
@@ -724,7 +656,7 @@ func TestModelViewQuitting(t *testing.T) {
 
 func TestViewShowsDetail(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{{Name: "auth-core", Status: "implementing", CurrentState: "qa_review"}}
+	m.plans = []PlanView{{Name: "test-plan", Phases: []PhaseView{{Name: "auth-core", Status: "implementing"}}}}
 	m.showDetail = true
 	m.height = 50
 	m.width = 100
@@ -736,41 +668,18 @@ func TestViewShowsDetail(t *testing.T) {
 	if !strings.Contains(view, "esc: back") {
 		t.Error("detail should show back hint")
 	}
-	if !strings.Contains(view, "qa_review") {
-		t.Error("detail should show current state")
-	}
-}
-
-func TestViewShowsAlerts(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
-		{Name: "auth", Status: "implementing", HasIntervention: true, InterventionReason: "need help"},
-		{Name: "api", Status: "pending"},
-	}
-	m.width = 100
-
-	view := m.View()
-	if !strings.Contains(view, "INTERVENTION") {
-		t.Error("view should show intervention alert")
-	}
-	if !strings.Contains(view, "auth") {
-		t.Error("intervention alert should name the phase")
-	}
 }
 
 // --- Phase row rendering ---
 
 func TestRenderPhaseRowWithNewColumns(t *testing.T) {
 	pv := PhaseView{
-		Name: "core", Status: "implementing", Icon: "[>]",
-		CurrentState: "qa_review", Iteration: 5, MaxIteration: 25,
+		Name: "core", Status: "running", Icon: "[>]",
+		Iteration: 5, MaxIteration: 25,
 		TestsPassing: 7, TestsTotal: 12, InputTokens: 28000, OutputTokens: 4800,
-		LastVerdict: "concerns",
+		Activity: "running gate checks",
 	}
 	row := renderPhaseRow(pv, 100, false)
-	if !strings.Contains(row, "qa_review") {
-		t.Error("missing state column")
-	}
 	if !strings.Contains(row, "5/25") {
 		t.Error("missing iter/max column")
 	}
@@ -780,30 +689,9 @@ func TestRenderPhaseRowWithNewColumns(t *testing.T) {
 	if !strings.Contains(row, "32k") {
 		t.Error("missing tokens column")
 	}
-	if !strings.Contains(row, "concerns") {
-		t.Error("missing verdict column")
-	}
-}
-
-func TestRenderPhaseRowStuck(t *testing.T) {
-	pv := PhaseView{
-		Name: "core", Status: "implementing", Icon: "[>]",
-		Iteration: 5, MaxIteration: 25, StuckIterations: 2,
-	}
-	row := renderPhaseRow(pv, 100, false)
-	if !strings.Contains(row, "~5/25") {
-		t.Errorf("missing stuck indicator, got %q", row)
-	}
-}
-
-func TestRenderPhaseRowModelOverride(t *testing.T) {
-	pv := PhaseView{
-		Name: "core", Status: "implementing", Icon: "[>]",
-		ModelOverride: "sonnet",
-	}
-	row := renderPhaseRow(pv, 100, false)
-	if !strings.Contains(row, "core*") {
-		t.Error("missing model override indicator")
+	// Activity line should NOT be dimmed — it should appear as plain text.
+	if !strings.Contains(row, "running gate checks") {
+		t.Error("missing activity line")
 	}
 }
 
@@ -826,27 +714,20 @@ func TestRenderPhaseRowNotSelected(t *testing.T) {
 func TestRenderPhaseRowNarrow(t *testing.T) {
 	pv := PhaseView{
 		Name: "core", Status: "implementing", Icon: "[>]",
-		CurrentState: "impl", Iteration: 5, MaxIteration: 25,
-		InputTokens: 28000, OutputTokens: 4800, LastVerdict: "approved",
+		Iteration: 5, MaxIteration: 25,
+		InputTokens: 28000, OutputTokens: 4800,
 	}
 	row := renderPhaseRow(pv, 60, false)
-	// Tokens and verdict should be hidden in narrow mode
 	if strings.Contains(row, "32k") {
 		t.Error("tokens should be hidden in narrow terminal")
-	}
-	if strings.Contains(row, "approved") {
-		t.Error("verdict should be hidden in narrow terminal")
 	}
 }
 
 func TestRenderPhaseRowComplete(t *testing.T) {
-	pv := PhaseView{Name: "core", Status: "complete", Icon: "[x]", CompletedAt: "14:02", LastVerdict: "approved"}
+	pv := PhaseView{Name: "core", Status: "complete", Icon: "[x]", CompletedAt: "14:02"}
 	row := renderPhaseRow(pv, 100, false)
 	if !strings.Contains(row, "[x]") {
 		t.Error("missing icon")
-	}
-	if !strings.Contains(row, "14:02") {
-		t.Error("missing completed timestamp")
 	}
 }
 
@@ -866,46 +747,67 @@ func TestRenderPhaseRowZeroWidth(t *testing.T) {
 	}
 }
 
-// --- Intervention alerts ---
-
-func TestRenderInterventionAlertsNone(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
-		{Name: "a", Status: "implementing"},
-		{Name: "b", Status: "pending"},
+func TestRenderPhaseTableActivityNotDimmed(t *testing.T) {
+	// Verify activity text appears as-is for running phases.
+	pv := PhaseView{
+		Name: "core", Status: "running", Icon: "[>]",
+		Activity: "compiling package",
 	}
-	alerts := m.renderInterventionAlerts()
-	if alerts != "" {
-		t.Errorf("expected empty alerts, got %q", alerts)
+	row := renderPhaseRow(pv, 100, false)
+	if !strings.Contains(row, "compiling package") {
+		t.Error("activity line missing")
 	}
-}
-
-func TestRenderInterventionAlertsOne(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
-		{Name: "auth", HasIntervention: true, InterventionReason: "need guidance"},
-	}
-	alerts := m.renderInterventionAlerts()
-	if !strings.Contains(alerts, "INTERVENTION") {
-		t.Error("missing INTERVENTION keyword")
-	}
-	if !strings.Contains(alerts, "auth") {
-		t.Error("missing phase name")
-	}
-	if !strings.Contains(alerts, "need guidance") {
-		t.Error("missing reason")
+	// The activity line in the source code is NOT wrapped in dimStyle.Render.
+	// We verify it's present and that the row contains a newline (activity on separate line).
+	lines := strings.Split(row, "\n")
+	if len(lines) < 2 {
+		t.Error("expected activity on a separate line")
 	}
 }
 
-func TestRenderInterventionAlertsMultiple(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
-		{Name: "auth", HasIntervention: true, InterventionReason: "reason1"},
-		{Name: "api", HasIntervention: true, InterventionReason: "reason2"},
+// --- Activity line rendering ---
+
+func TestRenderPhaseRowActivityShownForActive(t *testing.T) {
+	pv := PhaseView{
+		Name:     "core",
+		Status:   "running",
+		Icon:     "[>]",
+		Activity: "writing tests",
 	}
-	alerts := m.renderInterventionAlerts()
-	if !strings.Contains(alerts, "auth") || !strings.Contains(alerts, "api") {
-		t.Error("missing one of the phase names")
+	row := renderPhaseRow(pv, 100, false)
+	if !strings.Contains(row, "writing tests") {
+		t.Error("activity line should appear for running phases on wide terminal")
+	}
+}
+
+func TestRenderPhaseRowActivityHiddenForInactive(t *testing.T) {
+	for _, status := range []string{"pending", "complete", "blocked", "deferred"} {
+		pv := PhaseView{
+			Name:     "core",
+			Status:   status,
+			Icon:     "[ ]",
+			Activity: "some activity",
+		}
+		row := renderPhaseRow(pv, 100, false)
+		if strings.Contains(row, "some activity") {
+			t.Errorf("activity should be hidden for status=%q", status)
+		}
+	}
+}
+
+func TestRenderPhaseRowActivityTruncated(t *testing.T) {
+	pv := PhaseView{
+		Name:     "core",
+		Status:   "running",
+		Icon:     "[>]",
+		Activity: strings.Repeat("x", 200),
+	}
+	row := renderPhaseRow(pv, 80, false)
+	if strings.Contains(row, strings.Repeat("x", 100)) {
+		t.Error("activity should be truncated to fit terminal width")
+	}
+	if !strings.Contains(row, "...") {
+		t.Error("truncated activity should end with '...'")
 	}
 }
 
@@ -916,40 +818,25 @@ func TestRenderDetailPanel(t *testing.T) {
 	m.height = 60
 	m.width = 100
 	m.showDetail = true
-	m.phases = []PhaseView{{
-		Name:             "auth-core",
-		Status:           "implementing",
-		CurrentState:     "qa_review",
-		WorkflowType:     "feature",
-		Iteration:        7,
-		MaxIteration:     25,
-		GlobalIterations: 12,
-		TestsPassing:     14,
-		TestsTotal:       20,
-		RollbackCount:    2,
-		StuckIterations:  1,
-		HangCount:        0,
-		LastCommit:       "a3f92b1",
-		InputTokens:      28000,
-		OutputTokens:     4800,
-		Notes:            "investigating flaky test",
-		VerdictHistory: []VerdictRow{
-			{Iteration: 7, State: "qa_review", Verdict: "concerns", Timestamp: "14:31"},
-			{Iteration: 6, State: "impl", Verdict: "approved", Timestamp: "14:28"},
-		},
-		ExecutedEscalations: []string{"switch_model"},
-		DisputeDetails:      []DisputeRow{{TestName: "TestAuth", Reason: "401 error"}},
-	}}
+	m.plans = []PlanView{{Name: "my-plan", Phases: []PhaseView{{
+		Name:         "auth-core",
+		Status:       "implementing",
+		Iteration:    7,
+		MaxIteration: 25,
+		TestsPassing: 14,
+		TestsTotal:   20,
+		LastCommit:   "a3f92b1",
+		InputTokens:  28000,
+		OutputTokens: 4800,
+		Notes:        "investigating flaky test",
+	}}}}
 
 	view := m.renderDetailPanel()
 	if !strings.Contains(view, "auth-core") {
 		t.Error("missing phase name")
 	}
-	if !strings.Contains(view, "qa_review") {
-		t.Error("missing current state")
-	}
-	if !strings.Contains(view, "feature") {
-		t.Error("missing workflow type")
+	if !strings.Contains(view, "my-plan") {
+		t.Error("missing plan name in header")
 	}
 	if !strings.Contains(view, "7/25") {
 		t.Error("missing iteration")
@@ -963,124 +850,145 @@ func TestRenderDetailPanel(t *testing.T) {
 	if !strings.Contains(view, "investigating flaky test") {
 		t.Error("missing notes")
 	}
-	if !strings.Contains(view, "Verdict History") {
-		t.Error("missing verdict history section")
+	// AdversaryRound 0 should NOT be shown.
+	if strings.Contains(view, "Adversary") {
+		t.Error("AdversaryRound 0 should not be shown")
 	}
-	if !strings.Contains(view, "Escalations") {
-		t.Error("missing escalations section")
+}
+
+func TestRenderDetailPanelAdversaryRound(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 60
+	m.width = 100
+	m.showDetail = true
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{
+		Name:           "phase",
+		Status:         "adversary",
+		AdversaryRound: 2,
+	}}}}
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "Adversary") {
+		t.Error("AdversaryRound > 0 should be shown")
 	}
-	if !strings.Contains(view, "Disputes") {
-		t.Error("missing disputes section")
-	}
-	if !strings.Contains(view, "TestAuth") {
-		t.Error("missing dispute detail")
+	if !strings.Contains(view, "round 2") {
+		t.Error("missing adversary round number")
 	}
 }
 
 func TestRenderDetailPanelNoOptionalSections(t *testing.T) {
 	m := NewModel("test", "/tmp")
 	m.height = 50
-	m.phases = []PhaseView{{Name: "minimal", Status: "pending"}}
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{Name: "minimal", Status: "pending"}}}}
 	m.showDetail = true
 
 	view := m.renderDetailPanel()
-	if strings.Contains(view, "Verdict History") {
-		t.Error("should not show verdict history section when empty")
-	}
-	if strings.Contains(view, "Escalations") {
-		t.Error("should not show escalations section when empty")
-	}
-	if strings.Contains(view, "Disputes") {
-		t.Error("should not show disputes section when empty")
-	}
-	if strings.Contains(view, "Chunks") {
-		t.Error("should not show chunks section when empty")
-	}
-}
-
-func TestRenderDetailPanelChunks(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name: "chunked", Status: "implementing",
-		ChunksTotal: 5, ChunksDone: 3, ChunkCurrent: "write tests",
-	}}
-	m.showDetail = true
-
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "3/5") {
-		t.Error("missing chunk progress")
-	}
-	if !strings.Contains(view, "write tests") {
-		t.Error("missing current chunk name")
-	}
-}
-
-func TestRenderDetailPanelIntervention(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name: "stuck", Status: "implementing",
-		HasIntervention: true, InterventionReason: "need help",
-		InterventionOptions: []string{"continue", "rollback"},
-	}}
-	m.showDetail = true
-
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "INTERVENTION") {
-		t.Error("missing intervention alert")
-	}
-	if !strings.Contains(view, "need help") {
-		t.Error("missing intervention reason")
-	}
-	if !strings.Contains(view, "continue") || !strings.Contains(view, "rollback") {
-		t.Error("missing intervention options")
-	}
-}
-
-func TestRenderDetailPanelParallel(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name:             "parallel",
-		Status:           "implementing",
-		HasParallel:      true,
-		ParallelBranches: map[string]string{"branch-a": "complete", "branch-b": "running"},
-		ParallelVerdict:  "pending",
-	}}
-	m.showDetail = true
-
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "Parallel Execution") {
-		t.Error("missing parallel section")
-	}
-	if !strings.Contains(view, "branch-a") || !strings.Contains(view, "branch-b") {
-		t.Error("missing branch names")
+	if strings.Contains(view, "Adversary") {
+		t.Error("should not show adversary section when round is 0")
 	}
 }
 
 func TestRenderDetailPanelScroll(t *testing.T) {
 	m := NewModel("test", "/tmp")
-	m.height = 10
-	m.phases = []PhaseView{{
-		Name:         "scrollable",
-		Status:       "implementing",
-		CurrentState: "impl",
-		VerdictHistory: []VerdictRow{
-			{Iteration: 1, State: "impl", Verdict: "approved", Timestamp: "10:00"},
-			{Iteration: 2, State: "qa", Verdict: "concerns", Timestamp: "10:30"},
-			{Iteration: 3, State: "impl", Verdict: "approved", Timestamp: "11:00"},
-			{Iteration: 4, State: "qa", Verdict: "concerns", Timestamp: "11:30"},
-			{Iteration: 5, State: "impl", Verdict: "approved", Timestamp: "12:00"},
-		},
-	}}
+	m.height = 5 // very small to force scrolling
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{
+		Name:              "scrollable",
+		Status:            "implementing",
+		Iteration:         3,
+		MaxIteration:      25,
+		TestsPassing:      5,
+		TestsTotal:        10,
+		InputTokens:       10000,
+		OutputTokens:      2000,
+		LastCommit:        "abc1234",
+		Notes:             "some notes here",
+		Activity:          "running tests",
+		ActivityUpdatedAt: "2025-01-15T14:02:30Z",
+		BlockedReason:     "dep failed",
+		AdversaryRound:    1,
+	}}}}
 	m.showDetail = true
 	m.detailScroll = 2
 
 	view := m.renderDetailPanel()
-	// The scroll indicator should show the offset
 	if !strings.Contains(view, "line") {
 		t.Error("missing scroll indicator")
+	}
+}
+
+func TestRenderDetailPanelOutOfBounds(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.plans = []PlanView{}
+	m.selectedIdx = 0
+	view := m.renderDetailPanel()
+	if view != "" {
+		t.Errorf("expected empty string for out-of-bounds selectedIdx, got %q", view)
+	}
+}
+
+func TestRenderDetailPanelDeferredReason(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{
+		Name:           "deferred-phase",
+		Status:         "deferred",
+		DeferredReason: "waiting on dependency",
+	}}}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "waiting on dependency") {
+		t.Error("detail panel should show deferred reason")
+	}
+}
+
+func TestRenderDetailPanelActivity(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{
+		Name:              "active-phase",
+		Status:            "implementing",
+		Activity:          "running test suite",
+		ActivityUpdatedAt: "2025-01-15T14:02:30Z",
+	}}}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "running test suite") {
+		t.Error("detail panel should show activity")
+	}
+	if !strings.Contains(view, "14:02:30") {
+		t.Error("detail panel should show activity timestamp")
+	}
+}
+
+func TestRenderDetailPanelActivityDashForActive(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{
+		Name:     "active-phase",
+		Status:   "implementing",
+		Activity: "",
+	}}}}
+	m.showDetail = true
+
+	view := m.renderDetailPanel()
+	if !strings.Contains(view, "Activity") {
+		t.Error("detail panel should show Activity line for active phase")
+	}
+}
+
+func TestRenderDetailPanelScrollClamp(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.height = 50
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{{Name: "phase", Status: "pending"}}}}
+	m.showDetail = true
+	m.detailScroll = 9999
+
+	view := m.renderDetailPanel()
+	if view == "" {
+		t.Error("expected non-empty view even with scroll past end")
 	}
 }
 
@@ -1088,16 +996,11 @@ func TestRenderDetailPanelScroll(t *testing.T) {
 
 func TestRenderHeader(t *testing.T) {
 	m := NewModel("test-plan", "/tmp")
-	m.phases = []PhaseView{
-		{Status: "complete"},
-		{Status: "pending"},
-		{Status: "pending"},
-	}
-	m.planMeta = planSummary{
-		PhasesComplete: 1,
-		PhasesTotal:    3,
-		WorkflowType:   "feature",
-	}
+	m.plans = []PlanView{{
+		Name:   "test-plan",
+		Phases: []PhaseView{{Status: "complete"}, {Status: "pending"}, {Status: "pending"}},
+		Meta:   planSummary{CompletedCount: 1},
+	}}
 	header := m.renderHeader()
 	if !strings.Contains(header, "test-plan") {
 		t.Error("header missing plan name")
@@ -1105,43 +1008,32 @@ func TestRenderHeader(t *testing.T) {
 	if !strings.Contains(header, "1/3") {
 		t.Error("header missing progress")
 	}
-	if !strings.Contains(header, "feature") {
-		t.Error("header missing workflow type")
-	}
 }
 
-func TestRenderHeaderWithTokens(t *testing.T) {
+func TestRenderHeaderWithIterations(t *testing.T) {
 	m := NewModel("plan", "/tmp")
-	m.planMeta = planSummary{
-		TotalTokens:    142000,
-		TotalIterations: 47,
-		PhasesActive:   2,
-	}
+	m.plans = []PlanView{{
+		Meta: planSummary{
+			TotalIterations: 47,
+			RunningCount:    2,
+		},
+	}}
 	header := m.renderHeader()
-	if !strings.Contains(header, "142k tokens") {
-		t.Error("header missing total tokens")
-	}
 	if !strings.Contains(header, "47 iter") {
 		t.Error("header missing total iterations")
 	}
 }
 
-func TestRenderHeaderWithProblems(t *testing.T) {
+func TestRenderHeaderWithBlocked(t *testing.T) {
 	m := NewModel("plan", "/tmp")
-	m.planMeta = planSummary{
-		InterventionCount: 1,
-		BlockedCount:      2,
-		StuckCount:        1,
-	}
+	m.plans = []PlanView{{
+		Meta: planSummary{
+			FailedCount: 2,
+		},
+	}}
 	header := m.renderHeader()
-	if !strings.Contains(header, "1 intervention") {
-		t.Error("header missing intervention count")
-	}
 	if !strings.Contains(header, "2 blocked") {
 		t.Error("header missing blocked count")
-	}
-	if !strings.Contains(header, "1 stuck") {
-		t.Error("header missing stuck count")
 	}
 }
 
@@ -1168,9 +1060,6 @@ func TestRenderColumnHeader(t *testing.T) {
 	if !strings.Contains(header, "PHASE") {
 		t.Error("missing PHASE column")
 	}
-	if !strings.Contains(header, "STATE") {
-		t.Error("missing STATE column")
-	}
 	if !strings.Contains(header, "ITER") {
 		t.Error("missing ITER column")
 	}
@@ -1180,8 +1069,15 @@ func TestRenderColumnHeader(t *testing.T) {
 	if !strings.Contains(header, "TOKENS") {
 		t.Error("missing TOKENS column")
 	}
-	if !strings.Contains(header, "VERDICT") {
-		t.Error("missing VERDICT column")
+}
+
+func TestRenderColumnHeaderNoStateVerdict(t *testing.T) {
+	header := renderColumnHeader(100)
+	if strings.Contains(header, "STATE") {
+		t.Error("STATE column should not exist")
+	}
+	if strings.Contains(header, "VERDICT") {
+		t.Error("VERDICT column should not exist")
 	}
 }
 
@@ -1192,6 +1088,63 @@ func TestRenderColumnHeaderNarrow(t *testing.T) {
 	}
 	if strings.Contains(header, "TOKENS") {
 		t.Error("TOKENS should be hidden in narrow mode")
+	}
+}
+
+// --- Phase table ---
+
+func TestRenderPhaseTable(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.plans = []PlanView{{Name: "plan", Phases: []PhaseView{
+		{Name: "a", Icon: "[ ]"},
+		{Name: "b", Icon: "[>]"},
+	}}}
+	m.width = 100
+	table := m.renderPhaseTable()
+	if !strings.Contains(table, "a") || !strings.Contains(table, "b") {
+		t.Error("table missing phases")
+	}
+	if !strings.Contains(table, "PHASE") {
+		t.Error("table missing column header")
+	}
+}
+
+func TestRenderPhaseTableNoplans(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.plans = []PlanView{}
+	m.width = 100
+	table := m.renderPhaseTable()
+	if !strings.Contains(table, "No phases") {
+		t.Error("expected 'No phases' message for empty plans")
+	}
+}
+
+func TestRenderPhaseTablePlansWithNoPhases(t *testing.T) {
+	m := NewModel("test", "/tmp")
+	m.plans = []PlanView{{Name: "empty-plan", Phases: []PhaseView{}}}
+	m.width = 100
+	table := m.renderPhaseTable()
+	if !strings.Contains(table, "empty-plan") {
+		t.Error("should show plan header even with no phases")
+	}
+}
+
+func TestRenderPhaseTableMultiplePlans(t *testing.T) {
+	m := NewModel("", "/tmp")
+	m.plans = []PlanView{
+		{Name: "plan-a", Phases: []PhaseView{{Name: "p1", Icon: "[ ]"}}},
+		{Name: "plan-b", Phases: []PhaseView{{Name: "p2", Icon: "[>]"}}},
+	}
+	m.width = 100
+	table := m.renderPhaseTable()
+	if !strings.Contains(table, "plan-a") {
+		t.Error("table missing plan-a header")
+	}
+	if !strings.Contains(table, "plan-b") {
+		t.Error("table missing plan-b header")
+	}
+	if !strings.Contains(table, "p1") || !strings.Contains(table, "p2") {
+		t.Error("table missing phase names")
 	}
 }
 
@@ -1245,7 +1198,6 @@ func TestVerdictStyleRejected(t *testing.T) {
 
 func TestVerdictStyleUnknown(t *testing.T) {
 	_ = VerdictStyle("some_unknown_verdict")
-	// Should not panic
 }
 
 func TestStatusColorMapping(t *testing.T) {
@@ -1262,24 +1214,6 @@ func TestStatusColorEmptyString(t *testing.T) {
 	c := StatusColor("")
 	if c.Light == "" && c.Dark == "" {
 		t.Error("expected non-empty color for default")
-	}
-}
-
-// --- Phase table ---
-
-func TestRenderPhaseTable(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.phases = []PhaseView{
-		{Name: "a", Icon: "[ ]"},
-		{Name: "b", Icon: "[>]"},
-	}
-	m.width = 100
-	table := m.renderPhaseTable()
-	if !strings.Contains(table, "a") || !strings.Contains(table, "b") {
-		t.Error("table missing phases")
-	}
-	if !strings.Contains(table, "PHASE") {
-		t.Error("table missing column header")
 	}
 }
 
@@ -1300,127 +1234,6 @@ func TestMonitorInitReturnsCmd(t *testing.T) {
 	}
 }
 
-// --- Refresh reads files ---
-
-func TestRefreshReadsFiles(t *testing.T) {
-	planDir := t.TempDir()
-
-	meta := arc.NewPlanMeta("test-plan", "feature", []string{"core", "api"})
-	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
-
-	for _, phase := range []string{"core", "api"} {
-		phaseDir := filepath.Join(planDir, "phases", phase)
-		os.MkdirAll(phaseDir, 0755)
-		ps := arc.NewPhaseState("test-plan", phase, "feature")
-		ps.PhaseStatus = "implementing"
-		ps.Iteration.Current = 3
-		ps.Usage = arc.Usage{InputTokens: 10000, OutputTokens: 2000}
-		data, _ := json.MarshalIndent(ps, "", "  ")
-		os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644)
-	}
-
-	m := NewModel("test-plan", planDir)
-	msg := m.refresh()
-	rm, ok := msg.(refreshMsg)
-	if !ok {
-		t.Fatalf("expected refreshMsg, got %T", msg)
-	}
-	if len(rm.phases) != 2 {
-		t.Fatalf("phases=%d, want 2", len(rm.phases))
-	}
-	if rm.phases[0].Status != "implementing" {
-		t.Errorf("phase 0 status=%q", rm.phases[0].Status)
-	}
-	if rm.phases[0].InputTokens != 10000 {
-		t.Errorf("phase 0 input tokens=%d, want 10000", rm.phases[0].InputTokens)
-	}
-	if rm.meta.WorkflowType != "feature" {
-		t.Errorf("meta.WorkflowType=%q", rm.meta.WorkflowType)
-	}
-	if rm.meta.TotalTokens != 24000 {
-		t.Errorf("meta.TotalTokens=%d, want 24000", rm.meta.TotalTokens)
-	}
-}
-
-func TestRefreshMissingPlanJSON(t *testing.T) {
-	// When plan.json is absent, refresh returns existing phases unchanged.
-	m := NewModel("test-plan", t.TempDir())
-	m.phases = []PhaseView{{Name: "old", Status: "pending"}}
-	msg := m.refresh()
-	rm, ok := msg.(refreshMsg)
-	if !ok {
-		t.Fatalf("expected refreshMsg, got %T", msg)
-	}
-	if len(rm.phases) != 1 || rm.phases[0].Name != "old" {
-		t.Error("expected existing phases preserved when plan.json missing")
-	}
-}
-
-func TestRefreshInvalidPlanJSON(t *testing.T) {
-	// When plan.json contains invalid JSON, refresh returns existing phases unchanged.
-	planDir := t.TempDir()
-	os.WriteFile(filepath.Join(planDir, "plan.json"), []byte("not json"), 0644)
-
-	m := NewModel("test-plan", planDir)
-	m.phases = []PhaseView{{Name: "old", Status: "pending"}}
-	msg := m.refresh()
-	rm, ok := msg.(refreshMsg)
-	if !ok {
-		t.Fatalf("expected refreshMsg, got %T", msg)
-	}
-	if len(rm.phases) != 1 || rm.phases[0].Name != "old" {
-		t.Error("expected existing phases preserved when plan.json invalid")
-	}
-}
-
-func TestRefreshMissingStateFile(t *testing.T) {
-	// A phase with no state.json gets status "unknown" and icon "[?]".
-	planDir := t.TempDir()
-	meta := arc.NewPlanMeta("test-plan", "feature", []string{"missing-phase"})
-	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
-	// Do NOT create phases/missing-phase/state.json
-
-	m := NewModel("test-plan", planDir)
-	msg := m.refresh()
-	rm := msg.(refreshMsg)
-	if len(rm.phases) != 1 {
-		t.Fatalf("phases=%d, want 1", len(rm.phases))
-	}
-	if rm.phases[0].Status != "unknown" {
-		t.Errorf("status=%q, want 'unknown'", rm.phases[0].Status)
-	}
-	if rm.phases[0].Icon != "[?]" {
-		t.Errorf("icon=%q, want '[?]'", rm.phases[0].Icon)
-	}
-}
-
-func TestRefreshInvalidStateFile(t *testing.T) {
-	// A phase with invalid state.json gets status "error" and icon "[?]".
-	planDir := t.TempDir()
-	meta := arc.NewPlanMeta("test-plan", "feature", []string{"bad-phase"})
-	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
-
-	phaseDir := filepath.Join(planDir, "phases", "bad-phase")
-	os.MkdirAll(phaseDir, 0755)
-	os.WriteFile(filepath.Join(phaseDir, "state.json"), []byte("not json"), 0644)
-
-	m := NewModel("test-plan", planDir)
-	msg := m.refresh()
-	rm := msg.(refreshMsg)
-	if len(rm.phases) != 1 {
-		t.Fatalf("phases=%d, want 1", len(rm.phases))
-	}
-	if rm.phases[0].Status != "error" {
-		t.Errorf("status=%q, want 'error'", rm.phases[0].Status)
-	}
-	if rm.phases[0].Icon != "[?]" {
-		t.Errorf("icon=%q, want '[?]'", rm.phases[0].Icon)
-	}
-}
-
 // --- formatIter ---
 
 func TestFormatIter(t *testing.T) {
@@ -1431,7 +1244,6 @@ func TestFormatIter(t *testing.T) {
 		{PhaseView{Iteration: 0, MaxIteration: 0}, "—"},
 		{PhaseView{Iteration: 3, MaxIteration: 25}, "3/25"},
 		{PhaseView{Iteration: 0, MaxIteration: 25}, "0/25"},
-		{PhaseView{Iteration: 5, MaxIteration: 25, StuckIterations: 2}, "~5/25"},
 		{PhaseView{MaxIteration: 25}, "0/25"},
 	}
 	for _, tc := range tests {
@@ -1470,7 +1282,7 @@ func TestIsActiveStatus(t *testing.T) {
 			t.Errorf("isActiveStatus(%q) = true, want false", s)
 		}
 	}
-	active := []string{"implementing", "running", "qa_review", "act", "tests"}
+	active := []string{"implementing", "running", "act", "tests"}
 	for _, s := range active {
 		if !isActiveStatus(s) {
 			t.Errorf("isActiveStatus(%q) = false, want true", s)
@@ -1478,134 +1290,7 @@ func TestIsActiveStatus(t *testing.T) {
 	}
 }
 
-// --- renderPhaseRow activity line ---
-
-func TestRenderPhaseRowActivityShownForActive(t *testing.T) {
-	// Activity line is appended only when status is active.
-	pv := PhaseView{
-		Name:     "core",
-		Status:   "implementing",
-		Icon:     "[>]",
-		Activity: "writing tests",
-	}
-	row := renderPhaseRow(pv, 100, false)
-	if !strings.Contains(row, "writing tests") {
-		t.Error("activity line should appear for active phases on wide terminal")
-	}
-	if !strings.Contains(row, "↳") {
-		t.Error("activity line should include arrow indicator")
-	}
-}
-
-func TestRenderPhaseRowActivityHiddenForInactive(t *testing.T) {
-	// Activity line must NOT appear for non-active statuses.
-	for _, status := range []string{"pending", "complete", "blocked", "deferred"} {
-		pv := PhaseView{
-			Name:     "core",
-			Status:   status,
-			Icon:     "[ ]",
-			Activity: "some activity",
-		}
-		row := renderPhaseRow(pv, 100, false)
-		if strings.Contains(row, "some activity") {
-			t.Errorf("activity should be hidden for status=%q", status)
-		}
-	}
-}
-
-func TestRenderPhaseRowActivityTruncated(t *testing.T) {
-	// Very long activity strings are capped to terminal width.
-	pv := PhaseView{
-		Name:     "core",
-		Status:   "implementing",
-		Icon:     "[>]",
-		Activity: strings.Repeat("x", 200),
-	}
-	row := renderPhaseRow(pv, 80, false)
-	if strings.Contains(row, strings.Repeat("x", 100)) {
-		t.Error("activity should be truncated to fit terminal width")
-	}
-	if !strings.Contains(row, "...") {
-		t.Error("truncated activity should end with '...'")
-	}
-}
-
-// --- renderPhaseRow narrow (< 80) ---
-
-func TestRenderPhaseRowVeryNarrow(t *testing.T) {
-	// Width < 80: shows icon, name, and state only.
-	pv := PhaseView{
-		Name:         "core",
-		Status:       "implementing",
-		Icon:         "[>]",
-		CurrentState: "impl",
-		Iteration:    5, MaxIteration: 25,
-		TestsPassing: 7, TestsTotal: 12,
-	}
-	row := renderPhaseRow(pv, 70, false)
-	if !strings.Contains(row, "[>]") {
-		t.Error("narrow: missing icon")
-	}
-	if !strings.Contains(row, "core") {
-		t.Error("narrow: missing name")
-	}
-	if !strings.Contains(row, "impl") {
-		t.Error("narrow: missing state")
-	}
-	// Iter and tests columns should not appear.
-	if strings.Contains(row, "5/25") {
-		t.Error("narrow: iter column should be hidden")
-	}
-	if strings.Contains(row, "7/12") {
-		t.Error("narrow: tests column should be hidden")
-	}
-}
-
-func TestRenderPhaseRowNarrowNoCurrentState(t *testing.T) {
-	// When CurrentState is empty in narrow mode, falls back to Status.
-	pv := PhaseView{
-		Name:         "core",
-		Status:       "pending",
-		Icon:         "[ ]",
-		CurrentState: "",
-	}
-	row := renderPhaseRow(pv, 70, false)
-	if !strings.Contains(row, "pending") {
-		t.Error("narrow: should show status when CurrentState is empty")
-	}
-}
-
-// --- renderPhaseRow state dash for terminal statuses ---
-
-func TestRenderPhaseRowStateDashForTerminal(t *testing.T) {
-	// "pending", "complete", "blocked", "deferred" with no CurrentState show "—".
-	for _, status := range []string{"pending", "complete", "blocked", "deferred"} {
-		pv := PhaseView{
-			Name:         "phase",
-			Status:       status,
-			Icon:         "[ ]",
-			CurrentState: "",
-		}
-		row := renderPhaseRow(pv, 100, false)
-		if !strings.Contains(row, "—") {
-			t.Errorf("status=%q: state column should be '—' when CurrentState empty", status)
-		}
-	}
-}
-
-// --- stateColWidth / phaseNameWidth breakpoints ---
-
-func TestStateColWidthBreakpoints(t *testing.T) {
-	if w := stateColWidth(90); w != 16 {
-		t.Errorf("stateColWidth(90)=%d, want 16", w)
-	}
-	if w := stateColWidth(100); w != 20 {
-		t.Errorf("stateColWidth(100)=%d, want 20", w)
-	}
-	if w := stateColWidth(120); w != 28 {
-		t.Errorf("stateColWidth(120)=%d, want 28", w)
-	}
-}
+// --- phaseNameWidth breakpoints ---
 
 func TestPhaseNameWidthBreakpoints(t *testing.T) {
 	if w := phaseNameWidth(50); w != 15 {
@@ -1619,84 +1304,226 @@ func TestPhaseNameWidthBreakpoints(t *testing.T) {
 	}
 }
 
-// --- renderDetailPanel edge cases ---
+// --- Refresh reads files ---
 
-func TestRenderDetailPanelOutOfBounds(t *testing.T) {
-	// selectedIdx >= len(phases) returns empty string.
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{}
-	m.selectedIdx = 0
-	view := m.renderDetailPanel()
-	if view != "" {
-		t.Errorf("expected empty string for out-of-bounds selectedIdx, got %q", view)
+func TestRefreshReadsFiles(t *testing.T) {
+	parentDir := t.TempDir()
+	planDir := filepath.Join(parentDir, "test-plan")
+	os.MkdirAll(planDir, 0755)
+
+	meta := arc.NewPlanMeta("test-plan", "feature", []string{"core", "api"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+	for _, phase := range []string{"core", "api"} {
+		phaseDir := filepath.Join(planDir, "phases", phase)
+		os.MkdirAll(phaseDir, 0755)
+		ps := arc.NewPhaseState("test-plan", phase, "feature")
+		ps.PhaseStatus = "implementing"
+		ps.Iteration.Current = 3
+		ps.Usage = arc.Usage{InputTokens: 10000, OutputTokens: 2000}
+		data, _ := json.MarshalIndent(ps, "", "  ")
+		os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644)
+	}
+
+	m := NewModel("test-plan", parentDir)
+	msg := m.refresh()
+	rm, ok := msg.(refreshMsg)
+	if !ok {
+		t.Fatalf("expected refreshMsg, got %T", msg)
+	}
+	if len(rm.plans) != 1 {
+		t.Fatalf("plans=%d, want 1", len(rm.plans))
+	}
+	if len(rm.plans[0].Phases) != 2 {
+		t.Fatalf("phases=%d, want 2", len(rm.plans[0].Phases))
+	}
+	if rm.plans[0].Phases[0].Status != "implementing" {
+		t.Errorf("phase 0 status=%q", rm.plans[0].Phases[0].Status)
+	}
+	if rm.plans[0].Phases[0].InputTokens != 10000 {
+		t.Errorf("phase 0 input tokens=%d, want 10000", rm.plans[0].Phases[0].InputTokens)
 	}
 }
 
-func TestRenderDetailPanelDeferredReason(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name:           "deferred-phase",
-		Status:         "deferred",
-		DeferredReason: "waiting on dependency",
-	}}
-	m.showDetail = true
+func TestRefreshReadsMultiplePlans(t *testing.T) {
+	parentDir := t.TempDir()
 
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "waiting on dependency") {
-		t.Error("detail panel should show deferred reason")
+	for _, planName := range []string{"plan-a", "plan-b"} {
+		planDir := filepath.Join(parentDir, planName)
+		os.MkdirAll(planDir, 0755)
+		meta := arc.NewPlanMeta(planName, "feature", []string{"phase1"})
+		metaData, _ := json.MarshalIndent(meta, "", "  ")
+		os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+		phaseDir := filepath.Join(planDir, "phases", "phase1")
+		os.MkdirAll(phaseDir, 0755)
+		ps := arc.NewPhaseState(planName, "phase1", "feature")
+		ps.PhaseStatus = "pending"
+		data, _ := json.MarshalIndent(ps, "", "  ")
+		os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644)
+	}
+
+	m := NewModel("", parentDir) // empty filter = all plans
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 2 {
+		t.Fatalf("plans=%d, want 2", len(rm.plans))
 	}
 }
 
-func TestRenderDetailPanelActivity(t *testing.T) {
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name:              "active-phase",
-		Status:            "implementing",
-		Activity:          "running test suite",
-		ActivityUpdatedAt: "2025-01-15T14:02:30Z",
-	}}
-	m.showDetail = true
+func TestRefreshWithFilter(t *testing.T) {
+	parentDir := t.TempDir()
 
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "running test suite") {
-		t.Error("detail panel should show activity")
+	for _, planName := range []string{"plan-a", "plan-b"} {
+		planDir := filepath.Join(parentDir, planName)
+		os.MkdirAll(planDir, 0755)
+		meta := arc.NewPlanMeta(planName, "feature", []string{"phase1"})
+		metaData, _ := json.MarshalIndent(meta, "", "  ")
+		os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+		phaseDir := filepath.Join(planDir, "phases", "phase1")
+		os.MkdirAll(phaseDir, 0755)
+		ps := arc.NewPhaseState(planName, "phase1", "feature")
+		data, _ := json.MarshalIndent(ps, "", "  ")
+		os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644)
 	}
-	if !strings.Contains(view, "14:02:30") {
-		t.Error("detail panel should show activity timestamp")
+
+	m := NewModel("plan-a", parentDir) // filter to plan-a only
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 1 {
+		t.Fatalf("plans=%d, want 1", len(rm.plans))
+	}
+	if rm.plans[0].Name != "plan-a" {
+		t.Errorf("plan name=%q, want 'plan-a'", rm.plans[0].Name)
 	}
 }
 
-func TestRenderDetailPanelActivityDashForActive(t *testing.T) {
-	// Active phase with no activity shows "Activity: —".
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{
-		Name:     "active-phase",
+func TestRefreshFilterMatchesNone(t *testing.T) {
+	parentDir := t.TempDir()
+
+	planDir := filepath.Join(parentDir, "plan-a")
+	os.MkdirAll(planDir, 0755)
+	meta := arc.NewPlanMeta("plan-a", "feature", []string{"phase1"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+	phaseDir := filepath.Join(planDir, "phases", "phase1")
+	os.MkdirAll(phaseDir, 0755)
+	ps := arc.NewPhaseState("plan-a", "phase1", "feature")
+	data, _ := json.MarshalIndent(ps, "", "  ")
+	os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644)
+
+	m := NewModel("nonexistent-plan", parentDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 0 {
+		t.Errorf("plans=%d, want 0 (filter should match nothing)", len(rm.plans))
+	}
+}
+
+func TestRefreshHandlesPlanJSONReadError(t *testing.T) {
+	parentDir := t.TempDir()
+	// Create a directory but no plan.json inside it.
+	os.MkdirAll(filepath.Join(parentDir, "plan-a"), 0755)
+
+	m := NewModel("", parentDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	// plan-a has no plan.json, so it should be skipped.
+	if len(rm.plans) != 0 {
+		t.Errorf("plans=%d, want 0 (no plan.json)", len(rm.plans))
+	}
+}
+
+func TestRefreshHandlesPlanJSONUnmarshalError(t *testing.T) {
+	parentDir := t.TempDir()
+	planDir := filepath.Join(parentDir, "plan-a")
+	os.MkdirAll(planDir, 0755)
+	os.WriteFile(filepath.Join(planDir, "plan.json"), []byte("not json"), 0644)
+
+	m := NewModel("", parentDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 0 {
+		t.Errorf("plans=%d, want 0 (invalid plan.json)", len(rm.plans))
+	}
+}
+
+func TestRefreshHandlesStateJSONUnmarshalError(t *testing.T) {
+	parentDir := t.TempDir()
+	planDir := filepath.Join(parentDir, "plan-a")
+	os.MkdirAll(planDir, 0755)
+	meta := arc.NewPlanMeta("plan-a", "feature", []string{"bad-phase"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+	phaseDir := filepath.Join(planDir, "phases", "bad-phase")
+	os.MkdirAll(phaseDir, 0755)
+	os.WriteFile(filepath.Join(phaseDir, "state.json"), []byte("not json"), 0644)
+
+	m := NewModel("", parentDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 1 {
+		t.Fatalf("plans=%d, want 1", len(rm.plans))
+	}
+	if len(rm.plans[0].Phases) != 1 {
+		t.Fatalf("phases=%d, want 1", len(rm.plans[0].Phases))
+	}
+	if rm.plans[0].Phases[0].Status != "error" {
+		t.Errorf("status=%q, want 'error'", rm.plans[0].Phases[0].Status)
+	}
+	if rm.plans[0].Phases[0].Icon != "[?]" {
+		t.Errorf("icon=%q, want '[?]'", rm.plans[0].Phases[0].Icon)
+	}
+}
+
+func TestRefreshMissingStateFile(t *testing.T) {
+	parentDir := t.TempDir()
+	planDir := filepath.Join(parentDir, "plan-a")
+	os.MkdirAll(planDir, 0755)
+	meta := arc.NewPlanMeta("plan-a", "feature", []string{"missing-phase"})
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644)
+
+	m := NewModel("", parentDir)
+	msg := m.refresh()
+	rm := msg.(refreshMsg)
+	if len(rm.plans) != 1 {
+		t.Fatalf("plans=%d, want 1", len(rm.plans))
+	}
+	if rm.plans[0].Phases[0].Status != "unknown" {
+		t.Errorf("status=%q, want 'unknown'", rm.plans[0].Phases[0].Status)
+	}
+	if rm.plans[0].Phases[0].Icon != "[?]" {
+		t.Errorf("icon=%q, want '[?]'", rm.plans[0].Phases[0].Icon)
+	}
+}
+
+// --- Narrow rendering ---
+
+func TestRenderPhaseRowVeryNarrow(t *testing.T) {
+	pv := PhaseView{
+		Name:     "core",
 		Status:   "implementing",
-		Activity: "",
-	}}
-	m.showDetail = true
-
-	view := m.renderDetailPanel()
-	if !strings.Contains(view, "Activity: —") {
-		t.Error("detail panel should show 'Activity: —' for active phase with no activity")
+		Icon:     "[>]",
+		Iteration: 5, MaxIteration: 25,
+		TestsPassing: 7, TestsTotal: 12,
 	}
-}
-
-func TestRenderDetailPanelScrollClamp(t *testing.T) {
-	// When detailScroll exceeds content, it's clamped to a valid offset.
-	m := NewModel("test", "/tmp")
-	m.height = 50
-	m.phases = []PhaseView{{Name: "phase", Status: "pending"}}
-	m.showDetail = true
-	m.detailScroll = 9999 // way beyond content
-
-	// Should not panic and should render something.
-	view := m.renderDetailPanel()
-	if view == "" {
-		t.Error("expected non-empty view even with scroll past end")
+	row := renderPhaseRow(pv, 70, false)
+	if !strings.Contains(row, "[>]") {
+		t.Error("narrow: missing icon")
+	}
+	if !strings.Contains(row, "core") {
+		t.Error("narrow: missing name")
+	}
+	// Iter and tests columns should not appear in narrow mode.
+	if strings.Contains(row, "5/25") {
+		t.Error("narrow: iter column should be hidden")
+	}
+	if strings.Contains(row, "7/12") {
+		t.Error("narrow: tests column should be hidden")
 	}
 }
