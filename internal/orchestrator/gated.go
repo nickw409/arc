@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,11 +80,42 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 	// Build session config from complexity
 	turnBudget := arc.DefaultTurnBudget(spec.Complexity)
+	// Turn log file for audit trail
+	turnsPath := filepath.Join(phaseDir, "turns.jsonl")
+	turnsFile, _ := os.OpenFile(turnsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if turnsFile != nil {
+		defer turnsFile.Close()
+	}
+
+	// Stuck detection
+	role := arc.DefaultRole(spec.Role)
+	stuckDetector := NewStuckDetector(role, 0)
+	var stuckCancel context.CancelFunc // set per-attempt to cancel stuck sessions
+	var lastStuckSignal *StuckSignal   // set when stuck detection fires
+
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: turnBudget,
 		Timeout:  time.Duration(turnBudget) * 30 * time.Second,
-		OnTurn: func(tools []string) {
-			_ = state.SetActivity(sf, formatToolActivity(tools))
+		OnTurn: func(ev arc.TurnEvent) {
+			_ = state.SetActivity(sf, formatTurnActivity(ev))
+			if turnsFile != nil {
+				if line, err := json.Marshal(ev); err == nil {
+					line = append(line, '\n')
+					_, _ = turnsFile.Write(line)
+				}
+			}
+			if sig := stuckDetector.Record(ev); sig != nil {
+				lastStuckSignal = sig
+				opts.Logger.Warn("stuck agent detected",
+					"phase", opts.PhaseName,
+					"pattern", sig.Pattern,
+					"reason", sig.Reason,
+				)
+				_ = state.SetActivity(sf, "stuck: "+sig.Reason)
+				if stuckCancel != nil {
+					stuckCancel()
+				}
+			}
 		},
 	}
 
@@ -94,6 +126,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	var lastDiff string
 	prevCheckpointsPassed := 0
 	var attemptHistory []AttemptRecord
+	var stuckGuidance string // injected into prompt after stuck detection
+	escalationModel := ""    // set when model is escalated
+	stuckEscalationLevel := 0 // tracks how far up the ladder we've gone
 
 	// Structured logger (nil-safe — callers log methods check for nil)
 	pl := opts.PlanLogger
@@ -103,19 +138,36 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			return ctx.Err()
 		}
 
+		// Reset stuck detector for each attempt
+		stuckDetector.Reset()
+		lastStuckSignal = nil
+
 		if pl != nil {
 			pl.PhaseStarted(opts.PhaseName, attempt)
 		}
 
 		// Build prompt
 		var agentPrompt string
-		if attempt == 1 {
+		if attempt == 1 && stuckGuidance == "" {
 			agentPrompt, err = buildPhasePrompt(spec, opts.PlanName, projectCtx)
 		} else {
 			agentPrompt, err = buildRetryPrompt(spec, opts.PlanName, projectCtx, attempt, lastGateResult, lastDiff)
 		}
 		if err != nil {
 			return fmt.Errorf("building prompt (attempt %d): %w", attempt, err)
+		}
+
+		// Append stuck guidance if we detected stuck on previous attempt
+		if stuckGuidance != "" {
+			agentPrompt = agentPrompt + "\n\n" + stuckGuidance
+			stuckGuidance = "" // consumed
+		}
+
+		// Apply model escalation if set
+		attemptCfg := sessionCfg
+		if escalationModel != "" {
+			attemptCfg.Model = escalationModel
+			fmt.Printf("[%s] Model escalated to %s\n", opts.PhaseName, escalationModel)
 		}
 
 		// Update state — clear stale activity from previous attempt
@@ -138,12 +190,17 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		fmt.Printf("[%s] Attempt %d/%d — spawning %s agent\n",
 			opts.PhaseName, attempt, MaxGatedAttempts, agentAdapter.Name())
 
+		// Create per-attempt context for stuck cancellation
+		var attemptCtx context.Context
+		attemptCtx, stuckCancel = context.WithCancel(ctx)
+
 		// Spawn agent
 		if pl != nil {
 			pl.AgentSpawned(opts.PhaseName, attempt,
-				fmt.Sprintf("adapter=%s turns=%d", agentAdapter.Name(), sessionCfg.MaxTurns))
+				fmt.Sprintf("adapter=%s turns=%d", agentAdapter.Name(), attemptCfg.MaxTurns))
 		}
-		result, spawnErr := agentAdapter.Spawn(ctx, agentPrompt, workDir, sessionCfg)
+		result, spawnErr := agentAdapter.Spawn(attemptCtx, agentPrompt, workDir, attemptCfg)
+		stuckCancel() // always clean up
 
 		// Persist the agent PID from the result so crash recovery can kill stale
 		// processes. Written immediately after spawn returns (process has exited),
@@ -199,6 +256,39 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			}
 		}
 
+		// Handle stuck detection — if the detector cancelled the context, apply
+		// the escalation ladder instead of normal retry logic.
+		if lastStuckSignal != nil && attempt < MaxGatedAttempts {
+			sig := lastStuckSignal
+			fmt.Printf("[%s] Agent stuck: %s\n", opts.PhaseName, sig.Reason)
+
+			if updateErr := sf.Update(func(s *arc.PhaseState) error {
+				s.Notes = FormatStuckNote(sig, attempt)
+				return nil
+			}); updateErr != nil {
+				opts.Logger.Warn("failed to persist stuck note", "error", updateErr)
+			}
+
+			// Escalation ladder:
+			// Level 0 → inject guidance
+			// Level 1 → escalate model + guidance
+			// Level 2 → narrow scope to failing checkpoints
+			stuckEscalationLevel++
+			switch stuckEscalationLevel {
+			case 1:
+				stuckGuidance = StuckGuidance(sig)
+				fmt.Printf("[%s] Escalation: injecting stuck guidance\n", opts.PhaseName)
+			case 2:
+				escalationModel = resolveEscalationModel()
+				stuckGuidance = StuckGuidance(sig)
+				fmt.Printf("[%s] Escalation: switching to %s\n", opts.PhaseName, escalationModel)
+			default:
+				stuckGuidance = narrowScopeGuidance(spec, lastGateResult)
+				fmt.Printf("[%s] Escalation: narrowing scope\n", opts.PhaseName)
+			}
+			continue
+		}
+
 		// Handle spawn-level failures
 		if spawnErr != nil {
 			tier := classifySpawnError(result, spawnErr)
@@ -213,7 +303,6 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		}
 
 		// Run gate — role-based routing
-		role := arc.DefaultRole(spec.Role)
 		var gateResult *arc.GateResult
 		if role != "impl" {
 			// Non-impl roles: run verifier as the primary gate, skip assertions.
@@ -531,8 +620,64 @@ func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt 
 	return phasePrompt + "\n\n" + retryAddendum, nil
 }
 
-// formatToolActivity converts a list of tool names from a stream-json turn into
-// a human-readable activity string written to state.Activity.
+// formatTurnActivity converts a TurnEvent into a human-readable activity string.
+// Uses file paths and commands when available for richer status output.
+func formatTurnActivity(ev arc.TurnEvent) string {
+	var parts []string
+	seen := make(map[string]bool)
+
+	for _, tu := range ev.Tools {
+		var label string
+		switch tu.Name {
+		case "Edit", "MultiEdit":
+			if tu.File != "" {
+				label = "editing " + filepath.Base(tu.File)
+			} else {
+				label = "editing files"
+			}
+		case "Read", "View":
+			if tu.File != "" {
+				label = "reading " + filepath.Base(tu.File)
+			} else {
+				label = "reading files"
+			}
+		case "Write":
+			if tu.File != "" {
+				label = "writing " + filepath.Base(tu.File)
+			} else {
+				label = "writing files"
+			}
+		case "Bash":
+			if tu.Cmd != "" {
+				cmd := tu.Cmd
+				if len(cmd) > 40 {
+					cmd = cmd[:37] + "..."
+				}
+				label = "running: " + cmd
+			} else {
+				label = "running commands"
+			}
+		case "Grep":
+			label = "searching code"
+		case "Glob":
+			label = "searching files"
+		case "WebFetch", "WebSearch":
+			label = "searching web"
+		default:
+			label = friendlyToolName(tu.Name)
+		}
+
+		if !seen[label] {
+			seen[label] = true
+			parts = append(parts, label)
+		}
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// formatToolActivity converts a list of tool names into a human-readable activity string.
+// Kept for backward compatibility with non-streaming adapters.
 func formatToolActivity(tools []string) string {
 	seen := make(map[string]bool, len(tools))
 	var parts []string
@@ -570,6 +715,55 @@ func friendlyToolName(t string) string {
 		}
 		return t
 	}
+}
+
+// resolveEscalationModel returns the model to escalate to when stuck.
+func resolveEscalationModel() string {
+	return "claude-opus-4-6"
+}
+
+// narrowScopeGuidance produces a prompt addendum that focuses the agent on
+// just the failing checkpoints/assertions.
+func narrowScopeGuidance(spec *arc.PhaseSpec, lastGate *arc.GateResult) string {
+	var sb strings.Builder
+	sb.WriteString("## Narrowed Scope\n\n")
+	sb.WriteString("Your previous attempts made partial progress. Focus ONLY on the remaining failures below.\n")
+	sb.WriteString("Do NOT re-do work that already passes.\n\n")
+
+	if lastGate != nil {
+		var passing, failing []string
+		for _, cp := range lastGate.Checkpoints {
+			if cp.Status == "pass" {
+				passing = append(passing, cp.Name)
+			} else {
+				failing = append(failing, cp.Name+": "+cp.Output)
+			}
+		}
+		for _, a := range lastGate.Assertions {
+			if a.Passed {
+				passing = append(passing, a.Description)
+			} else {
+				failing = append(failing, a.Description+": "+a.Detail)
+			}
+		}
+
+		if len(passing) > 0 {
+			sb.WriteString("### Already passing (do not break these)\n")
+			for _, p := range passing {
+				sb.WriteString(fmt.Sprintf("- %s\n", p))
+			}
+			sb.WriteString("\n")
+		}
+		if len(failing) > 0 {
+			sb.WriteString("### Still failing (fix these)\n")
+			for _, f := range failing {
+				sb.WriteString(fmt.Sprintf("- %s\n", f))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
 }
 
 // captureDiff runs `git diff` in the given directory and returns the output.

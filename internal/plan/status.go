@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/gate"
 )
 
 // StatusOptions configures status display.
@@ -142,6 +143,45 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 		}
 
 		fmt.Fprintln(w, line)
+
+		// Show checkpoint results if gate-status.json exists.
+		phaseDir := filepath.Join(planDir, "phases", phase)
+		if gs, err := gate.ReadStatus(phaseDir); err == nil && len(gs.Checkpoints) > 0 {
+			// Read spec to get checkpoint order; fall back to map iteration.
+			var cpNames []string
+			if spec, specErr := ReadSpec(plansDir, planName, phase); specErr == nil {
+				for _, cp := range spec.Checkpoints {
+					if _, ok := gs.Checkpoints[cp.Name]; ok {
+						cpNames = append(cpNames, cp.Name)
+					}
+				}
+			}
+			// Include any checkpoint names in gate-status but not in spec.
+			inSpec := make(map[string]bool, len(cpNames))
+			for _, n := range cpNames {
+				inSpec[n] = true
+			}
+			for n := range gs.Checkpoints {
+				if !inSpec[n] {
+					cpNames = append(cpNames, n)
+				}
+			}
+			if len(cpNames) > 0 {
+				var parts []string
+				for _, n := range cpNames {
+					status := gs.Checkpoints[n]
+					switch status {
+					case "pass":
+						parts = append(parts, n+"=pass")
+					case "fail":
+						parts = append(parts, n+"=FAIL")
+					default:
+						parts = append(parts, n+"="+status)
+					}
+				}
+				fmt.Fprintf(w, "      checkpoints: %s\n", strings.Join(parts, "  "))
+			}
+		}
 	}
 
 	return nil

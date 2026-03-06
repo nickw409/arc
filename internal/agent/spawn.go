@@ -27,7 +27,7 @@ type SpawnOptions struct {
 	Model        string
 	CommandName  string
 	WorkingDir   string           // if set, the subprocess runs in this directory
-	OnTurn       func([]string)   // called after each agent turn with tool names used
+	OnTurn       func(arc.TurnEvent) // called after each agent turn with structured metadata
 }
 
 // SpawnResult is the outcome of a spawned agent subprocess.
@@ -129,7 +129,7 @@ type streamOutput struct {
 
 // spawnStreaming runs the subprocess with piped stdout, parsing stream-json
 // lines and running an inactivity watchdog.
-func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.Cmd, onTurn func([]string)) (*SpawnResult, error) {
+func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.Cmd, onTurn func(arc.TurnEvent)) (*SpawnResult, error) {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -179,7 +179,14 @@ func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.C
 					ts := parseTurnSummary(assistant, turnNum)
 					summaries = append(summaries, ts)
 					if onTurn != nil && len(ts.Tools) > 0 {
-						onTurn(ts.Tools)
+						ev := arc.TurnEvent{
+							Timestamp: time.Now(),
+							TurnNum:   turnNum,
+							Tools:     ts.ToolUses,
+							TokensIn:  ts.InputTokens,
+							TokensOut: ts.OutputTokens,
+						}
+						onTurn(ev)
 					}
 				}
 			case "result":
