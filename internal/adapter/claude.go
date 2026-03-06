@@ -30,6 +30,7 @@ func (a *ClaudeAdapter) Spawn(ctx context.Context, prompt string, workdir string
 		AllowedTools: config.Tools,
 		OutputFormat: "stream-json",
 		CommandName:  a.commandName(),
+		OnTurn:       config.OnTurn,
 	}
 
 	res, err := agent.Spawn(ctx, opts)

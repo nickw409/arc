@@ -26,7 +26,8 @@ type SpawnOptions struct {
 	OutputFormat string
 	Model        string
 	CommandName  string
-	WorkingDir   string // if set, the subprocess runs in this directory
+	WorkingDir   string           // if set, the subprocess runs in this directory
+	OnTurn       func([]string)   // called after each agent turn with tool names used
 }
 
 // SpawnResult is the outcome of a spawned agent subprocess.
@@ -113,7 +114,7 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 
 	// Use streaming for stream-json, buffered for everything else
 	if outputFormat == "stream-json" {
-		return spawnStreaming(ctx, timeoutCtx, cmd)
+		return spawnStreaming(ctx, timeoutCtx, cmd, opts.OnTurn)
 	}
 	return spawnBuffered(ctx, timeoutCtx, cmd)
 }
@@ -128,7 +129,7 @@ type streamOutput struct {
 
 // spawnStreaming runs the subprocess with piped stdout, parsing stream-json
 // lines and running an inactivity watchdog.
-func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.Cmd) (*SpawnResult, error) {
+func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.Cmd, onTurn func([]string)) (*SpawnResult, error) {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -175,7 +176,11 @@ func spawnStreaming(ctx context.Context, timeoutCtx context.Context, cmd *exec.C
 			case "assistant":
 				turnNum++
 				if assistant, ok := parseStreamAssistant(line); ok {
-					summaries = append(summaries, parseTurnSummary(assistant, turnNum))
+					ts := parseTurnSummary(assistant, turnNum)
+					summaries = append(summaries, ts)
+					if onTurn != nil && len(ts.Tools) > 0 {
+						onTurn(ts.Tools)
+					}
 				}
 			case "result":
 				if res, ok := parseStreamResult(line); ok {

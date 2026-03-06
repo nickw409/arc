@@ -27,6 +27,9 @@ type SessionConfig struct {
 	Timeout  time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Model    string        `json:"model,omitempty" yaml:"model,omitempty"`
 	Tools    []string      `json:"tools,omitempty" yaml:"tools,omitempty"`
+	// OnTurn is called after each agent turn with the tool names used that turn.
+	// It is not serialized. Adapters that support streaming should call it.
+	OnTurn func(tools []string) `json:"-" yaml:"-"`
 }
 
 // AgentResult is the outcome of a spawned agent session.

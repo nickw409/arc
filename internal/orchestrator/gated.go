@@ -46,6 +46,13 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		return fmt.Errorf("reading phase spec: %w", err)
 	}
 
+	// Require spec content before spawning. An empty spec wastes an agent
+	// session — the gate rejects it immediately as misconfigured. Simple phases
+	// don't need checkpoints or assertions, but the spec field is mandatory.
+	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
+		return fmt.Errorf("phase %q has no spec content — fill in spec.yaml before running (checkpoints optional for simple fixes, but spec field is required)", opts.PhaseName)
+	}
+
 	// Resolve adapter
 	adapterName := "claude"
 	if opts.Config != nil {
@@ -75,6 +82,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: turnBudget,
 		Timeout:  time.Duration(turnBudget) * 30 * time.Second,
+		OnTurn: func(tools []string) {
+			_ = state.SetActivity(sf, formatToolActivity(tools))
+		},
 	}
 
 	// Gate spec path
@@ -108,10 +118,12 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			return fmt.Errorf("building prompt (attempt %d): %w", attempt, err)
 		}
 
-		// Update state
+		// Update state — clear stale activity from previous attempt
 		if updateErr := sf.Update(func(s *arc.PhaseState) error {
 			s.PhaseStatus = "implementing"
 			s.Iteration.Current = attempt
+			s.Activity = ""
+			s.ActivityUpdatedAt = ""
 			return nil
 		}); updateErr != nil {
 			opts.Logger.Warn("failed to update state", "error", updateErr)
@@ -517,6 +529,47 @@ func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt 
 	}
 
 	return phasePrompt + "\n\n" + retryAddendum, nil
+}
+
+// formatToolActivity converts a list of tool names from a stream-json turn into
+// a human-readable activity string written to state.Activity.
+func formatToolActivity(tools []string) string {
+	seen := make(map[string]bool, len(tools))
+	var parts []string
+	for _, t := range tools {
+		label := friendlyToolName(t)
+		if !seen[label] {
+			seen[label] = true
+			parts = append(parts, label)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func friendlyToolName(t string) string {
+	switch t {
+	case "Edit", "MultiEdit":
+		return "editing files"
+	case "Read", "View":
+		return "reading files"
+	case "Write":
+		return "writing files"
+	case "Bash":
+		return "running commands"
+	case "WebFetch", "WebSearch":
+		return "searching web"
+	case "Glob":
+		return "searching files"
+	case "Grep":
+		return "searching code"
+	case "mcp__arc__arc_manage":
+		return "updating state"
+	default:
+		if strings.HasPrefix(t, "mcp__arc__") {
+			return strings.TrimPrefix(t, "mcp__arc__")
+		}
+		return t
+	}
 }
 
 // captureDiff runs `git diff` in the given directory and returns the output.
