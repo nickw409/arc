@@ -398,6 +398,30 @@ func checkNoUntracked(desc, workdir string) arc.AssertionResult {
 	}
 }
 
+// HasAssertions reads a spec YAML and returns true if it defines any gate
+// assertions or checkpoints with test commands.
+func HasAssertions(specPath string) (bool, error) {
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return false, fmt.Errorf("reading spec file %q: %w", specPath, err)
+	}
+
+	var spec arc.PhaseSpec
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return false, fmt.Errorf("parsing spec file %q: %w", specPath, err)
+	}
+
+	if len(spec.Gate.Assertions) > 0 {
+		return true, nil
+	}
+	for _, cp := range spec.Checkpoints {
+		if cp.Test != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // runCheckpoint runs a checkpoint's test command and returns its status.
 func runCheckpoint(ctx context.Context, cp arc.Checkpoint, workdir string) arc.CheckpointStatus {
 	if cp.Test == "" {

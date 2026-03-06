@@ -100,7 +100,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Build prompt
 		var agentPrompt string
 		if attempt == 1 {
-			agentPrompt, err = buildImplPrompt(spec, opts.PlanName, projectCtx)
+			agentPrompt, err = buildPhasePrompt(spec, opts.PlanName, projectCtx)
 		} else {
 			agentPrompt, err = buildRetryPrompt(spec, opts.PlanName, projectCtx, attempt, lastGateResult, lastDiff)
 		}
@@ -200,20 +200,45 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 				"attempt", attempt, "error", spawnErr)
 		}
 
-		// Run hard gate
-		fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
-		var gateOpts []gate.RunOption
-		if opts.Config != nil {
-			gateOpts = append(gateOpts, gate.WithVerifier(
-				gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
-		}
-		gateResult, gateErr := gate.Run(ctx, specPath, workDir, gateOpts...)
-		if gateErr != nil {
-			opts.Logger.Warn("gate execution error", "error", gateErr)
-			if attempt < MaxGatedAttempts {
-				continue
+		// Run gate — role-based routing
+		role := arc.DefaultRole(spec.Role)
+		var gateResult *arc.GateResult
+		if role != "impl" {
+			// Non-impl roles: run verifier as the primary gate, skip assertions.
+			fmt.Printf("[%s] Running verifier check\n", opts.PhaseName)
+			passed, reasoning, verifyErr := gate.RunVerifier(ctx, spec, workDir)
+			if verifyErr != nil {
+				opts.Logger.Warn("verifier execution error", "error", verifyErr)
+				if attempt < MaxGatedAttempts {
+					continue
+				}
+				return fmt.Errorf("verifier failed on final attempt: %w", verifyErr)
 			}
-			return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
+			gateResult = &arc.GateResult{
+				Passed:            passed,
+				ScopedTestPassed:  passed,
+				ScopedTestSkipped: true,
+			}
+			if !passed {
+				gateResult.ScopedTestOutput = reasoning
+			}
+		} else {
+			// Impl role: run assertion-based gate as before.
+			fmt.Printf("[%s] Running gate check\n", opts.PhaseName)
+			var gateOpts []gate.RunOption
+			if opts.Config != nil {
+				gateOpts = append(gateOpts, gate.WithVerifier(
+					gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
+			}
+			var gateErr error
+			gateResult, gateErr = gate.Run(ctx, specPath, workDir, gateOpts...)
+			if gateErr != nil {
+				opts.Logger.Warn("gate execution error", "error", gateErr)
+				if attempt < MaxGatedAttempts {
+					continue
+				}
+				return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
+			}
 		}
 
 		// Write gate status and increment run count
@@ -371,6 +396,19 @@ func gatedPhaseComplete(opts RunPhaseOptions, sf *state.StateFile, spec *arc.Pha
 	return nil
 }
 
+// buildPhasePrompt dispatches to the correct prompt builder based on the phase role.
+func buildPhasePrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, error) {
+	role := arc.DefaultRole(spec.Role)
+	switch role {
+	case "review", "audit":
+		return buildReviewPrompt(spec, planName, projectCtx)
+	case "investigate":
+		return buildInvestigatePrompt(spec, planName, projectCtx)
+	default:
+		return buildImplPrompt(spec, planName, projectCtx)
+	}
+}
+
 // buildImplPrompt renders the implementation prompt from the phase spec.
 // planName is the plan name used in the arc gate command.
 func buildImplPrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, error) {
@@ -396,15 +434,71 @@ func buildImplPrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, 
 	return prompt.RenderGatePrompt("impl", data)
 }
 
-// buildRetryPrompt renders the implementation prompt plus retry context.
+// buildReviewPrompt renders the review prompt for review/audit roles.
+func buildReviewPrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, error) {
+	data := prompt.ReviewData{
+		Spec:           spec.Spec,
+		Files:          spec.Files,
+		Plan:           planName,
+		Phase:          spec.Name,
+		OutputFile:     fmt.Sprintf("findings-%s.md", spec.Name),
+		ProjectContext: projectCtx,
+	}
+	return prompt.RenderGatePrompt("review", data)
+}
+
+// buildInvestigatePrompt renders the investigate prompt.
+func buildInvestigatePrompt(spec *arc.PhaseSpec, planName, projectCtx string) (string, error) {
+	data := prompt.InvestigateData{
+		Spec:           spec.Spec,
+		Files:          spec.Files,
+		Plan:           planName,
+		Phase:          spec.Name,
+		OutputFile:     fmt.Sprintf("findings-%s.md", spec.Name),
+		ProjectContext: projectCtx,
+	}
+	return prompt.RenderGatePrompt("investigate", data)
+}
+
+// buildRetryPrompt renders the phase prompt plus retry context.
+// For non-impl roles (review, investigate, audit), the retry uses verifier feedback
+// via the review-retry template instead of the standard gate-output retry.
 func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt int, lastGate *arc.GateResult, diff string) (string, error) {
-	// Start with the full impl prompt
-	implPrompt, err := buildImplPrompt(spec, planName, projectCtx)
+	// Start with the full phase prompt
+	phasePrompt, err := buildPhasePrompt(spec, planName, projectCtx)
 	if err != nil {
 		return "", err
 	}
 
-	// Render retry addendum
+	role := arc.DefaultRole(spec.Role)
+
+	// Non-impl roles use review-retry template with verifier feedback
+	if role == "review" || role == "investigate" || role == "audit" {
+		verifierFeedback := ""
+		if lastGate != nil {
+			// For verifier-only gate results, use the raw verifier reasoning.
+			if lastGate.ScopedTestOutput != "" {
+				verifierFeedback = lastGate.ScopedTestOutput
+			} else {
+				verifierFeedback = gate.Format(lastGate)
+			}
+		}
+
+		retryData := prompt.ReviewRetryData{
+			Attempt:          attempt,
+			MaxAttempts:      MaxGatedAttempts,
+			VerifierFeedback: verifierFeedback,
+			OutputFile:       fmt.Sprintf("findings-%s.md", spec.Name),
+		}
+
+		retryAddendum, retryErr := prompt.RenderGatePrompt("review-retry", retryData)
+		if retryErr != nil {
+			return "", retryErr
+		}
+		return phasePrompt + "\n\n" + retryAddendum, nil
+	}
+
+	// Impl role uses standard retry template
 	gateOutput := ""
 	if lastGate != nil {
 		gateOutput = gate.Format(lastGate)
@@ -422,7 +516,7 @@ func buildRetryPrompt(spec *arc.PhaseSpec, planName, projectCtx string, attempt 
 		return "", err
 	}
 
-	return implPrompt + "\n\n" + retryAddendum, nil
+	return phasePrompt + "\n\n" + retryAddendum, nil
 }
 
 // captureDiff runs `git diff` in the given directory and returns the output.

@@ -51,6 +51,34 @@ type AttemptData struct {
 	DiffSummary       string
 }
 
+// ReviewData is the template data for the review prompt.
+type ReviewData struct {
+	Spec           string
+	Files          []string
+	Plan           string
+	Phase          string
+	OutputFile     string
+	ProjectContext string
+}
+
+// InvestigateData is the template data for the investigate prompt.
+type InvestigateData struct {
+	Spec           string
+	Files          []string
+	Plan           string
+	Phase          string
+	OutputFile     string
+	ProjectContext string
+}
+
+// ReviewRetryData is the template data for the review/investigate retry prompt.
+type ReviewRetryData struct {
+	Attempt          int
+	MaxAttempts      int
+	VerifierFeedback string
+	OutputFile       string
+}
+
 // AdversaryData is the template data for the adversary prompt.
 type AdversaryData struct {
 	ChangedFiles   []string

@@ -148,6 +148,99 @@ func TestHandlePlanAddPhaseWithDeps(t *testing.T) {
 	}
 }
 
+func TestHandlePlanAddPhaseWithRole(t *testing.T) {
+	h, dir := newTestHandler(t)
+	createPlanForGated(t, dir, "my-plan", []string{"impl"})
+
+	result, err := callTool(context.Background(), h, h.handlePlanAddPhase, map[string]any{
+		"plan_name":  "my-plan",
+		"phase_name": "check",
+		"spec":       "Review the code",
+		"role":       "review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	// Verify role is persisted in spec.yaml
+	spec, err := plan.ReadSpec(
+		filepath.Join(dir, ".plans", "active"),
+		"my-plan", "check",
+	)
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if spec.Role != "review" {
+		t.Errorf("Role: got %q, want %q", spec.Role, "review")
+	}
+}
+
+func TestHandlePlanAddPhaseInvalidRole(t *testing.T) {
+	h, dir := newTestHandler(t)
+	createPlanForGated(t, dir, "my-plan", []string{"impl"})
+
+	result, err := callTool(context.Background(), h, h.handlePlanAddPhase, map[string]any{
+		"plan_name":  "my-plan",
+		"phase_name": "check",
+		"spec":       "Do something",
+		"role":       "unknown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid role")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "role") {
+		t.Fatalf("expected 'role' in error, got: %s", text)
+	}
+}
+
+func TestHandlePlanUpdatePhaseRole(t *testing.T) {
+	h, dir := newTestHandler(t)
+	createPlanForGated(t, dir, "my-plan", []string{"impl"})
+
+	// Add phase first
+	callTool(context.Background(), h, h.handlePlanAddPhase, map[string]any{
+		"plan_name":  "my-plan",
+		"phase_name": "check",
+		"spec":       "Check code",
+	})
+
+	// Update just the role
+	result, err := callTool(context.Background(), h, h.handlePlanUpdatePhase, map[string]any{
+		"plan_name":  "my-plan",
+		"phase_name": "check",
+		"role":       "audit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "role") {
+		t.Fatalf("expected 'role' in updated fields, got: %s", text)
+	}
+
+	// Verify persisted
+	spec, err := plan.ReadSpec(
+		filepath.Join(dir, ".plans", "active"),
+		"my-plan", "check",
+	)
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if spec.Role != "audit" {
+		t.Errorf("Role: got %q, want %q", spec.Role, "audit")
+	}
+}
+
 // --- arc_plan_remove_phase ---
 
 func TestHandlePlanRemovePhase(t *testing.T) {

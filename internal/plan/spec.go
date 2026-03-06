@@ -66,6 +66,19 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 		}
 	}
 
+	// Role: if set, must be one of the allowed values.
+	if spec.Role != "" {
+		switch spec.Role {
+		case "impl", "review", "investigate", "audit":
+			// valid
+		default:
+			warnings = append(warnings, SpecWarning{
+				Field:   "role",
+				Message: fmt.Sprintf("invalid role %q — must be impl, review, investigate, or audit", spec.Role),
+			})
+		}
+	}
+
 	// Complexity: should be set.
 	if spec.Complexity == "" {
 		warnings = append(warnings, SpecWarning{
@@ -288,6 +301,9 @@ func UpdateSpec(plansDir, planName, phaseName string, update *arc.PhaseSpec) err
 	}
 	if update.Spec != "" {
 		existing.Spec = update.Spec
+	}
+	if update.Role != "" {
+		existing.Role = update.Role
 	}
 	if update.Verify != "" {
 		existing.Verify = update.Verify

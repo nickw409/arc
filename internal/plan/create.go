@@ -23,6 +23,7 @@ type CreateOptions struct {
 	PlanContent    map[string]string   // optional: phase name → plan.md content (skip template)
 	CustomWorkflow []byte              // optional: custom workflow YAML (written as workflow.yaml)
 	Resolver       *resources.Resolver // if nil, uses NewResolver("", "") (embedded-only)
+	PhaseRoles     map[string]string   // optional: phase name → role (impl, review, investigate, audit)
 }
 
 // Create creates a new plan with directory structure, state files, and templates.
@@ -159,6 +160,16 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 		}
 		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), planMD, 0644); err != nil {
 			return nil, fmt.Errorf("write plan.md for %s: %w", phase, err)
+		}
+
+		// Write spec.yaml with role if PhaseRoles specifies one
+		if opts.PhaseRoles != nil {
+			if role, ok := opts.PhaseRoles[phase]; ok && role != "" {
+				spec := &arc.PhaseSpec{Role: role}
+				if err := WriteSpec(opts.PlansDir, opts.Name, phase, spec); err != nil {
+					return nil, fmt.Errorf("write spec.yaml for %s: %w", phase, err)
+				}
+			}
 		}
 	}
 
