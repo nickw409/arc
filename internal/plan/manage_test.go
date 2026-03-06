@@ -547,3 +547,209 @@ func TestManageResetPlan(t *testing.T) {
 		}
 	}
 }
+
+// --- Mutation guard tests ---
+
+// setStatus is a test helper that directly sets the phase status in state.json.
+func setStatus(t *testing.T, opts ManageOptions, status string) {
+	t.Helper()
+	sf := stateFileFor(opts)
+	if err := sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = status
+		return nil
+	}); err != nil {
+		t.Fatalf("setStatus(%q): %v", status, err)
+	}
+}
+
+// TestManageCompleteRunningBlocked verifies that ManageComplete returns an error
+// when the phase is in "running" status.
+func TestManageCompleteRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	setStatus(t, opts, "running")
+
+	err := ManageComplete(opts)
+	if err == nil {
+		t.Fatal("expected error completing a running phase, got nil")
+	}
+}
+
+// TestManageCompleteAlreadyCompleteBlocked verifies that ManageComplete returns
+// an error when the phase is already "complete".
+func TestManageCompleteAlreadyCompleteBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	setStatus(t, opts, "complete")
+
+	err := ManageComplete(opts)
+	if err == nil {
+		t.Fatal("expected error completing an already-complete phase, got nil")
+	}
+}
+
+// TestManageDeferRunningBlocked verifies that ManageDefer returns an error for
+// a running phase.
+func TestManageDeferRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Reason = "pause"
+	setStatus(t, opts, "running")
+
+	err := ManageDefer(opts)
+	if err == nil {
+		t.Fatal("expected error deferring a running phase, got nil")
+	}
+}
+
+// TestManageDeferCompleteBlocked verifies that ManageDefer returns an error for
+// a complete phase.
+func TestManageDeferCompleteBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Reason = "pause"
+	setStatus(t, opts, "complete")
+
+	err := ManageDefer(opts)
+	if err == nil {
+		t.Fatal("expected error deferring a complete phase, got nil")
+	}
+}
+
+// TestManageBlockRunningBlocked verifies that ManageBlock returns an error for
+// a running phase.
+func TestManageBlockRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Reason = "stuck"
+	setStatus(t, opts, "running")
+
+	err := ManageBlock(opts)
+	if err == nil {
+		t.Fatal("expected error blocking a running phase, got nil")
+	}
+}
+
+// TestManageBlockCompleteBlocked verifies that ManageBlock returns an error for
+// a complete phase.
+func TestManageBlockCompleteBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Reason = "stuck"
+	setStatus(t, opts, "complete")
+
+	err := ManageBlock(opts)
+	if err == nil {
+		t.Fatal("expected error blocking a complete phase, got nil")
+	}
+}
+
+// TestManageTestsRunningBlocked verifies that ManageTests returns an error for
+// a running phase.
+func TestManageTestsRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 5
+	opts.Total = 10
+	setStatus(t, opts, "running")
+
+	err := ManageTests(opts)
+	if err == nil {
+		t.Fatal("expected error updating tests on a running phase, got nil")
+	}
+}
+
+// TestManageTestsCompleteBlocked verifies that ManageTests returns an error for
+// a complete phase.
+func TestManageTestsCompleteBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Passing = 5
+	opts.Total = 10
+	setStatus(t, opts, "complete")
+
+	err := ManageTests(opts)
+	if err == nil {
+		t.Fatal("expected error updating tests on a complete phase, got nil")
+	}
+}
+
+// TestManagePackagesRunningBlocked verifies that ManagePackages returns an error
+// for a running phase.
+func TestManagePackagesRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Packages = []string{"internal/plan"}
+	setStatus(t, opts, "running")
+
+	err := ManagePackages(opts)
+	if err == nil {
+		t.Fatal("expected error setting packages on a running phase, got nil")
+	}
+}
+
+// TestManageNoteRunningBlocked verifies that ManageNote returns an error for a
+// running phase.
+func TestManageNoteRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Note = "some note"
+	setStatus(t, opts, "running")
+
+	err := ManageNote(opts)
+	if err == nil {
+		t.Fatal("expected error setting note on a running phase, got nil")
+	}
+}
+
+// TestManageNoteCompleteBlocked verifies that ManageNote returns an error for a
+// complete phase.
+func TestManageNoteCompleteBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Note = "some note"
+	setStatus(t, opts, "complete")
+
+	err := ManageNote(opts)
+	if err == nil {
+		t.Fatal("expected error setting note on a complete phase, got nil")
+	}
+}
+
+// TestManageIterationRunningBlocked verifies that ManageIteration returns an
+// error for a running phase.
+func TestManageIterationRunningBlocked(t *testing.T) {
+	_, opts := setupManageTest(t)
+	opts.Iteration = 3
+	setStatus(t, opts, "running")
+
+	err := ManageIteration(opts)
+	if err == nil {
+		t.Fatal("expected error setting iteration on a running phase, got nil")
+	}
+}
+
+// TestManagePendingAlwaysAllowed verifies that ManagePending succeeds regardless
+// of the current status (it is the escape hatch).
+func TestManagePendingAlwaysAllowed(t *testing.T) {
+	for _, status := range []string{"pending", "running", "complete", "blocked", "deferred", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			_, opts := setupManageTest(t)
+			setStatus(t, opts, status)
+			if err := ManagePending(opts); err != nil {
+				t.Fatalf("ManagePending should always succeed, got error for status %q: %v", status, err)
+			}
+			s := readTestState(t, opts)
+			if s.PhaseStatus != "pending" {
+				t.Fatalf("phase_status = %q, want %q", s.PhaseStatus, "pending")
+			}
+		})
+	}
+}
+
+// TestManageResetAlwaysAllowed verifies that ManageReset succeeds regardless of
+// the current status.
+func TestManageResetAlwaysAllowed(t *testing.T) {
+	for _, status := range []string{"pending", "running", "complete", "blocked", "deferred", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			_, opts := setupManageTest(t)
+			setStatus(t, opts, status)
+			if err := ManageReset(opts); err != nil {
+				t.Fatalf("ManageReset should always succeed, got error for status %q: %v", status, err)
+			}
+			s := readTestState(t, opts)
+			if s.PhaseStatus != "pending" {
+				t.Fatalf("phase_status = %q, want %q after reset", s.PhaseStatus, "pending")
+			}
+		})
+	}
+}

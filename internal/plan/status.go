@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/nwiley/arc/internal/arc"
 )
@@ -61,6 +63,19 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 	}
 
 	fmt.Fprintf(w, "Plan: %s (%s)\n", meta.Name, meta.WorkflowType)
+
+	// Show orchestrator status if a PID file exists.
+	pidPath := filepath.Join(planDir, "orchestrator.pid")
+	if pidData, err := os.ReadFile(pidPath); err == nil {
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(pidData)))
+		if parseErr == nil {
+			if isProcessAlive(pid) {
+				fmt.Fprintf(w, "  Orchestrator: running (PID %d)\n", pid)
+			} else {
+				fmt.Fprintf(w, "  Orchestrator: not running (stale PID %d)\n", pid)
+			}
+		}
+	}
 
 	// Collect all phase states for dependency checking
 	phaseStates := make(map[string]*arc.PhaseState)
@@ -135,6 +150,70 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 	}
 
 	return nil
+}
+
+// AllPhasesTerminal returns true when every phase in every matching plan has
+// reached a terminal status (complete, blocked, or deferred). It is used by
+// the --live flag to decide when to stop polling.
+func AllPhasesTerminal(opts StatusOptions) bool {
+	checkPlan := func(plansDir, planName string) bool {
+		planDir := filepath.Join(plansDir, planName)
+		planData, err := os.ReadFile(filepath.Join(planDir, "plan.json"))
+		if err != nil {
+			return false
+		}
+		var meta arc.PlanMeta
+		if err := json.Unmarshal(planData, &meta); err != nil {
+			return false
+		}
+		for _, phase := range meta.Phases {
+			statePath := filepath.Join(planDir, "phases", phase, "state.json")
+			stateData, err := os.ReadFile(statePath)
+			if err != nil {
+				return false
+			}
+			var st arc.PhaseState
+			if err := json.Unmarshal(stateData, &st); err != nil {
+				return false
+			}
+			switch st.PhaseStatus {
+			case "complete", "blocked", "deferred", "split":
+				// terminal
+			default:
+				return false
+			}
+		}
+		return true
+	}
+
+	if opts.PlanName != "" {
+		return checkPlan(opts.PlansDir, opts.PlanName)
+	}
+
+	entries, err := os.ReadDir(opts.PlansDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if !checkPlan(opts.PlansDir, e.Name()) {
+			return false
+		}
+	}
+	return true
+}
+
+// isProcessAlive returns true if a process with the given PID is alive.
+// It uses signal 0, which checks process existence without sending a real signal.
+func isProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 // StatusIcon returns the display icon for a phase status string.

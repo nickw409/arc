@@ -163,6 +163,18 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 		}, nil
 	}
 
+	// Check context after agent completes — a fast agent may finish before
+	// the context deadline fires, but the caller still intended cancellation.
+	if ctx.Err() != nil {
+		return &AdversaryResult{
+			Name:     adv.Name,
+			Status:   "error",
+			Verdict:  "",
+			Required: adv.Required,
+			Output:   ctx.Err().Error(),
+		}, nil
+	}
+
 	// Extract verdict from agent output
 	validVerdicts := []arc.Verdict{arc.Verdict(adv.PassVerdict), arc.Verdict(adv.FailVerdict)}
 	verdict, extractErr := prompt.ExtractVerdict(spawnResult.Output, validVerdicts)

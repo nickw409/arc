@@ -1,0 +1,33 @@
+name: add-endpoint
+description: Add a new HTTP endpoint (handler, route registration, and tests)
+params:
+  - name: endpoint_name
+  - name: http_method
+    default: GET
+  - name: package
+    default: internal/api
+phases:
+  - name: handler
+    spec: |
+      Implement a new {{.http_method}} HTTP handler for the {{.endpoint_name}} endpoint.
+
+      - Add the handler function in the {{.package}} package.
+      - Register the route so the endpoint is reachable.
+      - Keep the implementation focused and consistent with existing handler patterns.
+    verify: go test ./{{.package}}/...
+    complexity: medium
+    files:
+      - "{{.package}}/{{.endpoint_name}}.go"
+  - name: tests
+    spec: |
+      Write comprehensive tests for the {{.endpoint_name}} endpoint.
+
+      - Cover success cases, error cases, and edge cases.
+      - Use table-driven tests where appropriate.
+      - Ensure the handler returns correct HTTP status codes and response bodies.
+    verify: go test ./{{.package}}/...
+    complexity: medium
+    files:
+      - "{{.package}}/{{.endpoint_name}}_test.go"
+    deps:
+      - handler

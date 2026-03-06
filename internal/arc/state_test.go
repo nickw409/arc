@@ -175,7 +175,7 @@ func TestNewPlanMeta(t *testing.T) {
 		t.Fatalf("PhaseOrder = %v, want %v", m.PhaseOrder, wantOrder)
 	}
 
-	wantDeps := map[string][]string{"impl": {"qa"}}
+	wantDeps := map[string][]string{}
 	if !reflect.DeepEqual(m.Dependencies, wantDeps) {
 		t.Fatalf("Dependencies = %v, want %v", m.Dependencies, wantDeps)
 	}
@@ -246,8 +246,8 @@ func TestNewPlanMetaDuplicatePhases(t *testing.T) {
 		t.Fatalf("PhaseOrder[core] = %d, want 2", m.PhaseOrder["core"])
 	}
 
-	// Second "core" depends on first "core"
-	wantDeps := map[string][]string{"core": {"core"}}
+	// No auto-deps — phases are parallel by default
+	wantDeps := map[string][]string{}
 	if !reflect.DeepEqual(m.Dependencies, wantDeps) {
 		t.Fatalf("Dependencies = %v, want %v", m.Dependencies, wantDeps)
 	}

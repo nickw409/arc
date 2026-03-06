@@ -118,6 +118,13 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 - **audit** — Adversarial + fix: `adversary → impl → complete`
 - **direct** — Single-phase: `impl → complete` (used by `arc dev` for simple tasks)
 
+### Phase Roles
+Phases have a `role` that determines their prompt and gate behavior:
+- **impl** (default) — write code, verified by gate assertions
+- **review** — analyze code, verified by AI verifier
+- **investigate** — research questions, verified by AI verifier
+- **audit** — security/quality audit, verified by AI verifier
+
 ## Releases
 
 Releases are built by goreleaser via `.github/workflows/release.yml` on `v*` tag push. Version is injected via `-ldflags -X github.com/nwiley/arc/internal/cli.Version=...`. The `selfupdate` package downloads releases from the GitHub API with SHA256 checksum verification.

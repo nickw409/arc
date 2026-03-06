@@ -272,6 +272,7 @@ func TestNoOrphanPrompts(t *testing.T) {
 		"adversaries/",
 		"validate/",
 		"dev/", // agent prompts loaded outside workflow states
+		"gate/", // gate prompts are loaded programmatically via RenderGatePrompt, not by workflow states
 	}
 	exemptFiles := map[string]bool{
 		"direct/multi-phase.md": true, // loaded by orchestrator for direct multi-phase plans

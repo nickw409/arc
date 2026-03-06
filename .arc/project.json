@@ -1,0 +1,75 @@
+{
+  "flaky_tests": {
+    "TestRunAdversaryTimeout": {
+      "fail_count": 0,
+      "pass_count": 1,
+      "last_seen": "2026-03-06T02:33:31.152809611Z"
+    }
+  },
+  "cost_history": [
+    {
+      "plan_name": "daemon",
+      "complexity": "complex",
+      "cost_usd": 4.599643250000001,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.47069145Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "complex",
+      "cost_usd": 3.2016430000000007,
+      "turns": 2,
+      "timestamp": "2026-03-06T02:40:18.470735597Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 2.025719,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.470764717Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "complex",
+      "cost_usd": 3.7831265000000003,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.470819874Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 3.0029337499999995,
+      "turns": 3,
+      "timestamp": "2026-03-06T02:40:18.470829598Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 0.362857,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.470841898Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 0.28841775,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.47085331Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 0.36888499999999996,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.470861389Z"
+    },
+    {
+      "plan_name": "daemon",
+      "complexity": "medium",
+      "cost_usd": 0.903411,
+      "turns": 1,
+      "timestamp": "2026-03-06T02:40:18.470871927Z"
+    }
+  ],
+  "last_updated": "2026-03-06T02:40:18.471263982Z"
+}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // initTestRepo creates an isolated git repository with an initial commit.
@@ -400,5 +401,305 @@ func TestCreate_PlanLevelBranchExistsWorktreeRemoved(t *testing.T) {
 
 	if wt2.Branch != "arc/shared-restart" {
 		t.Errorf("expected branch arc/shared-restart, got %q", wt2.Branch)
+	}
+}
+
+// ---- Tests for ListOrphaned and CheckDiskSpace ----
+
+func TestListOrphaned_NoWorktrees(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	orphans, err := ListOrphaned(projectDir, nil)
+	if err != nil {
+		t.Fatalf("ListOrphaned failed: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("expected 0 orphans, got %d", len(orphans))
+	}
+}
+
+func TestListOrphaned_ActivePlanNotOrphaned(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "active-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	// Pass "arc/active-plan" as an active plan — should not appear as orphan.
+	orphans, err := ListOrphaned(projectDir, []string{"arc/active-plan"})
+	if err != nil {
+		t.Fatalf("ListOrphaned failed: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("expected 0 orphans, got %d: %+v", len(orphans), orphans)
+	}
+}
+
+func TestListOrphaned_OrphanedWorktree(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	// Create a worktree for "old-plan".
+	wt, err := Create(projectDir, "old-plan", "")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	// Do not include "arc/old-plan" in active plans → it should be orphaned.
+	orphans, err := ListOrphaned(projectDir, []string{"arc/other-plan"})
+	if err != nil {
+		t.Fatalf("ListOrphaned failed: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected 1 orphan, got %d: %+v", len(orphans), orphans)
+	}
+	if orphans[0].Branch != "arc/old-plan" {
+		t.Errorf("expected branch arc/old-plan, got %q", orphans[0].Branch)
+	}
+	if orphans[0].Dir == "" {
+		t.Error("expected non-empty Dir in orphan")
+	}
+	// Age should be a non-negative duration.
+	if orphans[0].Age < 0 {
+		t.Errorf("expected non-negative Age, got %v", orphans[0].Age)
+	}
+}
+
+func TestListOrphaned_MultipleWorktrees(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wtActive, err := Create(projectDir, "active-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("Create active-plan failed: %v", err)
+	}
+	defer Remove(wtActive)
+
+	wtOrphan, err := Create(projectDir, "orphan-plan", "phase-b")
+	if err != nil {
+		t.Fatalf("Create orphan-plan failed: %v", err)
+	}
+	defer Remove(wtOrphan)
+
+	orphans, err := ListOrphaned(projectDir, []string{"arc/active-plan"})
+	if err != nil {
+		t.Fatalf("ListOrphaned failed: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected 1 orphan, got %d: %+v", len(orphans), orphans)
+	}
+	if orphans[0].Branch != "arc/orphan-plan/phase-b" {
+		t.Errorf("expected branch arc/orphan-plan/phase-b, got %q", orphans[0].Branch)
+	}
+}
+
+func TestListOrphaned_NilActivePlansAllArcOrphaned(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "some-plan", "")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	// nil activePlans → every arc worktree is orphaned.
+	orphans, err := ListOrphaned(projectDir, nil)
+	if err != nil {
+		t.Fatalf("ListOrphaned failed: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected 1 orphan, got %d: %+v", len(orphans), orphans)
+	}
+}
+
+func TestCheckDiskSpace_SufficientSpace(t *testing.T) {
+	// 1 byte threshold — should always pass on any reasonably healthy system.
+	if err := CheckDiskSpace(1); err != nil {
+		t.Fatalf("CheckDiskSpace(1) unexpectedly failed: %v", err)
+	}
+}
+
+func TestCheckDiskSpace_ExcessiveThreshold(t *testing.T) {
+	// Require more disk space than any conceivable machine could have.
+	// This must fail.
+	const impossibleBytes = int64(1) << 62 // 4 EiB
+	err := CheckDiskSpace(impossibleBytes)
+	if err == nil {
+		t.Fatal("expected CheckDiskSpace to fail with impossibly large threshold, but it returned nil")
+	}
+	if !strings.Contains(err.Error(), "insufficient disk space") {
+		t.Errorf("expected 'insufficient disk space' in error, got: %v", err)
+	}
+}
+
+func TestWorktreeAge_ExistingDir(t *testing.T) {
+	dir := t.TempDir()
+	age := worktreeAge(dir)
+	// The directory was just created — age should be very small.
+	if age < 0 {
+		t.Errorf("expected non-negative age, got %v", age)
+	}
+	if age > 10*time.Second {
+		t.Errorf("expected age < 10s for a freshly created dir, got %v", age)
+	}
+}
+
+func TestWorktreeAge_NonExistentDir(t *testing.T) {
+	age := worktreeAge("/nonexistent/path/that/does/not/exist")
+	if age != 0 {
+		t.Errorf("expected age=0 for non-existent dir, got %v", age)
+	}
+}
+
+func TestCreate_DiskSpaceCheck(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	// Verify that Create succeeds under normal conditions (1 byte threshold is
+	// injected inside the package-level const, but we test Create end-to-end).
+	wt, err := Create(projectDir, "disk-check-plan", "")
+	if err != nil {
+		t.Fatalf("Create should succeed when disk space is sufficient: %v", err)
+	}
+	defer Remove(wt)
+}
+
+// ---- Tests for WorktreeMetadata (WriteMetadata / ReadMetadata) ----
+
+func TestWriteMetadata_Basic(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "meta-plan", "meta-phase")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	reason := "gate did not pass after 4 attempts"
+	if err := WriteMetadata(wt, reason, "meta-phase"); err != nil {
+		t.Fatalf("WriteMetadata failed: %v", err)
+	}
+
+	// Verify the file was created
+	metaPath := filepath.Join(wt.Dir, ".arc", "worktree-meta.json")
+	if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+		t.Fatal("worktree-meta.json was not created")
+	}
+}
+
+func TestWriteAndReadMetadata_RoundTrip(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "round-trip-plan", "impl")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	reason := "gate failed after 4 attempts: assertion 'file_exists' failed"
+	phaseName := "impl"
+
+	if err := WriteMetadata(wt, reason, phaseName); err != nil {
+		t.Fatalf("WriteMetadata failed: %v", err)
+	}
+
+	meta, err := ReadMetadata(wt.Dir)
+	if err != nil {
+		t.Fatalf("ReadMetadata failed: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+
+	if meta.Phase != phaseName {
+		t.Errorf("Phase: got %q, want %q", meta.Phase, phaseName)
+	}
+	if meta.FailureReason != reason {
+		t.Errorf("FailureReason: got %q, want %q", meta.FailureReason, reason)
+	}
+	if meta.Plan == "" {
+		t.Error("Plan should not be empty")
+	}
+	if meta.Timestamp == "" {
+		t.Error("Timestamp should not be empty")
+	}
+}
+
+func TestReadMetadata_NoFile(t *testing.T) {
+	dir := t.TempDir()
+
+	meta, err := ReadMetadata(dir)
+	if err != nil {
+		t.Fatalf("ReadMetadata should return nil,nil when file does not exist, got error: %v", err)
+	}
+	if meta != nil {
+		t.Fatalf("expected nil metadata when file does not exist, got: %+v", meta)
+	}
+}
+
+func TestReadMetadata_Corrupt(t *testing.T) {
+	dir := t.TempDir()
+
+	arcDir := filepath.Join(dir, ".arc")
+	if err := os.MkdirAll(arcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(arcDir, "worktree-meta.json"), []byte("not valid json{{"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadMetadata(dir)
+	if err == nil {
+		t.Fatal("expected error for corrupt JSON, got nil")
+	}
+}
+
+func TestWriteMetadata_PlanExtractedFromBranch(t *testing.T) {
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "extract-plan", "phase-x")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	if err := WriteMetadata(wt, "some failure", "phase-x"); err != nil {
+		t.Fatalf("WriteMetadata failed: %v", err)
+	}
+
+	meta, err := ReadMetadata(wt.Dir)
+	if err != nil {
+		t.Fatalf("ReadMetadata failed: %v", err)
+	}
+
+	// Plan name is extracted from the branch arc/extract-plan/phase-x → "extract-plan"
+	if meta.Plan != "extract-plan" {
+		t.Errorf("Plan: got %q, want %q", meta.Plan, "extract-plan")
+	}
+}
+
+func TestWriteMetadata_SharedWorktree(t *testing.T) {
+	// Shared (plan-level) worktree has branch arc/<plan> with no phase segment
+	projectDir := initTestRepo(t)
+
+	wt, err := Create(projectDir, "shared-meta-plan", "")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer Remove(wt)
+
+	if err := WriteMetadata(wt, "shared worktree failure", "impl"); err != nil {
+		t.Fatalf("WriteMetadata failed: %v", err)
+	}
+
+	meta, err := ReadMetadata(wt.Dir)
+	if err != nil {
+		t.Fatalf("ReadMetadata failed: %v", err)
+	}
+	if meta.Plan != "shared-meta-plan" {
+		t.Errorf("Plan: got %q, want %q", meta.Plan, "shared-meta-plan")
+	}
+	if meta.Phase != "impl" {
+		t.Errorf("Phase: got %q, want %q", meta.Phase, "impl")
 	}
 }

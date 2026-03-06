@@ -72,10 +72,9 @@ func TestCreatePlanDependencies(t *testing.T) {
 		t.Fatalf("Create error: %v", err)
 	}
 
-	// Dependencies["api"] == ["core"]
-	apiDeps := meta.Dependencies["api"]
-	if len(apiDeps) != 1 || apiDeps[0] != "core" {
-		t.Fatalf("Dependencies[api] = %v, want [core]", apiDeps)
+	// No auto-deps — phases are parallel by default
+	if len(meta.Dependencies) != 0 {
+		t.Fatalf("Dependencies = %v, want empty (no auto-chaining)", meta.Dependencies)
 	}
 }
 

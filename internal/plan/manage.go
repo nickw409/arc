@@ -12,6 +12,34 @@ import (
 	"github.com/nwiley/arc/internal/state"
 )
 
+// immutableStatuses are statuses from which no Manage operation (except Reset
+// and Pending) is permitted to mutate the phase.
+var immutableStatuses = map[string]bool{
+	"running":  true,
+	"complete": true,
+}
+
+// checkMutable reads the current phase status and returns an error if the
+// status is not among the allowedStatuses list.  An empty allowedStatuses
+// means the check is skipped (always allowed).
+func checkMutable(planDir, phaseName string, allowedStatuses ...string) error {
+	if len(allowedStatuses) == 0 {
+		return nil
+	}
+	statePath := filepath.Join(planDir, "phases", phaseName, "state.json")
+	sf := state.NewStateFile(statePath)
+	ps, err := sf.Read()
+	if err != nil {
+		return err
+	}
+	for _, s := range allowedStatuses {
+		if ps.PhaseStatus == s {
+			return nil
+		}
+	}
+	return fmt.Errorf("phase %q has status %q; operation not permitted in this state", phaseName, ps.PhaseStatus)
+}
+
 // ManageOptions configures phase management operations.
 type ManageOptions struct {
 	PlansDir    string
@@ -44,8 +72,13 @@ func validateManageOpts(opts ManageOptions) error {
 }
 
 // ManageComplete sets phase status to complete with a timestamp.
+// Not allowed when the phase is already "running" or "complete".
 func ManageComplete(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
 		return err
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
@@ -72,8 +105,13 @@ func ManagePending(opts ManageOptions) error {
 }
 
 // ManageDefer delegates to the Defer function.
+// Not allowed when the phase is "running" or "complete".
 func ManageDefer(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "failed"); err != nil {
 		return err
 	}
 	return Defer(DeferOptions{
@@ -85,8 +123,13 @@ func ManageDefer(opts ManageOptions) error {
 }
 
 // ManageBlock sets phase status to blocked with a reason.
+// Not allowed when the phase is "running" or "complete".
 func ManageBlock(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
 		return err
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
@@ -102,6 +145,7 @@ func ManageBlock(opts ManageOptions) error {
 }
 
 // ManageTests updates test passing/total counts.
+// Only allowed when the phase is in "pending", "blocked", or "deferred" status.
 func ManageTests(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
 		return err
@@ -115,6 +159,10 @@ func ManageTests(opts ManageOptions) error {
 	if opts.Passing > opts.Total {
 		return fmt.Errorf("passing count (%d) cannot exceed total (%d)", opts.Passing, opts.Total)
 	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
+		return err
+	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
 		s.TestsPassing = opts.Passing
 		s.TestsTotal = opts.Total
@@ -123,8 +171,13 @@ func ManageTests(opts ManageOptions) error {
 }
 
 // ManagePackages sets the packages list.
+// Only allowed when the phase is in "pending", "blocked", or "deferred" status.
 func ManagePackages(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
 		return err
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
@@ -137,8 +190,13 @@ func ManagePackages(opts ManageOptions) error {
 }
 
 // ManageNote sets the notes field.
+// Only allowed when the phase is in "pending", "blocked", or "deferred" status.
 func ManageNote(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
 		return err
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
@@ -148,8 +206,13 @@ func ManageNote(opts ManageOptions) error {
 }
 
 // ManageIteration sets the current iteration.
+// Only allowed when the phase is in "pending", "blocked", or "deferred" status.
 func ManageIteration(opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	if err := checkMutable(planDir, opts.Phase, "pending", "blocked", "deferred", "failed"); err != nil {
 		return err
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {

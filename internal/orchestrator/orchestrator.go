@@ -30,6 +30,7 @@ type LaunchOptions struct {
 	ArcHome          string
 	ProjectDir       string              // working directory for git commits; empty uses process cwd
 	Config           *config.Config
+	ConfigPath       string              // path to .arc.yaml; used by SIGHUP handler to reload config
 	Logger           *slog.Logger
 	Timeout          int                 // wall-clock timeout in seconds (0 = no timeout)
 	UseWorktree      bool                // if true, run agents in isolated git worktrees
@@ -37,6 +38,7 @@ type LaunchOptions struct {
 	StopOnFailure    bool                // if true, cancel in-progress phases and return on first failure
 	ChatMode         bool                // if true, skip escalation ladder and block immediately for chat-agent intervention
 	Resolver         *resources.Resolver // passed through to RunPhaseOptions
+	PlanLogger       *PlanLogger         // if non-nil, reuse this logger instead of creating a new one
 }
 
 // LaunchResult describes the outcome of an orchestrator run.
@@ -48,8 +50,30 @@ type LaunchResult struct {
 	Usage        arc.Usage
 }
 
-// Launch starts the orchestrator for a plan.
+// IsGatedPlan checks if a plan uses gate-based execution by looking for
+// spec.yaml files in its phase directories. Plans created with structured
+// specs (arc_plan_add_phase) use the gate-based orchestrator; legacy plans
+// with plan.md files use the state machine orchestrator.
+func IsGatedPlan(plansDir, planName string) bool {
+	planDir := filepath.Join(plansDir, planName)
+	meta, err := state.ReadPlan(planDir)
+	if err != nil || len(meta.Phases) == 0 {
+		return false
+	}
+	specPath := filepath.Join(planDir, "phases", meta.Phases[0], "spec.yaml")
+	_, err = os.Stat(specPath)
+	return err == nil
+}
+
+// Launch starts the orchestrator for a plan. It auto-detects whether the plan
+// uses gate-based execution (spec.yaml) or legacy state machine execution
+// (plan.md) and delegates accordingly.
 func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
+	// Auto-detect gate-based plans and delegate
+	if IsGatedPlan(opts.PlansDir, opts.PlanName) {
+		return LaunchGated(ctx, opts)
+	}
+
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
 
 	if err := acquireLock(planDir); err != nil {
@@ -107,7 +131,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 	// Helper to build a LaunchResult from current phase states.
 
 	buildResult := func(status, failedPhase, failedReason string) *LaunchResult {
-		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		phaseStates := LoadAllPhaseStates(planDir, meta.Phases)
 		summary := make(map[string]string, len(meta.Phases))
 		var totalUsage arc.Usage
 		for _, p := range meta.Phases {
@@ -133,7 +157,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		fmt.Println("(direct workflow — single agent session for all phases)")
 		directErr := runDirectPlanLoop(ctx, opts, planDir, meta, workingDir)
 
-		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		phaseStates := LoadAllPhaseStates(planDir, meta.Phases)
 
 		// Find the first blocked phase for the failure result
 		var firstBlocked, failReason string
@@ -209,7 +233,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		}
 
 		// Load all phase states
-		phaseStates := loadAllPhaseStates(planDir, meta.Phases)
+		phaseStates := LoadAllPhaseStates(planDir, meta.Phases)
 
 		// Check if all phases are done
 		allDone := true
@@ -345,7 +369,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult, error) {
 		for r := range results {
 			delete(running, r.phase)
 			if r.err != nil {
-				ps := loadPhaseState(planDir, r.phase)
+				ps := LoadPhaseState(planDir, r.phase)
 				if ps != nil && (ps.PhaseStatus == "blocked" || ps.PhaseStatus == "deferred") {
 					if opts.StopOnFailure {
 						if fatalErr == nil {
@@ -393,15 +417,17 @@ func shortHash(hash string) string {
 	return hash
 }
 
-func loadAllPhaseStates(planDir string, phases []string) map[string]*arc.PhaseState {
+// LoadAllPhaseStates reads state.json for each phase and returns a map.
+func LoadAllPhaseStates(planDir string, phases []string) map[string]*arc.PhaseState {
 	states := make(map[string]*arc.PhaseState, len(phases))
 	for _, phase := range phases {
-		states[phase] = loadPhaseState(planDir, phase)
+		states[phase] = LoadPhaseState(planDir, phase)
 	}
 	return states
 }
 
-func loadPhaseState(planDir string, phase string) *arc.PhaseState {
+// LoadPhaseState reads a single phase's state.json. Returns nil if not found.
+func LoadPhaseState(planDir string, phase string) *arc.PhaseState {
 	path := filepath.Join(planDir, "phases", phase, "state.json")
 	sf := state.NewStateFile(path)
 	ps, err := sf.Read()
@@ -435,21 +461,21 @@ func printBlockedSummary(meta *arc.PlanMeta, phaseStates map[string]*arc.PhaseSt
 	}
 }
 
-// acquireLock creates <planDir>/.orchestrator.lock with current PID.
-func acquireLock(planDir string) error {
+// AcquirePlanLock creates <planDir>/.orchestrator.lock with the given PID.
+// If a lock already exists for a live process, it returns an error.
+func AcquirePlanLock(planDir string, pid int) error {
 	lockPath := filepath.Join(planDir, ".orchestrator.lock")
 
 	data, err := os.ReadFile(lockPath)
 	if err == nil {
 		// Lock file exists - check if PID is still alive
-		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		existingPid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 		if err == nil {
-			// Check if process is alive by sending signal 0
-			process, err := os.FindProcess(pid)
+			process, err := os.FindProcess(existingPid)
 			if err == nil {
 				err = process.Signal(syscall.Signal(0))
 				if err == nil {
-					return fmt.Errorf("orchestrator already running (PID %d)", pid)
+					return fmt.Errorf("orchestrator already running (PID %d)", existingPid)
 				}
 			}
 		}
@@ -457,14 +483,45 @@ func acquireLock(planDir string) error {
 		os.Remove(lockPath)
 	}
 
-	// Write our PID
-	return os.WriteFile(lockPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	return os.WriteFile(lockPath, []byte(strconv.Itoa(pid)), 0644)
+}
+
+// ReleasePlanLock removes <planDir>/.orchestrator.lock.
+func ReleasePlanLock(planDir string) {
+	lockPath := filepath.Join(planDir, ".orchestrator.lock")
+	os.Remove(lockPath)
+}
+
+// CheckPlanLock reads the lock file and returns the PID and whether the lock is held
+// by a live process.
+func CheckPlanLock(planDir string) (pid int, locked bool) {
+	lockPath := filepath.Join(planDir, ".orchestrator.lock")
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return 0, false
+	}
+	pid, err = strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return pid, false
+	}
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		return pid, false
+	}
+	return pid, true
+}
+
+// acquireLock creates <planDir>/.orchestrator.lock with current PID.
+func acquireLock(planDir string) error {
+	return AcquirePlanLock(planDir, os.Getpid())
 }
 
 // releaseLock removes <planDir>/.orchestrator.lock.
 func releaseLock(planDir string) {
-	lockPath := filepath.Join(planDir, ".orchestrator.lock")
-	os.Remove(lockPath)
+	ReleasePlanLock(planDir)
 }
 
 // printUsageSummary outputs a JSON usage summary to stdout.

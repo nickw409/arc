@@ -26,6 +26,9 @@ var guidesFS embed.FS
 //go:embed blocks/*.yaml
 var blocksFS embed.FS
 
+//go:embed recipes/*.yaml
+var recipesFS embed.FS
+
 // WorkflowBytes returns the raw YAML for a workflow type (e.g., "feature").
 func WorkflowBytes(workflowType string) ([]byte, error) {
 	return workflowsFS.ReadFile(filepath.Join("workflows", workflowType+".yaml"))
@@ -92,6 +95,26 @@ func BlockBytes(name string) ([]byte, error) {
 // ListBlocks returns all available block names (without .yaml extension).
 func ListBlocks() []string {
 	entries, err := fs.ReadDir(blocksFS, "blocks")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
+		}
+	}
+	return names
+}
+
+// RecipeBytes returns the raw YAML for a built-in recipe (e.g., "add-endpoint").
+func RecipeBytes(name string) ([]byte, error) {
+	return recipesFS.ReadFile(filepath.Join("recipes", name+".yaml"))
+}
+
+// ListBuiltInRecipes returns all built-in recipe names (without .yaml extension).
+func ListBuiltInRecipes() []string {
+	entries, err := fs.ReadDir(recipesFS, "recipes")
 	if err != nil {
 		return nil
 	}

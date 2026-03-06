@@ -4,6 +4,7 @@ import "time"
 
 // PhaseState is the runtime state of a single phase, serialized to state.json.
 type PhaseState struct {
+	SchemaVersion       int             `json:"schema_version"`
 	Phase               string          `json:"phase"`
 	Plan                string          `json:"plan"`
 	WorkflowType        string          `json:"workflow_type"`
@@ -45,6 +46,8 @@ type PhaseState struct {
 	ActivityUpdatedAt   string              `json:"activity_updated_at,omitempty"`
 	AdversaryRound      int                 `json:"adversary_round,omitempty"`
 	AdversaryTests      map[string][]string `json:"adversary_tests,omitempty"` // round → test file paths
+	Checksum            string              `json:"checksum,omitempty"`
+	AgentPID            int                 `json:"agent_pid,omitempty"`
 }
 
 type Iteration struct {
@@ -129,6 +132,7 @@ func NewPhaseState(plan, phase, workflowType string) *PhaseState {
 
 // PlanMeta is the metadata for a plan, serialized to plan.json.
 type PlanMeta struct {
+	SchemaVersion int                 `json:"schema_version,omitempty"`
 	Name         string              `json:"name"`
 	Created      string              `json:"created"`
 	Status       string              `json:"status"`
@@ -142,6 +146,7 @@ type PlanMeta struct {
 	WorkflowType string              `json:"workflow_type"`
 	SplitPhases  map[string][]string `json:"split_phases,omitempty"`
 	ArchivedAt   string              `json:"archived_at,omitempty"`
+	AdversaryBugs map[string][]string `json:"adversary_bugs,omitempty"` // phase name → list of failing test names
 }
 
 // NewPlanMeta creates a PlanMeta with all maps/slices initialized.
@@ -150,9 +155,6 @@ func NewPlanMeta(name, workflowType string, phases []string) *PlanMeta {
 	dependencies := make(map[string][]string)
 	for i, p := range phases {
 		phaseOrder[p] = i + 1
-		if i > 0 {
-			dependencies[p] = []string{phases[i-1]}
-		}
 	}
 	if phases == nil {
 		phases = []string{}

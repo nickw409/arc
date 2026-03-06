@@ -25,9 +25,16 @@ func NewRootCmd() *cobra.Command {
 		newArchiveCmd(),
 		newManageCmd(),
 		newDevCmd(),
+		newTaskCmd(),
 		newServeCmd(),
 		newChatCmd(),
 		newTestCmd(),
+		newGateCmd(),
+		newAuditCmd(),
+		newRecipeCmd(),
+		newCancelCmd(),
+		newCleanupCmd(),
+		newDaemonCmd(),
 	)
 	return cmd
 }
