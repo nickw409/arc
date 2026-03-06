@@ -24,6 +24,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("role", mcp.Description("Phase role: impl, review, investigate, or audit (default: impl)")),
 		mcp.WithArray("files", mcp.WithStringItems(), mcp.Description("Key files relevant to this phase")),
 		mcp.WithArray("deps", mcp.WithStringItems(), mcp.Description("Phase names this phase depends on")),
+		mcp.WithArray("checkpoints", mcp.WithStringItems(), mcp.Description("Checkpoints in 'name:description:test_command' format, e.g. 'compiles:Package builds:go build ./...' or 'tests-pass:All tests pass:go test ./pkg/'")),
 	), h.handlePlanAddPhase)
 
 	s.AddTool(mcp.NewTool("arc_plan_remove_phase",
@@ -40,6 +41,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("verify", mcp.Description("Updated acceptance criteria for the verifier agent")),
 		mcp.WithString("complexity", mcp.Description("Updated complexity: simple, medium, or complex")),
 		mcp.WithString("role", mcp.Description("Phase role: impl, review, investigate, or audit (default: impl)")),
+		mcp.WithArray("checkpoints", mcp.WithStringItems(), mcp.Description("Checkpoints in 'name:description:test_command' format, e.g. 'compiles:Package builds:go build ./...' or 'tests-pass:All tests pass:go test ./pkg/'")),
 	), h.handlePlanUpdatePhase)
 
 	s.AddTool(mcp.NewTool("arc_plan_update_gate",
@@ -62,6 +64,31 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan")),
 		mcp.WithString("phase_name", mcp.Required(), mcp.Description("Name of the phase")),
 	), h.handlePlanShowSpec)
+}
+
+// parseCheckpoints converts "name:description:test_command" strings into arc.Checkpoint values.
+// The test field may contain colons — only the first two colons are used as delimiters.
+func parseCheckpoints(raw []any) ([]arc.Checkpoint, error) {
+	cps := make([]arc.Checkpoint, 0, len(raw))
+	for _, r := range raw {
+		s, ok := r.(string)
+		if !ok {
+			return nil, fmt.Errorf("each checkpoint must be a string in 'name:description:test_command' format")
+		}
+		parts := strings.SplitN(s, ":", 3)
+		if len(parts) < 2 || parts[0] == "" {
+			return nil, fmt.Errorf("invalid checkpoint %q: must be 'name:description' or 'name:description:test_command'", s)
+		}
+		cp := arc.Checkpoint{
+			Name:        parts[0],
+			Description: parts[1],
+		}
+		if len(parts) == 3 {
+			cp.Test = parts[2]
+		}
+		cps = append(cps, cp)
+	}
+	return cps, nil
 }
 
 func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -106,13 +133,23 @@ func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolR
 		return mcp.NewToolResultError(fmt.Sprintf("role must be impl, review, investigate, or audit; got %q", role)), nil
 	}
 
+	var checkpoints []arc.Checkpoint
+	if rawCPs, ok := args["checkpoints"].([]any); ok && len(rawCPs) > 0 {
+		var cpErr error
+		checkpoints, cpErr = parseCheckpoints(rawCPs)
+		if cpErr != nil {
+			return mcp.NewToolResultError(cpErr.Error()), nil
+		}
+	}
+
 	spec := &arc.PhaseSpec{
-		Spec:       specText,
-		Verify:     test,
-		Complexity: complexity,
-		Role:       role,
-		Files:      files,
-		Deps:       deps,
+		Spec:        specText,
+		Verify:      test,
+		Complexity:  complexity,
+		Role:        role,
+		Files:       files,
+		Deps:        deps,
+		Checkpoints: checkpoints,
 	}
 
 	// Auto-generate gate assertions from files list.
@@ -170,8 +207,17 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	complexity, _ := args["complexity"].(string)
 	role, _ := args["role"].(string)
 
-	if specText == "" && test == "" && complexity == "" && role == "" {
-		return mcp.NewToolResultError("at least one of spec, verify, complexity, or role must be provided"), nil
+	var checkpoints []arc.Checkpoint
+	if rawCPs, ok := args["checkpoints"].([]any); ok && len(rawCPs) > 0 {
+		var cpErr error
+		checkpoints, cpErr = parseCheckpoints(rawCPs)
+		if cpErr != nil {
+			return mcp.NewToolResultError(cpErr.Error()), nil
+		}
+	}
+
+	if specText == "" && test == "" && complexity == "" && role == "" && len(checkpoints) == 0 {
+		return mcp.NewToolResultError("at least one of spec, verify, complexity, role, or checkpoints must be provided"), nil
 	}
 
 	if complexity != "" && complexity != "simple" && complexity != "medium" && complexity != "complex" {
@@ -182,10 +228,11 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	}
 
 	update := &arc.PhaseSpec{
-		Spec:       specText,
-		Verify:     test,
-		Complexity: complexity,
-		Role:       role,
+		Spec:        specText,
+		Verify:      test,
+		Complexity:  complexity,
+		Role:        role,
+		Checkpoints: checkpoints,
 	}
 
 	if err := plan.UpdateSpec(h.plansDir(), planName, phaseName, update); err != nil {
@@ -204,6 +251,9 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	}
 	if role != "" {
 		updated = append(updated, "role")
+	}
+	if len(checkpoints) > 0 {
+		updated = append(updated, fmt.Sprintf("checkpoints(%d)", len(checkpoints)))
 	}
 
 	msg := fmt.Sprintf("Updated %s for phase %q in plan %q", strings.Join(updated, ", "), phaseName, planName)
