@@ -2,6 +2,7 @@ package arc
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -80,6 +81,57 @@ gate:
 	}
 	if len(spec.Gate.Assertions) != 2 {
 		t.Fatalf("len(Assertions) = %d, want 2", len(spec.Gate.Assertions))
+	}
+}
+
+func TestDefaultRole(t *testing.T) {
+	tests := []struct {
+		role string
+		want string
+	}{
+		{"impl", "impl"},
+		{"review", "review"},
+		{"investigate", "investigate"},
+		{"audit", "audit"},
+		{"", "impl"},
+		{"unknown", "impl"},
+		{"IMPL", "impl"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.role, func(t *testing.T) {
+			if got := DefaultRole(tt.role); got != tt.want {
+				t.Errorf("DefaultRole(%q) = %q, want %q", tt.role, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPhaseSpec_RoleYAMLRoundTrip(t *testing.T) {
+	spec := PhaseSpec{
+		Name: "check",
+		Role: "review",
+		Spec: "Review the code",
+	}
+	data, err := yaml.Marshal(spec)
+	if err != nil {
+		t.Fatalf("yaml marshal: %v", err)
+	}
+	var got PhaseSpec
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("yaml unmarshal: %v", err)
+	}
+	if got.Role != "review" {
+		t.Errorf("Role = %q, want %q", got.Role, "review")
+	}
+
+	// Empty role should not appear in YAML output
+	spec2 := PhaseSpec{Name: "impl-phase", Spec: "Implement"}
+	data2, err := yaml.Marshal(spec2)
+	if err != nil {
+		t.Fatalf("yaml marshal empty role: %v", err)
+	}
+	if strings.Contains(string(data2), "role") {
+		t.Errorf("empty role should be omitted from YAML, got: %s", data2)
 	}
 }
 

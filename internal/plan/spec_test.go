@@ -504,6 +504,64 @@ func TestUpdateSpecMergesFields(t *testing.T) {
 	}
 }
 
+func TestUpdateSpecMergesRole(t *testing.T) {
+	plansDir := makeTestPlan(t, "my-plan", []string{"phase-a"})
+
+	initial := &arc.PhaseSpec{Spec: "original", Role: "impl", Complexity: "simple"}
+	if err := WriteSpec(plansDir, "my-plan", "phase-a", initial); err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+
+	// Update only role — other fields should survive
+	update := &arc.PhaseSpec{Role: "review"}
+	if err := UpdateSpec(plansDir, "my-plan", "phase-a", update); err != nil {
+		t.Fatalf("UpdateSpec: %v", err)
+	}
+
+	got, err := ReadSpec(plansDir, "my-plan", "phase-a")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if got.Role != "review" {
+		t.Errorf("Role: got %q, want %q", got.Role, "review")
+	}
+	if got.Spec != "original" {
+		t.Errorf("Spec was wiped: got %q, want %q", got.Spec, "original")
+	}
+}
+
+func TestValidateSpec_InvalidRole(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Role:       "unknown",
+		Complexity: "simple",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "role" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about invalid role")
+	}
+}
+
+func TestValidateSpec_ValidRole(t *testing.T) {
+	for _, role := range []string{"impl", "review", "investigate", "audit"} {
+		spec := &arc.PhaseSpec{
+			Role:       role,
+			Complexity: "simple",
+		}
+		warnings := ValidateSpec(spec)
+		for _, w := range warnings {
+			if w.Field == "role" {
+				t.Errorf("unexpected role warning for %q: %s", role, w)
+			}
+		}
+	}
+}
+
 func TestValidateSpec_NumberedListTest(t *testing.T) {
 	spec := &arc.PhaseSpec{
 		Verify: "1. Check this\n2. Check that",

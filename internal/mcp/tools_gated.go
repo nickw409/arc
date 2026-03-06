@@ -21,6 +21,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("spec", mcp.Required(), mcp.Description("What this phase must accomplish")),
 		mcp.WithString("verify", mcp.Description("Acceptance criteria for the verifier agent (natural language, not a shell command)")),
 		mcp.WithString("complexity", mcp.Description("Estimated complexity: simple, medium, or complex")),
+		mcp.WithString("role", mcp.Description("Phase role: impl, review, investigate, or audit (default: impl)")),
 		mcp.WithArray("files", mcp.WithStringItems(), mcp.Description("Key files relevant to this phase")),
 		mcp.WithArray("deps", mcp.WithStringItems(), mcp.Description("Phase names this phase depends on")),
 	), h.handlePlanAddPhase)
@@ -38,6 +39,7 @@ func (h *handlerContext) registerGatedTools(s *server.MCPServer) {
 		mcp.WithString("spec", mcp.Description("Updated description of what the phase must accomplish")),
 		mcp.WithString("verify", mcp.Description("Updated acceptance criteria for the verifier agent")),
 		mcp.WithString("complexity", mcp.Description("Updated complexity: simple, medium, or complex")),
+		mcp.WithString("role", mcp.Description("Phase role: impl, review, investigate, or audit (default: impl)")),
 	), h.handlePlanUpdatePhase)
 
 	s.AddTool(mcp.NewTool("arc_plan_update_gate",
@@ -77,6 +79,7 @@ func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolR
 
 	test, _ := args["verify"].(string)
 	complexity, _ := args["complexity"].(string)
+	role, _ := args["role"].(string)
 
 	var files []string
 	if rawFiles, ok := args["files"].([]any); ok {
@@ -99,11 +102,15 @@ func (h *handlerContext) handlePlanAddPhase(_ context.Context, req mcp.CallToolR
 	if complexity != "" && complexity != "simple" && complexity != "medium" && complexity != "complex" {
 		return mcp.NewToolResultError(fmt.Sprintf("complexity must be simple, medium, or complex; got %q", complexity)), nil
 	}
+	if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+		return mcp.NewToolResultError(fmt.Sprintf("role must be impl, review, investigate, or audit; got %q", role)), nil
+	}
 
 	spec := &arc.PhaseSpec{
 		Spec:       specText,
 		Verify:     test,
 		Complexity: complexity,
+		Role:       role,
 		Files:      files,
 		Deps:       deps,
 	}
@@ -161,19 +168,24 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	specText, _ := args["spec"].(string)
 	test, _ := args["verify"].(string)
 	complexity, _ := args["complexity"].(string)
+	role, _ := args["role"].(string)
 
-	if specText == "" && test == "" && complexity == "" {
-		return mcp.NewToolResultError("at least one of spec, verify, or complexity must be provided"), nil
+	if specText == "" && test == "" && complexity == "" && role == "" {
+		return mcp.NewToolResultError("at least one of spec, verify, complexity, or role must be provided"), nil
 	}
 
 	if complexity != "" && complexity != "simple" && complexity != "medium" && complexity != "complex" {
 		return mcp.NewToolResultError(fmt.Sprintf("complexity must be simple, medium, or complex; got %q", complexity)), nil
+	}
+	if role != "" && role != "impl" && role != "review" && role != "investigate" && role != "audit" {
+		return mcp.NewToolResultError(fmt.Sprintf("role must be impl, review, investigate, or audit; got %q", role)), nil
 	}
 
 	update := &arc.PhaseSpec{
 		Spec:       specText,
 		Verify:     test,
 		Complexity: complexity,
+		Role:       role,
 	}
 
 	if err := plan.UpdateSpec(h.plansDir(), planName, phaseName, update); err != nil {
@@ -189,6 +201,9 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 	}
 	if complexity != "" {
 		updated = append(updated, "complexity")
+	}
+	if role != "" {
+		updated = append(updated, "role")
 	}
 
 	msg := fmt.Sprintf("Updated %s for phase %q in plan %q", strings.Join(updated, ", "), phaseName, planName)
