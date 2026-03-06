@@ -460,6 +460,11 @@ func GatedPlanComplete(
 		}
 	}
 
+	// --- Commitment audit: verify integration commitments are implemented ---
+	if auditErr := RunCommitmentAudit(context.Background(), opts, meta, planDir, workDir, planLogger); auditErr != nil {
+		return buildResult("blocked", "", fmt.Sprintf("commitment audit: %v", auditErr)), auditErr
+	}
+
 	// --- Merge shared worktree ---
 	if sharedWorktree != nil {
 		commitMsg := fmt.Sprintf("feat(%s): phase work", opts.PlanName)
