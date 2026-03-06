@@ -86,16 +86,28 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("plan %q has review status %q — run: arc review %s", planName, meta.ReviewStatus, planName)
 			}
 
-			// Warn about spec issues for pending phases — non-blocking so simple
-			// fixes without gate assertions can still run.
+			// Validate specs for pending phases. Fatal warnings (e.g. malformed gate
+			// assertions) block the run since they will cause runtime failures.
+			// Non-fatal warnings are printed but do not block.
+			var fatalWarnings []string
 			for _, phaseName := range meta.Phases {
 				spec, specErr := plan.ReadSpec(plansDir, planName, phaseName)
 				if specErr != nil {
 					continue
 				}
 				for _, w := range plan.ValidateSpec(spec) {
-					fmt.Fprintf(os.Stderr, "warning: phase %q spec.yaml — %s\n", phaseName, w)
+					if w.Fatal {
+						fatalWarnings = append(fatalWarnings, fmt.Sprintf("phase %q — %s", phaseName, w))
+					} else {
+						fmt.Fprintf(os.Stderr, "warning: phase %q spec.yaml — %s\n", phaseName, w)
+					}
 				}
+			}
+			if len(fatalWarnings) > 0 {
+				for _, msg := range fatalWarnings {
+					fmt.Fprintf(os.Stderr, "error: spec.yaml %s\n", msg)
+				}
+				return fmt.Errorf("spec validation failed — fix spec.yaml errors before running")
 			}
 
 			// Detach mode: re-exec ourselves with --detached and return immediately.

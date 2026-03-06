@@ -264,6 +264,28 @@ func (h *handlerContext) handleRun(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("plan %q has review status %q — run arc_review first", planName, meta.ReviewStatus)), nil
 	}
 
+	// Validate all phase specs before launching — fail immediately on fatal errors
+	// (e.g. malformed gate assertions) rather than discovering them after retries.
+	var fatalWarnings []string
+	for _, phaseName := range meta.Phases {
+		spec, specErr := plan.ReadSpec(h.plansDir(), planName, phaseName)
+		if specErr != nil {
+			continue
+		}
+		for _, w := range plan.ValidateSpec(spec) {
+			if w.Fatal {
+				fatalWarnings = append(fatalWarnings, fmt.Sprintf("phase %q — %s", phaseName, w))
+			}
+		}
+	}
+	if len(fatalWarnings) > 0 {
+		msg := "spec validation failed — fix spec.yaml errors before running:\n"
+		for _, w := range fatalWarnings {
+			msg += "  " + w + "\n"
+		}
+		return mcp.NewToolResultError(msg), nil
+	}
+
 	cfg, err := config.Load(h.projectDir)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("loading .arc.yaml: %v", err)), nil
@@ -372,6 +394,29 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 			return mcp.NewToolResultError(fmt.Sprintf("phase %q not found in plan", phaseFilter)), nil
 		}
 		phases = []string{phaseFilter}
+	}
+
+	// Validate specs before running review — fail immediately on fatal errors
+	// so the agent can fix them without wasting review iterations.
+	var fatalSpecWarnings []string
+	for _, phaseName := range phases {
+		spec, specErr := plan.ReadSpec(h.plansDir(), planName, phaseName)
+		if specErr != nil {
+			fatalSpecWarnings = append(fatalSpecWarnings, fmt.Sprintf("phase %q — cannot read spec.yaml: %v", phaseName, specErr))
+			continue
+		}
+		for _, w := range plan.ValidateSpec(spec) {
+			if w.Fatal {
+				fatalSpecWarnings = append(fatalSpecWarnings, fmt.Sprintf("phase %q — %s", phaseName, w))
+			}
+		}
+	}
+	if len(fatalSpecWarnings) > 0 {
+		msg := "spec validation failed — fix spec.yaml errors before reviewing:\n"
+		for _, w := range fatalSpecWarnings {
+			msg += "  " + w + "\n"
+		}
+		return mcp.NewToolResultError(msg), nil
 	}
 
 	// Run phases concurrently (max 3)

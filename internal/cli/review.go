@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +64,31 @@ func newReviewCmd() *cobra.Command {
 					return fmt.Errorf("phase %q not found in plan", phaseFilter)
 				}
 				phases = []string{phaseFilter}
+			}
+
+			// Validate all phase specs before running any review agents.
+			// Fatal warnings (e.g. malformed gate assertions) are hard errors —
+			// fix them before review so adversaries don't waste time on a broken spec.
+			var fatalWarnings []string
+			for _, phaseName := range phases {
+				spec, specErr := plan.ReadSpec(plansDir, planName, phaseName)
+				if specErr != nil {
+					fatalWarnings = append(fatalWarnings, fmt.Sprintf("phase %q — cannot read spec.yaml: %v", phaseName, specErr))
+					continue
+				}
+				for _, w := range plan.ValidateSpec(spec) {
+					if w.Fatal {
+						fatalWarnings = append(fatalWarnings, fmt.Sprintf("phase %q — %s", phaseName, w))
+					} else {
+						fmt.Fprintf(os.Stderr, "warning: phase %q spec.yaml — %s\n", phaseName, w)
+					}
+				}
+			}
+			if len(fatalWarnings) > 0 {
+				for _, msg := range fatalWarnings {
+					fmt.Fprintf(os.Stderr, "error: spec.yaml %s\n", msg)
+				}
+				return fmt.Errorf("spec validation failed — fix spec.yaml errors before reviewing")
 			}
 
 			// Run phases in batches to avoid overwhelming the system

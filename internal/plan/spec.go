@@ -17,13 +17,19 @@ import (
 // which indicates someone wrote a human-readable list instead of a shell command.
 var numberedListRe = regexp.MustCompile(`(?m)^\s*\d+[\.\)]\s`)
 
-// SpecWarning is a non-fatal issue detected during spec validation.
+// SpecWarning is an issue detected during spec validation.
+// Fatal warnings indicate structural errors that will cause runtime failures;
+// non-fatal warnings are advisory.
 type SpecWarning struct {
 	Field   string
 	Message string
+	Fatal   bool
 }
 
 func (w SpecWarning) String() string {
+	if w.Fatal {
+		return fmt.Sprintf("%s: %s [fatal]", w.Field, w.Message)
+	}
 	return fmt.Sprintf("%s: %s", w.Field, w.Message)
 }
 
@@ -95,7 +101,31 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 		})
 	}
 
+	// Gate assertions: each must have at least one recognized field set.
+	// Assertions without a recognized field silently hit "unknown assertion type"
+	// at runtime, causing the phase to block after exhausting retries.
+	for i, a := range spec.Gate.Assertions {
+		if isEmptyAssertion(a) {
+			warnings = append(warnings, SpecWarning{
+				Field:   "gate.assertions",
+				Message: fmt.Sprintf("assertion %d has no recognized field — use 'grep:', 'file_exists:', 'test_exists:', 'build_passes:', or 'no_untracked:' (or legacy type+target)", i+1),
+				Fatal:   true,
+			})
+		}
+	}
+
 	return warnings
+}
+
+// isEmptyAssertion returns true if a GateAssertion has no recognized field set
+// and will therefore always produce "unknown assertion type or missing target".
+func isEmptyAssertion(a arc.GateAssertion) bool {
+	return a.Grep == "" &&
+		a.FileExists == "" &&
+		a.TestExists == "" &&
+		a.BuildPasses == "" &&
+		a.NoUntracked == "" &&
+		!(a.Type != "" && a.Target != "")
 }
 
 func truncate(s string, n int) string {
