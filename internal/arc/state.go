@@ -155,9 +155,6 @@ func NewPlanMeta(name, workflowType string, phases []string) *PlanMeta {
 	dependencies := make(map[string][]string)
 	for i, p := range phases {
 		phaseOrder[p] = i + 1
-		if i > 0 {
-			dependencies[p] = []string{phases[i-1]}
-		}
 	}
 	if phases == nil {
 		phases = []string{}

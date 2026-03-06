@@ -122,6 +122,26 @@ func setupE2E(t *testing.T, planName string, phases []string, workflowType strin
 	return plansDir, scriptDir, projectDir
 }
 
+func addDeps(t *testing.T, plansDir, planName, phaseName string, deps []string) {
+	t.Helper()
+	planDir := filepath.Join(plansDir, planName)
+	meta, err := state.ReadPlan(planDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Dependencies == nil {
+		meta.Dependencies = make(map[string][]string)
+	}
+	meta.Dependencies[phaseName] = deps
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeState(t *testing.T, phaseDir string, ps *arc.PhaseState) {
 	t.Helper()
 	data, err := json.MarshalIndent(ps, "", "  ")
@@ -506,6 +526,7 @@ func TestE2EDisputeRejected(t *testing.T) {
 // Two phases: "core" (no deps) → "api" (depends on "core"). Run via Launch().
 func TestE2EMultiPhase(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-multi", []string{"core", "api"}, "feature")
+	addDeps(t, plansDir, "e2e-multi", "api", []string{"core"})
 
 	// Phase "core": calls 0-2 (happy path: impl.act + 2 parallel branches)
 	writeScript(t, scriptDir, 0, "Core implementation.\n\n## Verdict\ndone")
@@ -764,6 +785,7 @@ func TestE2ENonZeroExitRetries(t *testing.T) {
 // phase cannot run because its dependency is blocked.
 func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 	plansDir, _, projectDir := setupE2E(t, "e2e-dep-blocked", []string{"core", "api"}, "feature")
+	addDeps(t, plansDir, "e2e-dep-blocked", "api", []string{"core"})
 
 	// Pre-seed "core" as blocked
 	coreDir := filepath.Join(plansDir, "e2e-dep-blocked", "phases", "core")
@@ -803,20 +825,7 @@ func TestE2EMultiPhaseBlockedDependency(t *testing.T) {
 func TestE2EParallelPhasesNoDeps(t *testing.T) {
 	plansDir, scriptDir, projectDir := setupE2E(t, "e2e-parallel", []string{"alpha", "beta"}, "audit")
 
-	// Override plan.json to remove dependencies (setupE2E creates serial deps)
-	planDir := filepath.Join(plansDir, "e2e-parallel")
-	meta, err := state.ReadPlan(planDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	meta.Dependencies = map[string][]string{} // no deps — both should be ready
-	metaData, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(planDir, "plan.json"), metaData, 0644); err != nil {
-		t.Fatal(err)
-	}
+	// No deps needed — phases are parallel by default.
 
 	// Audit workflow: adversary → no_bugs_found → complete (1 call per phase).
 	// Both phases need the same verdict, so nondeterministic ordering is fine.

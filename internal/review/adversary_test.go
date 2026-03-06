@@ -83,9 +83,9 @@ func TestRunAdversaryTimeout(t *testing.T) {
 		Required:    true,
 	}
 
-	// Use a very short timeout context
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-	defer cancel()
+	// Use a pre-cancelled context for deterministic timeout behavior
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	result, err := RunAdversary(ctx, adv, planDir, phaseName, "# Test Phase", "", 1)
 	if err != nil {

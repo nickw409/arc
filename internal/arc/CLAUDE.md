@@ -18,6 +18,6 @@ Pure types package — no I/O, no external dependencies beyond stdlib and `gopkg
 
 - **`States` and `ParallelGroups` are `yaml:"-"`** in `Workflow` — not decoded from YAML directly. `States` is populated post-load (YAML uses a map, internal uses a list), `ParallelGroups` is synthesized by block composition.
 - **`NewPhaseState` initializes all slices to non-nil** — prevents JSON `null` for empty lists.
-- **`NewPlanMeta` auto-wires sequential dependencies** — each phase depends on the prior one by default.
+- **`NewPlanMeta` creates phases with no dependencies** — phases run in parallel by default; dependencies must be declared explicitly.
 - **`Transition` key `""` for unconditional transitions** — linear flow uses empty-string verdict key, unifying the routing logic.
 - **`ParseVerdict`** strips markdown bold/backticks, lowercases, takes first whitespace-split token, validates against allowed set per state.
