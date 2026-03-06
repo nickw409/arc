@@ -50,6 +50,17 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	// Require spec content before spawning. An empty spec wastes an agent
 	// session — the gate rejects it immediately as misconfigured. Simple phases
 	// don't need checkpoints or assertions, but the spec field is mandatory.
+	// Safety net: if spec.yaml is empty, attempt to sync from the ## Spec block
+	// in plan.md (e.g. when arc review was skipped or plan.md was edited after review).
+	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
+		if synced, syncErr := plan.SyncSpecFromPlanMD(opts.PlansDir, opts.PlanName, opts.PhaseName); syncErr == nil && synced {
+			opts.Logger.Info("auto-synced spec.yaml from plan.md", "phase", opts.PhaseName)
+			spec, err = plan.ReadSpec(opts.PlansDir, opts.PlanName, opts.PhaseName)
+			if err != nil {
+				return fmt.Errorf("reading phase spec after sync: %w", err)
+			}
+		}
+	}
 	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
 		return fmt.Errorf("phase %q has no spec content — fill in spec.yaml before running (checkpoints optional for simple fixes, but spec field is required)", opts.PhaseName)
 	}

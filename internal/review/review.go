@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/plan"
 )
 
 // MaxReviewIterations is the maximum number of review iterations per phase.
@@ -242,6 +243,15 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 	// done its best — remaining issues are logged but non-blocking.
 	if result.Status == "needs_review" {
 		result.Status = "conditional"
+	}
+
+	// Sync spec.yaml from the final plan.md so the orchestrator always has
+	// up-to-date gate assertions and spec content. Adversaries only modify
+	// plan.md — without this, spec.yaml can silently diverge.
+	if synced, err := plan.SyncSpecFromPlanMD(opts.PlansDir, opts.PlanName, opts.Phase); err != nil {
+		opts.Logger.Warn("failed to sync spec.yaml from plan.md", "phase", opts.Phase, "error", err)
+	} else if synced {
+		opts.Logger.Info("synced spec.yaml from plan.md", "phase", opts.Phase)
 	}
 
 	opts.Logger.Info("review complete", "status", result.Status, "phase", opts.Phase)

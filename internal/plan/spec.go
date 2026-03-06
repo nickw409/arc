@@ -105,6 +105,75 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// ExtractSpecFromPlanMD parses the ```yaml block under the "## Spec" heading
+// in plan.md and returns the PhaseSpec it contains.
+// Returns false if no spec block is found, if parsing fails, or if the spec
+// field is empty (indicating an unfilled template).
+func ExtractSpecFromPlanMD(planMD string) (*arc.PhaseSpec, bool) {
+	lines := strings.Split(planMD, "\n")
+
+	inSpecSection := false
+	inYAMLBlock := false
+	var yamlLines []string
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## Spec") {
+			inSpecSection = true
+			continue
+		}
+		// Another ## heading ends the spec section
+		if inSpecSection && strings.HasPrefix(line, "## ") {
+			break
+		}
+		if inSpecSection && !inYAMLBlock {
+			if strings.TrimSpace(line) == "```yaml" {
+				inYAMLBlock = true
+				continue
+			}
+		}
+		if inYAMLBlock {
+			if strings.TrimSpace(line) == "```" {
+				break
+			}
+			yamlLines = append(yamlLines, line)
+		}
+	}
+
+	if len(yamlLines) == 0 {
+		return nil, false
+	}
+
+	var spec arc.PhaseSpec
+	if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), &spec); err != nil {
+		return nil, false
+	}
+	if strings.TrimSpace(spec.Spec) == "" {
+		return nil, false
+	}
+	return &spec, true
+}
+
+// SyncSpecFromPlanMD reads plan.md for a phase, extracts the ## Spec yaml block,
+// and writes it to spec.yaml. Returns true if spec.yaml was updated, false if no
+// parseable spec block was found. Does not return an error if plan.md is absent.
+func SyncSpecFromPlanMD(plansDir, planName, phaseName string) (bool, error) {
+	phaseDir := filepath.Join(plansDir, planName, "phases", phaseName)
+	data, err := os.ReadFile(filepath.Join(phaseDir, "plan.md"))
+	if err != nil {
+		return false, nil // no plan.md — not an error
+	}
+
+	spec, ok := ExtractSpecFromPlanMD(string(data))
+	if !ok {
+		return false, nil
+	}
+
+	if err := WriteSpec(plansDir, planName, phaseName, spec); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // specPath returns the path to spec.yaml for a phase.
 func specPath(plansDir, planName, phaseName string) string {
 	return filepath.Join(plansDir, planName, "phases", phaseName, "spec.yaml")
