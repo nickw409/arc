@@ -4,102 +4,95 @@
 
 [One sentence describing what this phase accomplishes]
 
+## Spec
+
+> This section becomes `spec.yaml`. It is required — phases with no spec are blocked from running.
+> For each checkpoint, provide a name and a shell command that passes when the work is done.
+> Simple fixes don't need checkpoints, but must have a description in the spec field.
+
+```yaml
+name: [PHASE_NAME]
+complexity: simple|medium|complex
+spec: |
+  [Copy the Objective and Detailed Changes here as the agent's instructions]
+checkpoints:
+  - name: compiles
+    description: Package builds without errors
+    test: go build ./path/to/pkg/
+  - name: [milestone-name]
+    description: [What this verifies]
+    test: [shell command that exits 0 on success]
+  - name: tests-pass
+    description: All tests pass
+    test: go test ./path/to/pkg/
+gate:
+  assertions:
+    - file_exists: path/to/new/file.go
+    - grep: "func NewFunction"
+```
+
 ## Files
 
 ### Create
-- `path/to/new_file.rs` — [brief description]
+- `path/to/new_file` — [brief description]
 
 ### Modify
-- `path/to/existing.rs` — [what changes]
+- `path/to/existing_file` — [what changes]
 
-## Types and Signatures
+## Prerequisites
+
+Before making changes, verify:
+1. [Thing to check — e.g., "read the X type definition to confirm field names"]
+2. [Another prereq — or remove this section if none]
+
+## Detailed Changes
+
+### 1. [Change area] (`filename`)
+
+[Describe what to add/modify and why]
 
 ```
 // Complete, exact signatures. No pseudocode.
 
-/// [Doc comment explaining purpose]
-pub struct TypeName {
-    pub field1: Type1,
-    pub field2: Option<Type2>,
+TypeName {
+    field1: Type1
+    field2: Type2
 }
 
-/// [Doc comment]
-pub fn function_name<T: Bound>(arg: &T) -> Result<ReturnType, ErrorType> {
-    // Implementation notes if non-obvious
-}
+function_name(arg1: Type1, arg2: Type2) -> ReturnType
 ```
 
-## Error Types
+### 2. [Next change area] (`filename`)
 
-```
-#[derive(Debug, thiserror::Error)]
-pub enum PhaseError {
-    #[error("Specific message with context: {0}")]
-    VariantName(String),
-    
-    #[error("Another error: expected {expected}, got {actual}")]
-    AnotherVariant { expected: usize, actual: usize },
-}
-```
-
-## Dependencies
-
-```toml
-# Add to [crate]/Cargo.toml [dependencies]:
-crate_name = "1.2.3"
-another = { version = "2.0", features = ["feature1"] }
-```
-
-## DO NOT
-
-- [ ] Do NOT [common mistake 1]
-- [ ] Do NOT [common mistake 2]
-- [ ] Do NOT use unwrap()/expect() — propagate errors via Result
-- [ ] Do NOT modify files outside the scope listed above
+[Description and code block]
 
 ## Test Cases
 
 ### test_name_1
-**Input:**
-```
-let input = SomeStruct { field: value };
-```
-**Expected:** `function(&input)` returns `Ok(expected_value)`
+**Input:** [concrete input values]
+**Expected:** [exact expected output]
 
 ### test_name_2
-**Input:**
-```
-let invalid = SomeStruct { field: bad_value };
-```
-**Expected:** `function(&invalid)` returns `Err(PhaseError::VariantName(_))`
+**Input:** [invalid/edge input]
+**Expected:** [specific error or empty result — state which one]
 
 ### test_edge_case_empty
-**Input:** Empty collection `vec![]`
-**Expected:** [Valid empty result | Specific error] — state which one
+**Input:** empty/zero values
+**Expected:** [valid result | specific error] — state which one
 
 ## Edge Cases
 
-1. **Empty collections** — [valid or error?]
-2. **Null/None fields** — [which fields can be None, behavior when None]
+1. **Empty input** — [valid or error?]
+2. **Null/None fields** — [which fields can be null, behavior when null]
 3. **Boundary values** — [max/min values, behavior at boundaries]
-4. **Unicode** — [if strings involved, unicode handling]
-5. **Large inputs** — [any size limits, memory considerations]
+4. **Large inputs** — [any size limits or memory considerations]
 
-## Integration Points
+## DO NOT
 
-### Consumed by
-- Phase XX: [how it uses this phase's output]
-- Crate YY: [external consumer]
-
-### Depends on
-- Phase ZZ: [what this phase needs from previous phases]
-- External: [external dependencies like DB, files]
-
-### Exports
-List all `pub` items that other phases/crates will use:
-- `TypeName` — used by [consumer]
-- `function_name` — called by [consumer]
-- `PhaseError` — matched by [consumer]
+- Do NOT [common mistake 1 specific to this phase]
+- Do NOT [common mistake 2]
+- Do NOT ignore errors — handle or propagate all failure cases
+- Do NOT modify files outside the scope listed above
 
 ---
 
@@ -107,12 +100,10 @@ List all `pub` items that other phases/crates will use:
 
 Before marking ready for sub-agents:
 
-- [ ] Every struct/enum has exact field definitions with types
-- [ ] Every function has full signature with generics and bounds
-- [ ] Every error variant has specific message format
-- [ ] File paths are explicit (not "somewhere in the crate")
-- [ ] Cargo.toml changes listed with exact versions
-- [ ] DO NOT section covers likely mistakes
+- [ ] Every type has exact field definitions
+- [ ] Every function has full signature with parameter and return types
+- [ ] File paths are explicit (not "somewhere in the codebase")
+- [ ] DO NOT section covers likely mistakes for this specific phase
 - [ ] Test cases have concrete inputs and expected outputs
 - [ ] Edge cases enumerated
-- [ ] Integration points documented
+- [ ] Verify compilation/build after changes

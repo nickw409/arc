@@ -26,11 +26,14 @@ arc status <plan-name>
 
 | Type | Use When |
 |------|----------|
-| `feature` (default) | New functionality, TDD workflow |
-| `bugfix` | Reproducing and fixing bugs |
+| `feature` (default) | New functionality, implementation + adversarial testing |
+| `bugfix` | Reproducing and fixing bugs with regression tests |
 | `investigation` | Research only, no code changes |
-| `refactor` | Restructuring existing code |
+| `refactor` | Restructuring existing code without changing behavior |
 | `performance` | Optimization driven by benchmarks |
+| `adversarial` | Implementation with adversarial hardening |
+| `audit` | Audit existing code for bugs/issues, then fix |
+| `direct` | Single-phase, straightforward tasks |
 
 ## Plan.md Format
 
@@ -47,14 +50,12 @@ One sentence describing what this phase accomplishes.
 ### Modify
 - `path/to/file` — What changes and why
 
-## Types and Signatures
-Exact function/type signatures in code blocks. No pseudocode.
-
-## Error Types
-Full error enums/types with all variants.
+## Detailed Changes
+Step-by-step breakdown of what to implement, with exact types and
+function signatures in fenced code blocks. No pseudocode.
 
 ## Test Cases
-### test_name
+### test_name_case
 **Input:** Concrete input values
 **Expected:** Exact expected output
 
@@ -64,7 +65,48 @@ Full error enums/types with all variants.
 
 ## DO NOT
 - Common mistakes the implementation agent should avoid
+- Do NOT break `go build ./...` or `go test ./...`
 ```
+
+## spec.yaml — Required for Every Phase
+
+Every phase **must** have a `spec.yaml` with a non-empty `spec` field. Phases with no spec are blocked from running — the orchestrator hard-errors before spawning the agent.
+
+**Minimal spec (simple fix, no gate assertions needed):**
+```yaml
+name: phase-name
+complexity: simple
+spec: |
+  Fix the off-by-one error in handleSubmit: move the queued == 0
+  check to before sched.Register, not after.
+```
+
+**Full spec with checkpoints (preferred for any non-trivial work):**
+```yaml
+name: phase-name
+complexity: medium
+spec: |
+  [Full description of what to implement — copy from plan.md Detailed Changes]
+checkpoints:
+  - name: compiles
+    description: Package builds without errors
+    test: go build ./internal/pkg/
+  - name: tests-pass
+    description: All tests pass
+    test: go test ./internal/pkg/
+gate:
+  assertions:
+    - file_exists: internal/pkg/newfile.go
+    - grep: "type NewType struct"
+```
+
+**Checkpoint rules:**
+- `test` must be a shell command that exits 0 on success
+- Name checkpoints after the milestone they verify (compiles, auth-works, tests-pass)
+- Order checkpoints from cheapest to most expensive (build first, full test suite last)
+- Every phase that touches code should have at minimum a `compiles` checkpoint
+
+The `arc plan spec` command opens `spec.yaml` for editing. Write it before running.
 
 ## Planning Process
 
