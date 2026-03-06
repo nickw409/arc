@@ -110,18 +110,13 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 		}
 
 		// Add iteration info if in progress
-		if iter := state.StateIterations[state.CurrentState]; iter > 0 {
+		if iter := state.Iteration.Current; iter > 0 {
 			line += fmt.Sprintf(" iter %d", iter)
 		}
 
 		// Add test counts if present
 		if state.TestsTotal > 0 {
 			line += fmt.Sprintf(" %d/%d", state.TestsPassing, state.TestsTotal)
-		}
-
-		// Add dispute count if present
-		if len(state.Disputes) > 0 {
-			line += fmt.Sprintf(" disputes:%d", len(state.Disputes))
 		}
 
 		// Add activity if present

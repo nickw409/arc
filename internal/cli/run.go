@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/orchestrator"
+	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/state"
 	"github.com/spf13/cobra"
@@ -83,6 +84,18 @@ func newRunCmd() *cobra.Command {
 			}
 			if meta.ReviewStatus != "approved" && meta.ReviewStatus != "conditional" {
 				return fmt.Errorf("plan %q has review status %q — run: arc review %s", planName, meta.ReviewStatus, planName)
+			}
+
+			// Warn about spec issues for pending phases — non-blocking so simple
+			// fixes without gate assertions can still run.
+			for _, phaseName := range meta.Phases {
+				spec, specErr := plan.ReadSpec(plansDir, planName, phaseName)
+				if specErr != nil {
+					continue
+				}
+				for _, w := range plan.ValidateSpec(spec) {
+					fmt.Fprintf(os.Stderr, "warning: phase %q spec.yaml — %s\n", phaseName, w)
+				}
 			}
 
 			// Detach mode: re-exec ourselves with --detached and return immediately.
