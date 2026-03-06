@@ -289,7 +289,7 @@ func EnsureRunning(socketPath string) error {
 		return fmt.Errorf("opening daemon log: %w", err)
 	}
 
-	cmd := exec.Command(exe, "daemon", "start")
+	cmd := exec.Command(exe, "daemon", "start", "--foreground")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

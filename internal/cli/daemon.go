@@ -57,6 +57,8 @@ func newDaemonStartCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
+			sched.ShutdownFn = cancel
+
 			// Handle SIGTERM/SIGINT for graceful shutdown.
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

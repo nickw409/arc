@@ -31,6 +31,7 @@ type Scheduler struct {
 	runner        PhaseRunner
 	finalizer     Finalizer
 	OnStateChange func()
+	ShutdownFn    func() // called when draining and all plans have finished
 	logger        *slog.Logger
 }
 
@@ -115,11 +116,15 @@ func (s *Scheduler) Cancel(planName string) error {
 	return nil
 }
 
-// Drain stops accepting new plans. Existing plans run to completion.
+// Drain stops accepting new plans and shuts down once all current plans finish.
 func (s *Scheduler) Drain() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.draining = true
+	// If already idle, shut down immediately.
+	if len(s.registrations) == 0 && s.ShutdownFn != nil {
+		go s.ShutdownFn()
+	}
 }
 
 // Status returns the status of a single plan.
@@ -384,6 +389,11 @@ func (s *Scheduler) releasePlanLocked(reg *PlanRegistration, status string) {
 
 	if s.OnStateChange != nil {
 		s.OnStateChange()
+	}
+
+	// If draining and now idle, trigger shutdown.
+	if s.draining && len(s.registrations) == 0 && s.ShutdownFn != nil {
+		go s.ShutdownFn()
 	}
 }
 
