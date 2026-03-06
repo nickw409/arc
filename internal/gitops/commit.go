@@ -63,6 +63,17 @@ func Commit(opts CommitOptions) (string, error) {
 	return strings.TrimSpace(string(hashOut)), nil
 }
 
+// IsDirty returns true if the git working tree at dir has uncommitted changes.
+func IsDirty(dir string) (bool, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git status: %w", err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
 // FormatCommitMessage formats a commit message based on config style.
 func FormatCommitMessage(style, commitType, scope, description string) string {
 	switch style {

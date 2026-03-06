@@ -685,12 +685,14 @@ func TestRun_MissingSpec(t *testing.T) {
 // Run — empty assertions (should pass)
 // ---------------------------------------------------------------------------
 
-func TestRun_EmptyAssertions_Pass(t *testing.T) {
+func TestRun_EmptyAssertions_WithSpec_Pass(t *testing.T) {
 	workdir := t.TempDir()
 	phaseDir := t.TempDir()
 
+	// Empty assertions are OK if the spec has content (verifier can check it).
 	spec := `
 name: test-phase
+spec: "implement the feature"
 gate:
   assertions: []
 `
@@ -701,10 +703,7 @@ gate:
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if !result.Passed {
-		t.Errorf("expected Passed=true for empty assertions")
-	}
-	if len(result.Assertions) != 0 {
-		t.Errorf("expected 0 assertions, got %d", len(result.Assertions))
+		t.Errorf("expected Passed=true when spec has content")
 	}
 }
 
@@ -748,6 +747,7 @@ func TestRun_NoScopedTest_Skipped(t *testing.T) {
 
 	spec := `
 name: test-phase
+spec: "placeholder spec"
 gate:
   assertions: []
 `
@@ -759,6 +759,29 @@ gate:
 	}
 	if !result.ScopedTestSkipped {
 		t.Errorf("expected ScopedTestSkipped=true when no test command set")
+	}
+}
+
+func TestRun_EmptySpec_Fails(t *testing.T) {
+	workdir := t.TempDir()
+	phaseDir := t.TempDir()
+
+	spec := `
+name: test-phase
+gate:
+  assertions: []
+`
+	specPath := writeSpec(t, phaseDir, spec)
+
+	result, err := Run(context.Background(), specPath, workdir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Passed {
+		t.Error("expected gate to fail when spec has no assertions, no checkpoints, and no spec content")
+	}
+	if len(result.Assertions) == 0 || !strings.Contains(result.Assertions[0].Detail, "misconfigured") {
+		t.Errorf("expected misconfigured error detail, got: %v", result.Assertions)
 	}
 }
 

@@ -2,6 +2,7 @@ package plan
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
@@ -562,6 +563,22 @@ func TestValidateSpec_MissingComplexity(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected warning about missing complexity")
+	}
+}
+
+func TestValidateSpec_EmptySpec(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Complexity: "simple",
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "spec" && strings.Contains(w.Message, "empty") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about empty spec content")
 	}
 }
 

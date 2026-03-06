@@ -195,6 +195,10 @@ func (h *handlerContext) handlePlanUpdatePhase(_ context.Context, req mcp.CallTo
 
 	// Re-read merged spec and validate.
 	if merged, err := plan.ReadSpec(h.plansDir(), planName, phaseName); err == nil {
+		// Hard error: merged spec must have content for the gate to work with.
+		if strings.TrimSpace(merged.Spec) == "" && strings.TrimSpace(merged.Verify) == "" {
+			return mcp.NewToolResultError("spec update resulted in empty spec — phase must have spec or verify content for the gate to evaluate"), nil
+		}
 		if warnings := plan.ValidateSpec(merged); len(warnings) > 0 {
 			msg += "\n\nWarnings:"
 			for _, w := range warnings {

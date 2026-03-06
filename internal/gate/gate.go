@@ -79,6 +79,19 @@ func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption
 		return nil, fmt.Errorf("parsing spec file %q: %w", specPath, err)
 	}
 
+	// Fail fast if the spec has nothing to verify — an empty gate is misconfigured,
+	// not passing. Require at least one assertion, checkpoint, or a non-empty spec/verify field.
+	hasContent := strings.TrimSpace(spec.Spec) != "" || strings.TrimSpace(spec.Verify) != ""
+	if len(spec.Gate.Assertions) == 0 && len(spec.Checkpoints) == 0 && !hasContent {
+		return &arc.GateResult{
+			Passed: false,
+			Assertions: []arc.AssertionResult{{
+				Passed: false,
+				Detail: "gate misconfigured: no assertions, no checkpoints, and no spec defined",
+			}},
+		}, nil
+	}
+
 	result := &arc.GateResult{
 		Passed:      true,
 		Assertions:  make([]arc.AssertionResult, 0, len(spec.Gate.Assertions)),

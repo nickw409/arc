@@ -32,6 +32,14 @@ func (w SpecWarning) String() string {
 func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 	var warnings []SpecWarning
 
+	// Spec content: must have something for the agent and gate to work with.
+	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
+		warnings = append(warnings, SpecWarning{
+			Field:   "spec",
+			Message: "empty — phase has no spec or verify content; the gate will reject this as misconfigured",
+		})
+	}
+
 	// Test field: should be a shell command, not a human-readable description.
 	if spec.Verify != "" {
 		if numberedListRe.MatchString(spec.Verify) {

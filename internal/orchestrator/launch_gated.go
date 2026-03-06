@@ -473,6 +473,20 @@ func GatedPlanComplete(
 			fmt.Printf("Committed worktree changes: %s\n", shortHash(hash))
 		}
 
+		// Check for uncommitted changes in the project dir before merging.
+		// If dirty, skip the merge — the worktree is durable and can be
+		// merged later once the user commits or stashes their changes.
+		if isDirty, dirtyErr := gitops.IsDirty(opts.ProjectDir); dirtyErr != nil {
+			opts.Logger.Warn("failed to check project dir status", "error", dirtyErr)
+		} else if isDirty {
+			fmt.Printf("\nSkipping merge: project directory has uncommitted changes.\n")
+			fmt.Printf("Your completed work is safe in the worktree: %s\n", sharedWorktree.Dir)
+			fmt.Printf("To merge manually:\n")
+			fmt.Printf("  1. Commit or stash your changes\n")
+			fmt.Printf("  2. git merge --no-ff %s\n", sharedWorktree.Branch)
+			return buildResult("complete", "", ""), nil
+		}
+
 		if hash, mergeErr := worktree.MergeBack(sharedWorktree); mergeErr != nil {
 			opts.Logger.Warn("worktree merge failed", "branch", sharedWorktree.Branch, "error", mergeErr)
 
