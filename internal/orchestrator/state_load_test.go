@@ -29,7 +29,7 @@ func TestLoadPhaseStateValid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := loadPhaseState(planDir, "my-phase")
+	result := LoadPhaseState(planDir, "my-phase")
 	if result == nil {
 		t.Fatal("expected non-nil phase state")
 	}
@@ -44,7 +44,7 @@ func TestLoadPhaseStateValid(t *testing.T) {
 func TestLoadPhaseStateMissing(t *testing.T) {
 	planDir := t.TempDir()
 
-	result := loadPhaseState(planDir, "nonexistent")
+	result := LoadPhaseState(planDir, "nonexistent")
 	if result != nil {
 		t.Fatal("expected nil for missing phase state")
 	}
@@ -61,7 +61,7 @@ func TestLoadPhaseStateInvalidJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := loadPhaseState(planDir, "bad-phase")
+	result := LoadPhaseState(planDir, "bad-phase")
 	if result != nil {
 		t.Fatal("expected nil for invalid JSON state")
 	}
@@ -89,7 +89,7 @@ func TestLoadAllPhaseStates(t *testing.T) {
 		}
 	}
 
-	result := loadAllPhaseStates(planDir, phases)
+	result := LoadAllPhaseStates(planDir, phases)
 
 	if len(result) != 3 {
 		t.Fatalf("expected 3 entries in result map, got %d", len(result))
@@ -109,7 +109,7 @@ func TestLoadAllPhaseStates(t *testing.T) {
 func TestLoadAllPhaseStatesEmpty(t *testing.T) {
 	planDir := t.TempDir()
 
-	result := loadAllPhaseStates(planDir, []string{})
+	result := LoadAllPhaseStates(planDir, []string{})
 	if len(result) != 0 {
 		t.Fatalf("expected empty map, got %d entries", len(result))
 	}
