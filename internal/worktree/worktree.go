@@ -314,7 +314,7 @@ func CheckDiskSpace(minBytes int64) error {
 	}
 
 	// Bavail is the number of free blocks available to unprivileged users.
-	available := int64(stat.Bavail) * stat.Bsize //nolint:unconvert
+	available := int64(stat.Bavail) * int64(stat.Bsize)
 	if available < minBytes {
 		return fmt.Errorf("insufficient disk space: %d bytes available, %d required", available, minBytes)
 	}
