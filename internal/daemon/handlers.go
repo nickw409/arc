@@ -90,8 +90,8 @@ func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {
 	}
 
 	// Create resolver.
-	arcHome := filepath.Join(req.Project, ".arc")
-	resolver := resources.NewResolver(req.Project, arcHome)
+	homeDir, _ := os.UserHomeDir()
+	resolver := resources.NewResolver(req.Project, homeDir)
 
 	// Create shared worktree if requested (not per-phase).
 	var wt *worktree.Worktree
@@ -123,7 +123,7 @@ func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {
 		PlanName:         req.Plan,
 		ProjectDir:       req.Project,
 		PlansDir:         plansDir,
-		ArcHome:          arcHome,
+		ArcHome:          homeDir,
 		Meta:             meta,
 		Timeout:          req.Timeout,
 		UseWorktree:      req.UseWorktree,

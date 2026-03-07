@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/nwiley/arc/internal/gate"
 	"github.com/spf13/cobra"
@@ -39,14 +41,18 @@ Exit code 0 means all checks passed. Exit code 1 means one or more checks failed
 				workdir = wd
 			}
 
+			// Find the project root (handles worktrees where CWD may not have .plans/).
+			// Use git's common git dir to locate the main worktree root.
+			projectRoot := findProjectRoot(workdir)
+
 			// Resolve spec path.
-			specPath := filepath.Join(".plans", "active", planName, "phases", phaseName, "spec.yaml")
+			specPath := filepath.Join(projectRoot, ".plans", "active", planName, "phases", phaseName, "spec.yaml")
 			if _, err := os.Stat(specPath); os.IsNotExist(err) {
 				return fmt.Errorf("spec not found at %s — does phase %q exist in plan %q?", specPath, phaseName, planName)
 			}
 
 			// Determine the phase directory for status persistence.
-			phaseDir := filepath.Join(".plans", "active", planName, "phases", phaseName)
+			phaseDir := filepath.Join(projectRoot, ".plans", "active", planName, "phases", phaseName)
 
 			// Run gate.
 			result, err := gate.Run(cmd.Context(), specPath, workdir)
@@ -76,4 +82,22 @@ Exit code 0 means all checks passed. Exit code 1 means one or more checks failed
 
 	cmd.Flags().StringVar(&workdir, "workdir", "", "Working directory for file assertions (default: current directory)")
 	return cmd
+}
+
+// findProjectRoot returns the root of the main git worktree, which is where
+// .plans/ lives. When called from inside a git worktree, git rev-parse
+// --git-common-dir returns the absolute path to the shared .git directory
+// (e.g. /project/.git), so its parent is the project root. When called from
+// the main worktree it returns a relative path (.git), so the CWD is the root.
+func findProjectRoot(fromDir string) string {
+	out, err := exec.Command("git", "-C", fromDir, "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return fromDir
+	}
+	gitCommonDir := strings.TrimSpace(string(out))
+	if filepath.IsAbs(gitCommonDir) {
+		return filepath.Dir(gitCommonDir)
+	}
+	// Relative path means we're in the main worktree; fromDir is already the root.
+	return fromDir
 }
