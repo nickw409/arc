@@ -28,7 +28,7 @@ func NewStuckDetector(role string, threshold int) *StuckDetector {
 	if threshold <= 0 {
 		switch role {
 		case "impl":
-			threshold = 8
+			threshold = 15
 		default:
 			threshold = 12
 		}
