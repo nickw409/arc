@@ -125,15 +125,19 @@ func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption
 	// Run verifier agent if resolved and all other checks passed.
 	runVerifier := ShouldRunVerifier(ro.verifierOverride, "", spec.Gate.VerifierAgent, spec.Complexity)
 	if runVerifier && result.Passed {
-		verifyCtx, verifyCancel := context.WithTimeout(ctx, 2*time.Minute)
+		verifyCtx, verifyCancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer verifyCancel()
 		passed, reasoning, verifyErr := RunVerifier(verifyCtx, &spec, workdir)
 		if verifyErr != nil {
 			// Verifier error is non-fatal — log but don't fail.
-			result.ScopedTestOutput += fmt.Sprintf("\n\nVerifier error: %v", verifyErr)
+			result.ScopedTestSkipped = false
+			result.ScopedTestPassed = false
+			result.ScopedTestOutput += fmt.Sprintf("Verifier error: %v", verifyErr)
 		} else if !passed {
 			result.Passed = false
-			result.ScopedTestOutput += fmt.Sprintf("\n\nVerifier FAILED:\n%s", reasoning)
+			result.ScopedTestSkipped = false
+			result.ScopedTestPassed = false
+			result.ScopedTestOutput += fmt.Sprintf("Verifier FAILED:\n%s", reasoning)
 		}
 	}
 
