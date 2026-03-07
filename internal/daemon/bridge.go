@@ -52,9 +52,13 @@ func BuildLaunchOptions(reg *PlanRegistration) orchestrator.LaunchOptions {
 }
 
 // DefaultPhaseRunner returns a PhaseRunner that calls orchestrator.RunPhaseGated.
-func DefaultPhaseRunner() PhaseRunner {
+// sched may be nil (e.g. in tests); if non-nil its RateLimitSignal is wired in.
+func DefaultPhaseRunner(sched *Scheduler) PhaseRunner {
 	return func(ctx context.Context, reg *PlanRegistration, phaseName string) error {
 		opts := BuildPhaseOptions(reg, phaseName)
+		if sched != nil {
+			opts.OnRateLimit = sched.RateLimitSignal
+		}
 		return orchestrator.RunPhaseGated(ctx, opts)
 	}
 }

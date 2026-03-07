@@ -55,6 +55,7 @@ type RunPhaseOptions struct {
 	ChatMode    bool                // if true, block immediately instead of retrying on failure
 	Resolver    *resources.Resolver // reserved for future use
 	PlanLogger  *PlanLogger         // structured JSONL logger; nil disables structured logging
+	OnRateLimit func()              // called when agent rate-limited; may be nil
 }
 
 // commitPhase creates a git commit for the phase.

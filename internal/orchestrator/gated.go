@@ -306,7 +306,11 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			if tier == TierTransient && attempt < MaxGatedAttempts {
 				opts.Logger.Warn("transient spawn error, retrying",
 					"attempt", attempt, "error", spawnErr)
-				delay := transientBackoff(attempt, result != nil && result.RateLimit)
+				isRateLimit := result != nil && result.RateLimit
+				if isRateLimit && opts.OnRateLimit != nil {
+					opts.OnRateLimit()
+				}
+				delay := transientBackoff(attempt, isRateLimit)
 				select {
 				case <-time.After(delay):
 				case <-ctx.Done():
@@ -322,6 +326,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Back off if the agent was rate-limited but exited without a spawn error.
 		if spawnErr == nil && result != nil && result.RateLimit && attempt < MaxGatedAttempts {
 			opts.Logger.Warn("agent rate-limited, backing off", "attempt", attempt)
+			if opts.OnRateLimit != nil {
+				opts.OnRateLimit()
+			}
 			delay := transientBackoff(attempt, true)
 			select {
 			case <-time.After(delay):

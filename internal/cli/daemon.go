@@ -51,7 +51,10 @@ func newDaemonStartCmd() *cobra.Command {
 			}
 
 			// Foreground mode: run the daemon in this process.
-			sched := daemon.NewScheduler(cfg.MaxParallel, daemon.DefaultPhaseRunner(), daemon.DefaultFinalizer())
+			// Two-step init: create scheduler first, then wire in the runner that
+			// captures the scheduler reference for rate-limit signalling.
+			sched := daemon.NewScheduler(cfg.MaxParallel, nil, daemon.DefaultFinalizer())
+			sched.SetRunner(daemon.DefaultPhaseRunner(sched))
 			d := daemon.New(*cfg, sched)
 
 			ctx, cancel := context.WithCancel(context.Background())

@@ -507,3 +507,141 @@ func TestSchedulerRegistrations(t *testing.T) {
 		t.Fatalf("unexpected registrations: %v", regs)
 	}
 }
+
+func TestRateLimitSignalReducesSlots(t *testing.T) {
+	s := NewScheduler(3, nil, nil)
+
+	// Pre-fill all slots so we can check a drain occurred.
+	// First put tokens into the channel to simulate idle state.
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+
+	// Drain one slot to match what's "in use" — leave 2 free.
+	<-s.slots
+
+	// slots now has 2 tokens (1 in use).
+	if len(s.slots) != 2 {
+		t.Fatalf("expected 2 slots before signal, got %d", len(s.slots))
+	}
+
+	s.RateLimitSignal()
+
+	s.mu.Lock()
+	throttled := s.throttleSlots
+	s.mu.Unlock()
+
+	if throttled != 1 {
+		t.Fatalf("expected throttleSlots=1 after signal, got %d", throttled)
+	}
+	if len(s.slots) != 1 {
+		t.Fatalf("expected 1 slot after signal, got %d", len(s.slots))
+	}
+
+	// Stop the timer to avoid goroutine leak.
+	s.mu.Lock()
+	if s.throttleTimer != nil {
+		s.throttleTimer.Stop()
+	}
+	s.mu.Unlock()
+}
+
+func TestRateLimitSignalCap(t *testing.T) {
+	// maxParallel=3: cap is maxParallel-1 = 2.
+	s := NewScheduler(3, nil, nil)
+
+	// Fill all 3 slots (simulate idle).
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+
+	s.RateLimitSignal() // throttleSlots=1
+	s.RateLimitSignal() // throttleSlots=2
+
+	s.mu.Lock()
+	throttled := s.throttleSlots
+	s.mu.Unlock()
+
+	if throttled != 2 {
+		t.Fatalf("expected throttleSlots=2 at cap, got %d", throttled)
+	}
+
+	// Third call should be a noop (cap reached).
+	s.RateLimitSignal()
+
+	s.mu.Lock()
+	throttledAfter := s.throttleSlots
+	s.mu.Unlock()
+
+	if throttledAfter != 2 {
+		t.Fatalf("expected throttleSlots to remain 2, got %d", throttledAfter)
+	}
+
+	// Stop timer.
+	s.mu.Lock()
+	if s.throttleTimer != nil {
+		s.throttleTimer.Stop()
+	}
+	s.mu.Unlock()
+}
+
+func TestRestoreSlotReturnsCapacity(t *testing.T) {
+	s := NewScheduler(3, nil, nil)
+
+	// Fill all 3 slots.
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+	s.slots <- struct{}{}
+
+	// Drain one via RateLimitSignal.
+	s.RateLimitSignal()
+
+	s.mu.Lock()
+	if s.throttleSlots != 1 {
+		s.mu.Unlock()
+		t.Fatalf("expected throttleSlots=1, got %d", s.throttleSlots)
+	}
+	if s.throttleTimer != nil {
+		s.throttleTimer.Stop()
+	}
+	s.mu.Unlock()
+
+	slotsBefore := len(s.slots)
+
+	// Manually call restoreSlot.
+	s.restoreSlot()
+
+	s.mu.Lock()
+	throttled := s.throttleSlots
+	s.mu.Unlock()
+
+	if throttled != 0 {
+		t.Fatalf("expected throttleSlots=0 after restore, got %d", throttled)
+	}
+	if len(s.slots) != slotsBefore+1 {
+		t.Fatalf("expected %d slots after restore, got %d", slotsBefore+1, len(s.slots))
+	}
+}
+
+func TestRateLimitSignalNoFreeSlotsIsNoop(t *testing.T) {
+	s := NewScheduler(2, nil, nil)
+
+	// Do NOT add any tokens — all slots are "in use" by running goroutines.
+	if len(s.slots) != 0 {
+		t.Fatalf("expected empty slots channel, got %d", len(s.slots))
+	}
+
+	s.RateLimitSignal()
+
+	s.mu.Lock()
+	throttled := s.throttleSlots
+	s.mu.Unlock()
+
+	// No free slot to drain; should remain 0.
+	if throttled != 0 {
+		t.Fatalf("expected throttleSlots=0 (noop), got %d", throttled)
+	}
+	if len(s.slots) != 0 {
+		t.Fatalf("expected 0 slots (noop), got %d", len(s.slots))
+	}
+}

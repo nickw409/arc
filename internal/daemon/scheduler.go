@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/state"
@@ -20,19 +21,22 @@ type Finalizer func(reg *PlanRegistration)
 
 // Scheduler dispatches phases from all registered plans into a bounded worker pool.
 type Scheduler struct {
-	mu            sync.Mutex
-	registrations map[string]*PlanRegistration
-	running       map[string]map[string]bool // planName -> phaseName -> running
-	dirty         map[string]bool
-	slots         chan struct{} // semaphore
-	wake          chan struct{} // buffered(1)
-	done          chan PhaseResult
-	draining      bool
-	runner        PhaseRunner
-	finalizer     Finalizer
-	OnStateChange func()
-	ShutdownFn    func() // called when draining and all plans have finished
-	logger        *slog.Logger
+	mu             sync.Mutex
+	registrations  map[string]*PlanRegistration
+	running        map[string]map[string]bool // planName -> phaseName -> running
+	dirty          map[string]bool
+	slots          chan struct{} // semaphore
+	wake           chan struct{} // buffered(1)
+	done           chan PhaseResult
+	draining       bool
+	runner         PhaseRunner
+	finalizer      Finalizer
+	OnStateChange  func()
+	ShutdownFn     func() // called when draining and all plans have finished
+	logger         *slog.Logger
+	maxParallel    int
+	throttleSlots  int
+	throttleTimer  *time.Timer
 }
 
 // NewScheduler creates a scheduler with the given concurrency limit.
@@ -47,7 +51,58 @@ func NewScheduler(maxParallel int, runner PhaseRunner, finalizer Finalizer) *Sch
 		runner:        runner,
 		finalizer:     finalizer,
 		logger:        slog.Default(),
+		maxParallel:   maxParallel,
 	}
+}
+
+// SetRunner replaces the phase runner. Used to break initialization cycles
+// when the runner itself needs a reference to the scheduler.
+func (s *Scheduler) SetRunner(runner PhaseRunner) {
+	s.runner = runner
+}
+
+// RateLimitSignal is called when a phase agent receives a rate-limit response.
+// It adaptively reduces the concurrency by one slot (down to a minimum of 1)
+// and schedules a slot restoration after 30 seconds of quiescence.
+func (s *Scheduler) RateLimitSignal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.throttleSlots >= s.maxParallel-1 {
+		// Already at minimum concurrency; nothing more to drain.
+		return
+	}
+
+	// Try to drain one token from the semaphore (non-blocking).
+	select {
+	case <-s.slots:
+		// Successfully drained a slot.
+	default:
+		// All slots are currently held by running goroutines; no free slot to drain.
+		return
+	}
+
+	s.throttleSlots++
+
+	// Reset (or create) the restore timer.
+	if s.throttleTimer != nil {
+		s.throttleTimer.Stop()
+	}
+	s.throttleTimer = time.AfterFunc(30*time.Second, s.restoreSlot)
+}
+
+// restoreSlot returns one previously throttled slot to the semaphore.
+func (s *Scheduler) restoreSlot() {
+	s.mu.Lock()
+	if s.throttleSlots <= 0 {
+		s.mu.Unlock()
+		return
+	}
+	s.throttleSlots--
+	s.mu.Unlock()
+
+	// Send the token back outside the lock to avoid deadlock.
+	s.slots <- struct{}{}
 }
 
 // Run is the main dispatch loop. It blocks until ctx is cancelled.

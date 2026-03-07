@@ -141,7 +141,7 @@ func TestBuildLaunchOptions(t *testing.T) {
 }
 
 func TestDefaultPhaseRunner_ReturnsFunction(t *testing.T) {
-	runner := DefaultPhaseRunner()
+	runner := DefaultPhaseRunner(nil)
 	if runner == nil {
 		t.Fatal("DefaultPhaseRunner returned nil")
 	}
