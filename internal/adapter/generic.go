@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"strings"
 	"syscall"
 	"time"
 
@@ -240,13 +241,25 @@ func (a *GenericAdapter) Spawn(ctx context.Context, prompt string, workdir strin
 		}
 	}
 
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
 	return &arc.AgentResult{
-		ExitCode: exitCode,
-		Output:   stdoutBuf.String(),
-		Stderr:   stderrBuf.String(),
-		TimedOut: timedOut,
-		Duration: duration,
+		ExitCode:  exitCode,
+		Output:    stdout,
+		Stderr:    stderr,
+		TimedOut:  timedOut,
+		RateLimit: isGenericRateLimit(stdout, stderr),
+		Duration:  duration,
 	}, nil
+}
+
+// isGenericRateLimit returns true if stdout or stderr indicate a rate limit error.
+func isGenericRateLimit(stdout, stderr string) bool {
+	combined := strings.ToLower(stdout + stderr)
+	return strings.Contains(combined, "rate limit") ||
+		strings.Contains(combined, "rate_limit") ||
+		strings.Contains(combined, "too many requests") ||
+		strings.Contains(combined, "429")
 }
 
 // Preflight checks that the command exists in PATH and that workdir is

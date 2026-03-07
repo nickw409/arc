@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -140,12 +141,24 @@ func (a *CodexAdapter) Spawn(ctx context.Context, prompt string, workdir string,
 		}
 	}
 
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
 	return &arc.AgentResult{
-		ExitCode: exitCode,
-		Output:   stdoutBuf.String(),
-		Stderr:   stderrBuf.String(),
-		TimedOut: timedOut,
-		Duration: duration,
+		ExitCode:  exitCode,
+		Output:    stdout,
+		Stderr:    stderr,
+		TimedOut:  timedOut,
+		RateLimit: isCodexRateLimit(stdout, stderr),
+		Duration:  duration,
 		// Usage is not reported by codex; left as zero.
 	}, nil
+}
+
+// isCodexRateLimit returns true if stdout or stderr indicate a rate limit error.
+func isCodexRateLimit(stdout, stderr string) bool {
+	combined := stdout + stderr
+	return strings.Contains(combined, "rate_limit_exceeded") ||
+		strings.Contains(combined, "Rate limit reached") ||
+		strings.Contains(combined, "Too Many Requests") ||
+		strings.Contains(combined, "429")
 }

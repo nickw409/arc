@@ -47,6 +47,7 @@ func (a *ClaudeAdapter) Spawn(ctx context.Context, prompt string, workdir string
 		Usage:          res.Usage,
 		TimedOut:       res.TimedOut,
 		InactivityKill: res.InactivityKill,
+		RateLimit:      res.RateLimit,
 		Duration:       res.Duration,
 		PID:            res.PID,
 	}, nil

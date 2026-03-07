@@ -37,6 +37,7 @@ type SpawnResult struct {
 	ExitCode       int
 	TimedOut       bool
 	InactivityKill bool          // true if watchdog killed the process
+	RateLimit      bool          // true if the agent was rate-limited by the API
 	Duration       time.Duration // wall-clock time from Start() to Wait() return
 	Usage          arc.Usage
 	TurnSummaries  []TurnSummary // per-turn metadata from stream
@@ -322,6 +323,9 @@ func buildStreamResult(ctx context.Context, timeoutCtx context.Context, waitErr 
 		result.Usage = usageFromStreamResult(output.result)
 		if output.result.IsError {
 			result.ExitCode = 1
+			if strings.Contains(strings.ToLower(output.result.Result), "rate limit") {
+				result.RateLimit = true
+			}
 		}
 	} else {
 		// No result message — fallback to raw lines
