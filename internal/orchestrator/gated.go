@@ -306,11 +306,29 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			if tier == TierTransient && attempt < MaxGatedAttempts {
 				opts.Logger.Warn("transient spawn error, retrying",
 					"attempt", attempt, "error", spawnErr)
+				delay := transientBackoff(attempt, result != nil && result.RateLimit)
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				continue
 			}
 			// Agent failed hard — still run gate in case it made partial progress
 			opts.Logger.Warn("agent spawn failed, running gate anyway",
 				"attempt", attempt, "error", spawnErr)
+		}
+
+		// Back off if the agent was rate-limited but exited without a spawn error.
+		if spawnErr == nil && result != nil && result.RateLimit && attempt < MaxGatedAttempts {
+			opts.Logger.Warn("agent rate-limited, backing off", "attempt", attempt)
+			delay := transientBackoff(attempt, true)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
 		}
 
 		// Run gate — role-based routing
@@ -775,6 +793,20 @@ func narrowScopeGuidance(spec *arc.PhaseSpec, lastGate *arc.GateResult) string {
 	}
 
 	return sb.String()
+}
+
+// transientBackoff returns the delay to wait before a transient retry.
+// Rate-limited retries use exponential backoff (5s * 2^(attempt-1), capped at 60s).
+// Other transient failures use a fixed 2s delay.
+func transientBackoff(attempt int, rateLimit bool) time.Duration {
+	if !rateLimit {
+		return 2 * time.Second
+	}
+	delay := 5 * time.Second * (1 << uint(attempt-1))
+	if delay > 60*time.Second {
+		delay = 60 * time.Second
+	}
+	return delay
 }
 
 // captureDiff runs `git diff` in the given directory and returns the output.

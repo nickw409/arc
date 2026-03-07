@@ -1,6 +1,6 @@
 {
   "plan": "rate-limit-handling",
-  "phase": "detect",
-  "failure_reason": "gate failed after 4 attempts:\nFAIL\n- [x] RateLimit field added to AgentResult\n- [x] Codex rate limit detection function exists\n- [x] Generic rate limit detection function exists\n- [x] Checkpoint \"compiles\": pass\n- [x] Checkpoint \"tests-pass\": pass\n\nFix the items above, then run this command again.\n",
-  "timestamp": "2026-03-07T01:44:13Z"
+  "phase": "adaptive",
+  "failure_reason": "gate failed after 4 attempts:\nFAIL\n- [ ] OnRateLimit callback field added to RunPhaseOptions — pattern \"OnRateLimit\" not found in any .go file\n- [ ] RateLimitSignal method exists on Scheduler — pattern \"RateLimitSignal\" not found in any .go file\n- [ ] restoreSlot helper exists for adaptive slot restoration — pattern \"restoreSlot\" not found in any .go file\n- [x] Checkpoint \"compiles\": pass\n- [x] Checkpoint \"tests-pass\": pass\n\nFix the items above, then run this command again.\n",
+  "timestamp": "2026-03-07T02:12:37Z"
 }

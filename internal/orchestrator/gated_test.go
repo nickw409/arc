@@ -968,6 +968,33 @@ func TestRunPhaseGated_ImplRole_GateStillRuns(t *testing.T) {
 	}
 }
 
+func TestTransientBackoff(t *testing.T) {
+	tests := []struct {
+		name      string
+		attempt   int
+		rateLimit bool
+		want      time.Duration
+	}{
+		{"no-ratelimit any attempt", 1, false, 2 * time.Second},
+		{"no-ratelimit attempt 3", 3, false, 2 * time.Second},
+		{"ratelimit attempt 1", 1, true, 5 * time.Second},
+		{"ratelimit attempt 2", 2, true, 10 * time.Second},
+		{"ratelimit attempt 3", 3, true, 20 * time.Second},
+		{"ratelimit attempt 4", 4, true, 40 * time.Second},
+		{"ratelimit attempt 5 capped", 5, true, 60 * time.Second},
+		{"ratelimit attempt 10 capped", 10, true, 60 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := transientBackoff(tt.attempt, tt.rateLimit)
+			if got != tt.want {
+				t.Errorf("transientBackoff(%d, %v) = %v, want %v", tt.attempt, tt.rateLimit, got, tt.want)
+			}
+		})
+	}
+}
+
 // readGateStatus reads gate-status.json from a phase directory.
 func readGateStatus(phaseDir string) (*arc.GateStatus, error) {
 	data, err := os.ReadFile(filepath.Join(phaseDir, "gate-status.json"))
