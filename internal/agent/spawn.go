@@ -102,9 +102,11 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 		cmd.Dir = opts.WorkingDir
 	}
 
-	// Clear CLAUDECODE env var so subprocesses aren't blocked by the
-	// nested-session check when arc is invoked from within Claude Code.
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+	// Clear Claude Code session env vars so subprocesses aren't blocked by
+	// the nested-session check when arc is invoked from within Claude Code.
+	env := filterEnv(os.Environ(), "CLAUDECODE")
+	env = filterEnv(env, "CLAUDE_CODE_ENTRYPOINT")
+	cmd.Env = env
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
