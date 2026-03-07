@@ -3,7 +3,9 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/nwiley/arc/internal/agent"
@@ -70,6 +72,14 @@ func (a *ClaudeAdapter) Preflight(ctx context.Context, workdir string) error {
 	defer authCancel()
 
 	authCmd := exec.CommandContext(authCtx, path, "--print", "test", "--max-turns", "1")
+	env := os.Environ()
+	filtered := env[:0:0]
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "CLAUDECODE=") && !strings.HasPrefix(kv, "CLAUDE_CODE_ENTRYPOINT=") {
+			filtered = append(filtered, kv)
+		}
+	}
+	authCmd.Env = filtered
 	if out, err := authCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("claude authentication check failed — ensure you are logged in (%w): %s", err, string(out))
 	}

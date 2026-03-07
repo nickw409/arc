@@ -74,13 +74,14 @@ func Spawn(ctx context.Context, opts SpawnOptions) (*SpawnResult, error) {
 
 	allowedTools := opts.AllowedTools
 	if len(allowedTools) == 0 {
-		allowedTools = []string{"View", "Edit", "Write", "Bash"}
+		allowedTools = []string{"View", "Edit", "Write", "Bash", "Read", "Glob", "Grep"}
 	}
 
 	args := []string{
 		"--print",
 		"--output-format", outputFormat,
 		"--max-turns", strconv.Itoa(maxTurns),
+		"--tools", strings.Join(allowedTools, ","),
 		"--allowedTools", strings.Join(allowedTools, ","),
 	}
 
