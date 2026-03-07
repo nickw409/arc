@@ -272,6 +272,24 @@ func unmarshalDaemonConfig(data []byte, cfg *DaemonConfig) error {
 	return yaml.Unmarshal(data, cfg)
 }
 
+// SaveDaemonConfig marshals cfg to YAML and writes it to ~/.arc/daemon.yaml.
+// The ~/.arc directory is created if it does not exist.
+func SaveDaemonConfig(cfg *DaemonConfig) error {
+	dir := defaultArcDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating ~/.arc directory: %w", err)
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling daemon config: %w", err)
+	}
+	configPath := filepath.Join(dir, "daemon.yaml")
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("writing daemon config: %w", err)
+	}
+	return nil
+}
+
 // EnsureRunning checks if the daemon is running and auto-starts it if not.
 func EnsureRunning(socketPath string) error {
 	if IsRunning(socketPath) {

@@ -20,13 +20,21 @@ type Store struct {
 
 // Data is the serializable intelligence data.
 type Data struct {
-	TestCommands      map[string]string     `json:"test_commands,omitempty"`      // package → working test command
-	FlakyTests        map[string]FlakyEntry `json:"flaky_tests,omitempty"`        // test name → flaky info
-	FileCoupling      []CouplingEntry       `json:"file_coupling,omitempty"`      // frequently co-changed files
-	CostHistory       []CostEntry           `json:"cost_history,omitempty"`       // historical cost per complexity
-	FailurePatterns   []FailurePattern      `json:"failure_patterns,omitempty"`   // error → fix mappings
-	ConventionPatterns []ConventionPattern  `json:"convention_patterns,omitempty"` // observed project conventions
-	LastUpdated       time.Time             `json:"last_updated"`
+	TestCommands       map[string]string     `json:"test_commands,omitempty"`       // package → working test command
+	FlakyTests         map[string]FlakyEntry `json:"flaky_tests,omitempty"`         // test name → flaky info
+	FileCoupling       []CouplingEntry       `json:"file_coupling,omitempty"`       // frequently co-changed files
+	CostHistory        []CostEntry           `json:"cost_history,omitempty"`        // historical cost per complexity
+	FailurePatterns    []FailurePattern      `json:"failure_patterns,omitempty"`    // error → fix mappings
+	ConventionPatterns []ConventionPattern   `json:"convention_patterns,omitempty"` // observed project conventions
+	RateLimitHistory   []RateLimitEvent      `json:"rate_limit_history,omitempty"`  // rate limit events per adapter
+	LastUpdated        time.Time             `json:"last_updated"`
+}
+
+// RateLimitEvent records a rate limit hit for a specific adapter at a given parallelism level.
+type RateLimitEvent struct {
+	Adapter   string    `json:"adapter"`
+	Parallel  int       `json:"parallel"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // FailurePattern records a known error and its fix for future guidance.
@@ -350,6 +358,65 @@ func (s *Store) GetAllConventions() []ConventionPattern {
 		return result[i].Confidence > result[j].Confidence
 	})
 	return result
+}
+
+// RecordRateLimit records a rate limit event for the given adapter at the given parallelism level.
+// History is capped at 200 entries; the oldest entries are evicted when over capacity.
+// Save is called outside the lock.
+func (s *Store) RecordRateLimit(adapter string, parallel int) {
+	s.mu.Lock()
+	s.data.RateLimitHistory = append(s.data.RateLimitHistory, RateLimitEvent{
+		Adapter:   adapter,
+		Parallel:  parallel,
+		Timestamp: time.Now().UTC(),
+	})
+	if len(s.data.RateLimitHistory) > 200 {
+		s.data.RateLimitHistory = s.data.RateLimitHistory[len(s.data.RateLimitHistory)-200:]
+	}
+	s.mu.Unlock()
+
+	_ = s.Save()
+}
+
+// SuggestMaxParallel returns the suggested max parallelism for an adapter based on rate limit history.
+// Returns 0 if there is no history for the adapter.
+// Otherwise returns max(1, minParallel-1) where minParallel is the minimum Parallel across all events.
+func (s *Store) SuggestMaxParallel(adapter string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	minParallel := -1
+	for _, e := range s.data.RateLimitHistory {
+		if e.Adapter != adapter {
+			continue
+		}
+		if minParallel < 0 || e.Parallel < minParallel {
+			minParallel = e.Parallel
+		}
+	}
+
+	if minParallel < 0 {
+		return 0
+	}
+	suggested := minParallel - 1
+	if suggested < 1 {
+		suggested = 1
+	}
+	return suggested
+}
+
+// CountRateLimitEvents returns the number of rate limit events recorded for the given adapter.
+func (s *Store) CountRateLimitEvents(adapter string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, e := range s.data.RateLimitHistory {
+		if e.Adapter == adapter {
+			count++
+		}
+	}
+	return count
 }
 
 // sameFiles returns true if two string slices contain exactly the same elements in the same order.

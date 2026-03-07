@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/state"
 )
@@ -37,6 +38,7 @@ type Scheduler struct {
 	maxParallel    int
 	throttleSlots  int
 	throttleTimer  *time.Timer
+	IntelStore     *intelligence.Store
 }
 
 // NewScheduler creates a scheduler with the given concurrency limit.
@@ -83,6 +85,18 @@ func (s *Scheduler) RateLimitSignal() {
 	}
 
 	s.throttleSlots++
+
+	// Record rate limit event in the intelligence store.
+	// adapterName defaults to "claude" — the scheduler doesn't track per-adapter concurrency yet;
+	// this is a simplification that assumes claude is the primary adapter.
+	if s.IntelStore != nil {
+		currentRunning := 0
+		for _, phases := range s.running {
+			currentRunning += len(phases)
+		}
+		adapterName := "claude"
+		go s.IntelStore.RecordRateLimit(adapterName, currentRunning)
+	}
 
 	// Reset (or create) the restore timer.
 	if s.throttleTimer != nil {

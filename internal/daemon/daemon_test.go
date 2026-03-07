@@ -350,3 +350,58 @@ func yamlUnmarshalForTest(data []byte, v *DaemonConfig) error {
 	// Since we're in the same package, we can call the yaml package.
 	return unmarshalDaemonConfig(data, v)
 }
+
+func TestSaveDaemonConfig(t *testing.T) {
+	// Override the home dir to use a temp dir.
+	// SaveDaemonConfig uses defaultArcDir() which calls os.UserHomeDir().
+	// We'll write to a known temp path by monkey-patching the environment.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &DaemonConfig{
+		SocketPath:  "/tmp/test.sock",
+		PIDPath:     "/tmp/test.pid",
+		LockPath:    "/tmp/test.lock",
+		StatePath:   "/tmp/test-state.json",
+		MaxParallel: 7,
+	}
+
+	if err := SaveDaemonConfig(cfg); err != nil {
+		t.Fatalf("SaveDaemonConfig: %v", err)
+	}
+
+	// Verify the file was written.
+	configPath := filepath.Join(home, ".arc", "daemon.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading saved config: %v", err)
+	}
+
+	var loaded DaemonConfig
+	if err := unmarshalDaemonConfig(data, &loaded); err != nil {
+		t.Fatalf("unmarshaling saved config: %v", err)
+	}
+
+	if loaded.MaxParallel != 7 {
+		t.Errorf("MaxParallel: got %d, want 7", loaded.MaxParallel)
+	}
+	if loaded.SocketPath != "/tmp/test.sock" {
+		t.Errorf("SocketPath: got %s, want /tmp/test.sock", loaded.SocketPath)
+	}
+}
+
+func TestSaveDaemonConfig_CreatesDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &DaemonConfig{MaxParallel: 2}
+	if err := SaveDaemonConfig(cfg); err != nil {
+		t.Fatalf("SaveDaemonConfig: %v", err)
+	}
+
+	// Verify the ~/.arc directory was created.
+	arcDir := filepath.Join(home, ".arc")
+	if _, err := os.Stat(arcDir); err != nil {
+		t.Errorf("~/.arc directory not created: %v", err)
+	}
+}

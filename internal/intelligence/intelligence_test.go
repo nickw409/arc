@@ -771,3 +771,123 @@ func TestConcurrentAccess(t *testing.T) {
 		t.Errorf("cost history exceeded max: %d", len(s.data.CostHistory))
 	}
 }
+
+func TestRecordRateLimit_Basic(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	s.RecordRateLimit("claude", 5)
+	s.RecordRateLimit("claude", 3)
+	s.RecordRateLimit("codex", 2)
+
+	if got := s.CountRateLimitEvents("claude"); got != 2 {
+		t.Errorf("CountRateLimitEvents claude: got %d, want 2", got)
+	}
+	if got := s.CountRateLimitEvents("codex"); got != 1 {
+		t.Errorf("CountRateLimitEvents codex: got %d, want 1", got)
+	}
+	if got := s.CountRateLimitEvents("generic"); got != 0 {
+		t.Errorf("CountRateLimitEvents generic: got %d, want 0", got)
+	}
+}
+
+func TestRecordRateLimit_Cap(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	for i := 0; i < 250; i++ {
+		s.mu.Lock()
+		s.data.RateLimitHistory = append(s.data.RateLimitHistory, RateLimitEvent{
+			Adapter:   "claude",
+			Parallel:  i,
+			Timestamp: time.Now().UTC(),
+		})
+		s.mu.Unlock()
+	}
+
+	// Trigger cap via RecordRateLimit
+	s.RecordRateLimit("claude", 10)
+
+	if got := len(s.data.RateLimitHistory); got > 200 {
+		t.Errorf("RateLimitHistory exceeded cap: %d entries", got)
+	}
+}
+
+func TestSuggestMaxParallel_NoData(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	if got := s.SuggestMaxParallel("claude"); got != 0 {
+		t.Errorf("SuggestMaxParallel with no data: got %d, want 0", got)
+	}
+}
+
+func TestSuggestMaxParallel_MinusOne(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordRateLimit("claude", 5)
+	s.RecordRateLimit("claude", 3)
+	s.RecordRateLimit("claude", 7)
+
+	// min is 3, so suggestion is max(1, 3-1) = 2
+	if got := s.SuggestMaxParallel("claude"); got != 2 {
+		t.Errorf("SuggestMaxParallel: got %d, want 2", got)
+	}
+}
+
+func TestSuggestMaxParallel_MinIsOne(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordRateLimit("claude", 1)
+
+	// min is 1, so suggestion is max(1, 0) = 1
+	if got := s.SuggestMaxParallel("claude"); got != 1 {
+		t.Errorf("SuggestMaxParallel with min=1: got %d, want 1", got)
+	}
+}
+
+func TestSuggestMaxParallel_AdapterIsolation(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	s.RecordRateLimit("claude", 4)
+	s.RecordRateLimit("codex", 10)
+
+	// claude: min=4, suggest=3
+	if got := s.SuggestMaxParallel("claude"); got != 3 {
+		t.Errorf("SuggestMaxParallel claude: got %d, want 3", got)
+	}
+	// codex: min=10, suggest=9
+	if got := s.SuggestMaxParallel("codex"); got != 9 {
+		t.Errorf("SuggestMaxParallel codex: got %d, want 9", got)
+	}
+	// generic: no data
+	if got := s.SuggestMaxParallel("generic"); got != 0 {
+		t.Errorf("SuggestMaxParallel generic: got %d, want 0", got)
+	}
+}
+
+func TestCountRateLimitEvents(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+
+	if got := s.CountRateLimitEvents("claude"); got != 0 {
+		t.Errorf("initial count: got %d, want 0", got)
+	}
+
+	s.RecordRateLimit("claude", 3)
+	s.RecordRateLimit("claude", 4)
+	s.RecordRateLimit("codex", 2)
+
+	if got := s.CountRateLimitEvents("claude"); got != 2 {
+		t.Errorf("after 2 claude events: got %d, want 2", got)
+	}
+}

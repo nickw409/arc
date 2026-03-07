@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/daemon"
+	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,7 @@ func newDaemonCmd() *cobra.Command {
 		newDaemonStatusCmd(),
 		newDaemonSubmitCmd(),
 		newDaemonCancelCmd(),
+		newDaemonCalibrateCmd(),
 	)
 	return cmd
 }
@@ -232,4 +234,54 @@ func newDaemonCancelCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newDaemonCalibrateCmd() *cobra.Command {
+	var apply bool
+	cmd := &cobra.Command{
+		Use:   "calibrate",
+		Short: "Report learned safe MaxParallel from rate limit history",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectDir, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+
+			store, err := intelligence.Open(projectDir)
+			if err != nil {
+				return fmt.Errorf("opening intelligence store: %w", err)
+			}
+
+			adapters := []string{"claude", "codex", "generic"}
+			for _, adapter := range adapters {
+				suggested := store.SuggestMaxParallel(adapter)
+				if suggested == 0 {
+					fmt.Printf("%s: no rate limit data\n", adapter)
+				} else {
+					fmt.Printf("%s: suggested max_parallel = %d\n", adapter, suggested)
+				}
+			}
+
+			if apply {
+				suggested := store.SuggestMaxParallel("claude")
+				if suggested == 0 {
+					return fmt.Errorf("no rate limit data for claude; cannot apply calibration")
+				}
+
+				cfg, err := daemon.LoadDaemonConfig()
+				if err != nil {
+					return fmt.Errorf("loading daemon config: %w", err)
+				}
+				cfg.MaxParallel = suggested
+				if err := daemon.SaveDaemonConfig(cfg); err != nil {
+					return fmt.Errorf("saving daemon config: %w", err)
+				}
+				fmt.Printf("Applied: max_parallel = %d written to ~/.arc/daemon.yaml\n", suggested)
+			}
+
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&apply, "apply", false, "Write the suggested max_parallel for claude to ~/.arc/daemon.yaml")
+	return cmd
 }
