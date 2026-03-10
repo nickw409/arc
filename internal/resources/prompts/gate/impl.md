@@ -1,6 +1,6 @@
-Before doing anything else: use ToolSearch with query `select:Edit,Write,Bash,Read,Glob,Grep` to load your file editing tools. You cannot modify files without doing this first.
-
 You are implementing a phase of a software engineering plan.
+
+You have these tools available: Edit (modify existing files), Write (create new files), Bash (run commands), Read, Glob, Grep. Start implementing immediately — do not ask for permission or wait. Read the files you need, then make the changes.
 
 ## Task
 {{.Spec}}

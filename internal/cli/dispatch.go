@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newDevCmd() *cobra.Command {
+func newDispatchCmd() *cobra.Command {
 	var interactive bool
 	var timeout int
 	var skipReview bool
@@ -23,9 +23,9 @@ func newDevCmd() *cobra.Command {
 	var autoYes bool
 
 	cmd := &cobra.Command{
-		Use:   "dev [task description...]",
-		Short: "Analyze, plan, and execute a development task",
-		Long:  "Spawns agents to analyze the task, generate a plan, optionally review it, then run the orchestrator.",
+		Use:   "dispatch [task description...]",
+		Short: "Analyze, plan, and submit a development task to the daemon",
+		Long:  "Spawns agents to analyze the task, generate a plan, optionally review it, then submit to the daemon for execution.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskDescription := strings.Join(args, " ")
@@ -79,10 +79,8 @@ func newDevCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("\n[dev] Done. Plan: %s, Complexity: %s\n", result.PlanName, result.Complexity)
-			if result.Usage.CostUSD > 0 {
-				fmt.Printf("[dev] Cost: $%.4f\n", result.Usage.CostUSD)
-			}
+			fmt.Printf("\n[dispatch] Plan %q submitted to daemon (complexity: %s).\n", result.PlanName, result.Complexity)
+			fmt.Printf("[dispatch] Monitor with: arc daemon status %s\n", result.PlanName)
 
 			return nil
 		},

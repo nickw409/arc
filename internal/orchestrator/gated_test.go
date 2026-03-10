@@ -540,28 +540,19 @@ func TestClassifySpawnError(t *testing.T) {
 func TestClassifyGateFailure(t *testing.T) {
 	tests := []struct {
 		name        string
-		passed      int // checkpoints passed in current result
 		attempt     int
 		maxAttempts int
-		prevPassed  int
 		want        ErrorTier
 	}{
-		{"first attempt fail", 0, 1, 4, 0, TierFeedback},
-		{"second attempt with progress", 1, 2, 4, 0, TierFeedback},
-		{"second attempt no progress", 0, 2, 4, 0, TierStrategic},
-		{"max attempts", 0, 4, 4, 0, TierGiveUp},
-		{"max attempts with progress", 2, 4, 4, 1, TierGiveUp},
+		{"first attempt fail", 1, 2, TierFeedback},
+		{"second attempt at max", 2, 2, TierGiveUp},
+		{"beyond max", 3, 2, TierGiveUp},
+		{"nil result", 1, 2, TierFeedback},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := &arc.GateResult{
-				Checkpoints: make([]arc.CheckpointStatus, tt.passed),
-			}
-			for i := range result.Checkpoints {
-				result.Checkpoints[i].Status = "pass"
-			}
-			got := classifyGateFailure(result, tt.attempt, tt.maxAttempts, tt.prevPassed)
+			got := classifyGateFailure(nil, tt.attempt, tt.maxAttempts)
 			if got != tt.want {
 				t.Errorf("classifyGateFailure: got %d, want %d", got, tt.want)
 			}
@@ -621,7 +612,7 @@ func TestBuildRetryPrompt(t *testing.T) {
 	if !strings.Contains(result, "Add a feature") {
 		t.Error("retry prompt should contain original spec")
 	}
-	if !strings.Contains(result, "attempt 2 of 4") {
+	if !strings.Contains(result, "attempt 2 of 2") {
 		t.Error("retry prompt should contain attempt count")
 	}
 	if !strings.Contains(result, "FAIL") {
@@ -762,7 +753,7 @@ func TestBuildRetryPrompt_Review(t *testing.T) {
 	if !strings.Contains(result, "findings-auth-review.md") {
 		t.Error("review retry should reference the output file")
 	}
-	if !strings.Contains(result, "attempt 2 of 4") {
+	if !strings.Contains(result, "attempt 2 of 2") {
 		t.Error("review retry should contain attempt count")
 	}
 
