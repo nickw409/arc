@@ -157,6 +157,26 @@ func UpdateParallelBranch(sf *StateFile, branch, status string, exitCode int) er
 	})
 }
 
+// IncrementWatchAttempts increments the watch attempt counter for a phase.
+// Called before spawning an intervention agent so crashes still count as attempts.
+func IncrementWatchAttempts(sf *StateFile) error {
+	return sf.Update(func(s *arc.PhaseState) error {
+		s.WatchAttempts++
+		return nil
+	})
+}
+
+// ResetToRetry resets a blocked phase to pending so the orchestrator can retry it.
+// Called after a watch intervention agent exits.
+func ResetToRetry(sf *StateFile) error {
+	return sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "pending"
+		s.BlockedReason = ""
+		s.BlockedAt = ""
+		return nil
+	})
+}
+
 // AppendAttemptLog appends a gate attempt summary to the phase's attempt_log.
 func AppendAttemptLog(sf *StateFile, summary arc.AttemptSummary) error {
 	return sf.Update(func(s *arc.PhaseState) error {
