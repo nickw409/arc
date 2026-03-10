@@ -646,3 +646,131 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestIncrementWatchAttempts(t *testing.T) {
+	sf, _ := newTestStateFile(t)
+	writeInitialState(t, sf)
+
+	// First increment: 0 → 1
+	if err := IncrementWatchAttempts(sf); err != nil {
+		t.Fatalf("IncrementWatchAttempts (1): %v", err)
+	}
+	s, _ := sf.Read()
+	if s.WatchAttempts != 1 {
+		t.Errorf("WatchAttempts after 1st: got %d, want 1", s.WatchAttempts)
+	}
+
+	// Second increment: 1 → 2
+	if err := IncrementWatchAttempts(sf); err != nil {
+		t.Fatalf("IncrementWatchAttempts (2): %v", err)
+	}
+	s, _ = sf.Read()
+	if s.WatchAttempts != 2 {
+		t.Errorf("WatchAttempts after 2nd: got %d, want 2", s.WatchAttempts)
+	}
+}
+
+func TestIncrementWatchAttemptsFromNonZero(t *testing.T) {
+	sf, _ := newTestStateFile(t)
+	initial := writeInitialState(t, sf)
+	initial.WatchAttempts = 5
+	if err := sf.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := IncrementWatchAttempts(sf); err != nil {
+		t.Fatalf("IncrementWatchAttempts: %v", err)
+	}
+	s, _ := sf.Read()
+	if s.WatchAttempts != 6 {
+		t.Errorf("WatchAttempts: got %d, want 6", s.WatchAttempts)
+	}
+}
+
+func TestIncrementWatchAttemptsError(t *testing.T) {
+	sf := NewStateFile("/nonexistent/dir/state.json")
+	err := IncrementWatchAttempts(sf)
+	if err == nil {
+		t.Error("expected error for unwritable path, got nil")
+	}
+}
+
+func TestResetToRetry(t *testing.T) {
+	sf, _ := newTestStateFile(t)
+	initial := writeInitialState(t, sf)
+	initial.PhaseStatus = "blocked"
+	initial.BlockedReason = "gate failed"
+	initial.BlockedAt = "2026-03-09T12:00:00Z"
+	if err := sf.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ResetToRetry(sf); err != nil {
+		t.Fatalf("ResetToRetry: %v", err)
+	}
+
+	s, _ := sf.Read()
+	if s.PhaseStatus != "pending" {
+		t.Errorf("PhaseStatus: got %q, want pending", s.PhaseStatus)
+	}
+	if s.BlockedReason != "" {
+		t.Errorf("BlockedReason: got %q, want empty", s.BlockedReason)
+	}
+	if s.BlockedAt != "" {
+		t.Errorf("BlockedAt: got %q, want empty", s.BlockedAt)
+	}
+}
+
+func TestResetToRetryPreservesOtherFields(t *testing.T) {
+	sf, _ := newTestStateFile(t)
+	initial := writeInitialState(t, sf)
+	initial.WatchAttempts = 2
+	initial.Notes = "important"
+	initial.PhaseStatus = "blocked"
+	if err := sf.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ResetToRetry(sf); err != nil {
+		t.Fatalf("ResetToRetry: %v", err)
+	}
+
+	s, _ := sf.Read()
+	if s.WatchAttempts != 2 {
+		t.Errorf("WatchAttempts: got %d, want 2", s.WatchAttempts)
+	}
+	if s.Notes != "important" {
+		t.Errorf("Notes: got %q, want 'important'", s.Notes)
+	}
+	if s.PhaseStatus != "pending" {
+		t.Errorf("PhaseStatus: got %q, want pending", s.PhaseStatus)
+	}
+}
+
+func TestResetToRetryIdempotent(t *testing.T) {
+	sf, _ := newTestStateFile(t)
+	initial := writeInitialState(t, sf)
+	initial.PhaseStatus = "pending"
+	initial.BlockedReason = ""
+	initial.BlockedAt = ""
+	if err := sf.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ResetToRetry(sf); err != nil {
+		t.Fatalf("ResetToRetry: %v", err)
+	}
+
+	s, _ := sf.Read()
+	if s.PhaseStatus != "pending" {
+		t.Errorf("PhaseStatus: got %q, want pending", s.PhaseStatus)
+	}
+}
+
+func TestResetToRetryError(t *testing.T) {
+	sf := NewStateFile("/nonexistent/dir/state.json")
+	err := ResetToRetry(sf)
+	if err == nil {
+		t.Error("expected error for unwritable path, got nil")
+	}
+}

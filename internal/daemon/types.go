@@ -40,6 +40,8 @@ type PlanRegistration struct {
 	SubmittedAt     time.Time
 	PhaseStates     map[string]*arc.PhaseState
 	PendingFinalize bool
+	PendingWatch    bool // true while watch interventions are in flight
+	WatchInflight   int  // number of intervention goroutines still running
 
 	// Context (not persisted)
 	Ctx    context.Context
@@ -48,10 +50,11 @@ type PlanRegistration struct {
 
 // PhaseResult is emitted when a phase completes (success or failure).
 type PhaseResult struct {
-	PlanName  string
-	PhaseName string
-	Err       error
-	Finalize  bool
+	PlanName          string
+	PhaseName         string
+	Err               error
+	Finalize          bool
+	WatchIntervention bool // true if this result came from a watch intervention goroutine
 }
 
 // WorkItem represents a unit of work for the scheduler.

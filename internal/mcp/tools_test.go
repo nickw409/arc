@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/daemon"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/plan"
 )
@@ -994,3 +996,142 @@ func TestHandleRunStartsAsync(t *testing.T) {
 	<-job.Done
 }
 
+
+// --- queryDaemonList tests ---
+
+func TestQueryDaemonListDaemonNotRunning(t *testing.T) {
+	plans, err := queryDaemonList("/nonexistent/daemon-arc-test.sock")
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if plans != nil {
+		t.Errorf("expected nil plans when daemon not running, got: %v", plans)
+	}
+}
+
+func TestQueryDaemonListSuccess(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "daemon.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Read request and write fake list response.
+		var req daemon.Request
+		if err := daemon.ReadMessage(conn, &req); err != nil {
+			return
+		}
+		resp := daemon.Response{
+			OK: true,
+			ActivePlans: []daemon.ActivePlanInfo{
+				{
+					PlanName:    "remote-plan",
+					ProjectDir:  "/remote/proj",
+					Phases:      []daemon.PhaseInfo{{Name: "impl", Status: "running"}},
+					SubmittedAt: "2026-03-09T12:00:00Z",
+				},
+			},
+		}
+		daemon.WriteMessage(conn, resp)
+	}()
+
+	plans, err := queryDaemonList(sockPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	if plans[0].PlanName != "remote-plan" {
+		t.Errorf("PlanName: got %q, want remote-plan", plans[0].PlanName)
+	}
+}
+
+func TestHandleRunStatusDaemonReturnsPlans(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "daemon.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req daemon.Request
+		if err := daemon.ReadMessage(conn, &req); err != nil {
+			return
+		}
+		resp := daemon.Response{
+			OK: true,
+			ActivePlans: []daemon.ActivePlanInfo{
+				{
+					PlanName:   "plan-alpha",
+					ProjectDir: "/alpha",
+					Phases: []daemon.PhaseInfo{
+						{Name: "impl", Status: "blocked", BlockedReason: "build failed"},
+					},
+					SubmittedAt: "2026-03-09T12:00:00Z",
+				},
+				{
+					PlanName:    "plan-beta",
+					ProjectDir:  "/beta",
+					Phases:      []daemon.PhaseInfo{{Name: "test", Status: "running"}},
+					SubmittedAt: "2026-03-09T12:01:00Z",
+				},
+			},
+		}
+		daemon.WriteMessage(conn, resp)
+	}()
+
+	// queryDaemonList is the core of the daemon integration in handleRunStatus.
+	// We test it directly since handleRunStatus uses daemon.DefaultSocketPath().
+	plans, err := queryDaemonList(sockPath)
+	if err != nil {
+		t.Fatalf("queryDaemonList: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 plans, got %d", len(plans))
+	}
+	found := false
+	for _, p := range plans {
+		if p.PlanName == "plan-alpha" {
+			for _, ph := range p.Phases {
+				if ph.BlockedReason == "build failed" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("expected to find plan-alpha with blocked reason 'build failed'")
+	}
+}
+
+func TestHandleRunStatusNoDaemonNoPlan(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	// No jobs, daemon not running — should fall through to "No active runs."
+	result, err := callTool(context.Background(), h, h.handleRunStatus, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "No active runs") {
+		t.Fatalf("expected 'No active runs', got: %s", text)
+	}
+}

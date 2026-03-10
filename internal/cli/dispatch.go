@@ -24,8 +24,8 @@ func newDispatchCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dispatch [task description...]",
-		Short: "Analyze, plan, and execute a task autonomously (for automated pipelines)",
-		Long:  "Spawns agents to analyze the task, generate a plan, optionally review it, then run the orchestrator. Designed for automated systems (CI, webhooks). Human users should use arc chat instead.",
+		Short: "Analyze, plan, and submit a development task to the daemon",
+		Long:  "Spawns agents to analyze the task, generate a plan, optionally review it, then submit to the daemon for execution.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskDescription := strings.Join(args, " ")
@@ -79,10 +79,8 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("\n[dispatch] Done. Plan: %s, Complexity: %s\n", result.PlanName, result.Complexity)
-			if result.Usage.CostUSD > 0 {
-				fmt.Printf("[dev] Cost: $%.4f\n", result.Usage.CostUSD)
-			}
+			fmt.Printf("\n[dispatch] Plan %q submitted to daemon (complexity: %s).\n", result.PlanName, result.Complexity)
+			fmt.Printf("[dispatch] Monitor with: arc daemon status %s\n", result.PlanName)
 
 			return nil
 		},

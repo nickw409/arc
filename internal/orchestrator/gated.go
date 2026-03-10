@@ -21,7 +21,7 @@ import (
 
 const (
 	// MaxGatedAttempts is the maximum number of agent sessions per phase (1 initial + retries).
-	MaxGatedAttempts = 4
+	MaxGatedAttempts = 2
 )
 
 // RunPhaseGated executes a phase using the gate-based verification model.
@@ -132,11 +132,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 	var lastGateResult *arc.GateResult
 	var lastDiff string
-	prevCheckpointsPassed := 0
-	var attemptHistory []AttemptRecord
 	var stuckGuidance string // injected into prompt after stuck detection
-	escalationModel := ""    // set when model is escalated
-	stuckEscalationLevel := 0 // tracks how far up the ladder we've gone
 
 	// Structured logger (nil-safe — callers log methods check for nil)
 	pl := opts.PlanLogger
@@ -171,12 +167,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			stuckGuidance = "" // consumed
 		}
 
-		// Apply model escalation if set
 		attemptCfg := sessionCfg
-		if escalationModel != "" {
-			attemptCfg.Model = escalationModel
-			fmt.Printf("[%s] Model escalated to %s\n", opts.PhaseName, escalationModel)
-		}
 
 		// Update state — clear stale activity from previous attempt
 		if updateErr := sf.Update(func(s *arc.PhaseState) error {
@@ -264,8 +255,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			}
 		}
 
-		// Handle stuck detection — if the detector cancelled the context, apply
-		// the escalation ladder instead of normal retry logic.
+		// Handle stuck detection — inject guidance on next attempt
 		if lastStuckSignal != nil && attempt < MaxGatedAttempts {
 			sig := lastStuckSignal
 			fmt.Printf("[%s] Agent stuck: %s\n", opts.PhaseName, sig.Reason)
@@ -277,23 +267,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 				opts.Logger.Warn("failed to persist stuck note", "error", updateErr)
 			}
 
-			// Escalation ladder:
-			// Level 0 → inject guidance
-			// Level 1 → escalate model + guidance
-			// Level 2 → narrow scope to failing checkpoints
-			stuckEscalationLevel++
-			switch stuckEscalationLevel {
-			case 1:
-				stuckGuidance = StuckGuidance(sig)
-				fmt.Printf("[%s] Escalation: injecting stuck guidance\n", opts.PhaseName)
-			case 2:
-				escalationModel = resolveEscalationModel()
-				stuckGuidance = StuckGuidance(sig)
-				fmt.Printf("[%s] Escalation: switching to %s\n", opts.PhaseName, escalationModel)
-			default:
-				stuckGuidance = narrowScopeGuidance(spec, lastGateResult)
-				fmt.Printf("[%s] Escalation: narrowing scope\n", opts.PhaseName)
-			}
+			stuckGuidance = StuckGuidance(sig)
 			continue
 		}
 
@@ -403,56 +377,28 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Capture diff for retry context
 		lastDiff = captureDiff(workDir)
 
-		// Record attempt for strategic agent context
-		attemptHistory = append(attemptHistory, AttemptRecord{
-			Attempt:           attempt,
-			GateOutput:        formatted,
-			CheckpointsPassed: countCheckpointsPassed(gateResult),
-			CheckpointsTotal:  len(gateResult.Assertions) + len(gateResult.Checkpoints),
-			DiffSummary:       lastDiff,
-		})
-
 		// Classify failure
-		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts, prevCheckpointsPassed)
-		prevCheckpointsPassed = countCheckpointsPassed(gateResult)
+		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts)
+
+		// Capture attempt diagnostic for arc_manage show
+		summary := arc.AttemptSummary{
+			Attempt:   attempt,
+			ErrorTier: tierString(tier),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		if gateResult != nil {
+			summary.Assertions = gateResult.Assertions
+		}
+		_ = state.AppendAttemptLog(sf, summary)
 
 		opts.Logger.Info("gate failed",
 			"attempt", attempt,
 			"tier", tier,
-			"checkpoints_passed", prevCheckpointsPassed,
 		)
 
 		switch tier {
 		case TierGiveUp:
 			// Fall through to mark failed below
-		case TierStrategic:
-			// Tier 3: spawn orchestrator agent for strategic diagnosis
-			fmt.Printf("[%s] No progress after %d attempts — running strategic intervention\n",
-				opts.PhaseName, attempt)
-			decision, stratErr := RunStrategicIntervention(ctx, opts, spec, attemptHistory)
-			if stratErr != nil {
-				opts.Logger.Warn("strategic intervention failed", "error", stratErr)
-				continue // fall back to feedback retry
-			}
-			opts.Logger.Info("strategic decision",
-				"action", decision.Action,
-				"phase", opts.PhaseName,
-			)
-			fmt.Printf("[%s] Strategic decision: %s\n", opts.PhaseName, decision.Action)
-
-			if applyStrategicDecision(decision, spec, gateResult) {
-				// Spec or gate was modified — retry with updated context
-				opts.Logger.Info("applied strategic changes, retrying",
-					"phase", opts.PhaseName,
-					"action", decision.Action,
-				)
-				continue
-			}
-			// Strategic agent said give_up or split_phase (not handled inline)
-			if decision.Action == "give_up" {
-				break
-			}
-			continue
 		default:
 			continue
 		}
@@ -750,55 +696,6 @@ func friendlyToolName(t string) string {
 	}
 }
 
-// resolveEscalationModel returns the model to escalate to when stuck.
-func resolveEscalationModel() string {
-	return "claude-opus-4-6"
-}
-
-// narrowScopeGuidance produces a prompt addendum that focuses the agent on
-// just the failing checkpoints/assertions.
-func narrowScopeGuidance(spec *arc.PhaseSpec, lastGate *arc.GateResult) string {
-	var sb strings.Builder
-	sb.WriteString("## Narrowed Scope\n\n")
-	sb.WriteString("Your previous attempts made partial progress. Focus ONLY on the remaining failures below.\n")
-	sb.WriteString("Do NOT re-do work that already passes.\n\n")
-
-	if lastGate != nil {
-		var passing, failing []string
-		for _, cp := range lastGate.Checkpoints {
-			if cp.Status == "pass" {
-				passing = append(passing, cp.Name)
-			} else {
-				failing = append(failing, cp.Name+": "+cp.Output)
-			}
-		}
-		for _, a := range lastGate.Assertions {
-			if a.Passed {
-				passing = append(passing, a.Description)
-			} else {
-				failing = append(failing, a.Description+": "+a.Detail)
-			}
-		}
-
-		if len(passing) > 0 {
-			sb.WriteString("### Already passing (do not break these)\n")
-			for _, p := range passing {
-				sb.WriteString(fmt.Sprintf("- %s\n", p))
-			}
-			sb.WriteString("\n")
-		}
-		if len(failing) > 0 {
-			sb.WriteString("### Still failing (fix these)\n")
-			for _, f := range failing {
-				sb.WriteString(fmt.Sprintf("- %s\n", f))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String()
-}
-
 // transientBackoff returns the delay to wait before a transient retry.
 // Rate-limited retries use exponential backoff (5s * 2^(attempt-1), capped at 60s).
 // Other transient failures use a fixed 2s delay.
@@ -830,4 +727,17 @@ func captureDiff(dir string) string {
 		diff = diff[:4096] + "\n... (truncated)"
 	}
 	return diff
+}
+
+func tierString(t ErrorTier) string {
+	switch t {
+	case TierTransient:
+		return "transient"
+	case TierFeedback:
+		return "feedback"
+	case TierGiveUp:
+		return "giveup"
+	default:
+		return "unknown"
+	}
 }

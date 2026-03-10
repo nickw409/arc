@@ -235,6 +235,31 @@ func (s *Scheduler) Registrations() []*PlanRegistration {
 	return regs
 }
 
+// ListPlans returns per-plan diagnostics for all active registrations, sorted by plan name.
+func (s *Scheduler) ListPlans() []ActivePlanInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	names := make([]string, 0, len(s.registrations))
+	for name := range s.registrations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	plans := make([]ActivePlanInfo, 0, len(s.registrations))
+	for _, name := range names {
+		reg := s.registrations[name]
+		status := s.buildPlanStatus(reg)
+		plans = append(plans, ActivePlanInfo{
+			PlanName:    reg.PlanName,
+			ProjectDir:  reg.ProjectDir,
+			Phases:      status.Phases,
+			SubmittedAt: reg.SubmittedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return plans
+}
+
 func (s *Scheduler) buildPlanStatus(reg *PlanRegistration) *Response {
 	resp := &Response{
 		OK:       true,
@@ -259,6 +284,9 @@ func (s *Scheduler) buildPlanStatus(reg *PlanRegistration) *Response {
 			info.Status = "running"
 		} else {
 			info.Status = ps.PhaseStatus
+			if ps.PhaseStatus == "blocked" {
+				info.BlockedReason = ps.BlockedReason
+			}
 		}
 		resp.Phases = append(resp.Phases, info)
 	}
@@ -351,6 +379,91 @@ func (s *Scheduler) handlePhaseResult(result PhaseResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Handle watch intervention results.
+	if result.WatchIntervention {
+		reg, ok := s.registrations[result.PlanName]
+		if !ok {
+			return
+		}
+
+		// Reload phase state — intervention agent modified files on disk.
+		pd := planDir(reg)
+		updated := orchestrator.LoadPhaseState(pd, result.PhaseName)
+		if updated != nil {
+			reg.PhaseStates[result.PhaseName] = updated
+		}
+
+		reg.WatchInflight--
+		s.logger.Info("watch intervention result",
+			"plan", result.PlanName, "phase", result.PhaseName,
+			"inflight_remaining", reg.WatchInflight)
+
+		if reg.WatchInflight == 0 {
+			reg.PendingWatch = false
+
+			// Re-evaluate plan state now that all interventions have completed.
+			allTerminal := true
+			allComplete := true
+			for _, phase := range reg.Meta.Phases {
+				ps := reg.PhaseStates[phase]
+				if ps == nil {
+					allTerminal = false
+					allComplete = false
+					break
+				}
+				switch ps.PhaseStatus {
+				case "complete":
+					// good
+				case "blocked", "deferred":
+					allComplete = false
+				default:
+					allTerminal = false
+					allComplete = false
+				}
+			}
+
+			if !allTerminal {
+				// Some phases are now pending (ResetToRetry succeeded) — let normal scheduling handle it.
+				s.dirty[result.PlanName] = true
+				select {
+				case s.wake <- struct{}{}:
+				default:
+				}
+			} else if allComplete {
+				reg.PendingFinalize = true
+				s.dirty[result.PlanName] = true
+				select {
+				case s.wake <- struct{}{}:
+				default:
+				}
+			} else {
+				// Still terminal but not all complete. Check for another watch round.
+				var eligible []string
+				for _, phase := range reg.Meta.Phases {
+					ps := reg.PhaseStates[phase]
+					if ps != nil && ps.PhaseStatus == "blocked" && ps.WatchAttempts < MaxWatchAttempts {
+						eligible = append(eligible, phase)
+					}
+				}
+				if len(eligible) > 0 {
+					reg.PendingWatch = true
+					reg.WatchInflight = len(eligible)
+					for _, phase := range eligible {
+						if ps := reg.PhaseStates[phase]; ps != nil {
+							ps.WatchAttempts++
+						}
+					}
+					s.logger.Info("watch: firing interventions (retry round)",
+						"plan", reg.PlanName, "count", len(eligible), "phases", eligible)
+					go s.runWatchInterventions(reg.Ctx, reg, eligible)
+				} else {
+					s.releasePlanLocked(reg, "partial")
+				}
+			}
+		}
+		return
+	}
+
 	reg, ok := s.registrations[result.PlanName]
 	if !ok {
 		return
@@ -422,7 +535,34 @@ func (s *Scheduler) handlePhaseResult(result PhaseResult) {
 		reg.PendingFinalize = true
 		// dirty is already set, dispatchReady will pick it up
 	} else if allTerminal {
-		s.releasePlanLocked(reg, "partial")
+		// Some phases are blocked/deferred. Check for watch-eligible phases.
+		var eligible []string
+		for _, phase := range reg.Meta.Phases {
+			ps, ok := reg.PhaseStates[phase]
+			if !ok || ps == nil {
+				continue
+			}
+			if ps.PhaseStatus == "blocked" && ps.WatchAttempts < MaxWatchAttempts {
+				eligible = append(eligible, phase)
+			}
+		}
+
+		if len(eligible) > 0 {
+			reg.PendingWatch = true
+			reg.WatchInflight = len(eligible)
+			// Eagerly increment in-memory WatchAttempts so eligibility is updated
+			// even if the disk state file write fails in runOneIntervention.
+			for _, phase := range eligible {
+				if ps := reg.PhaseStates[phase]; ps != nil {
+					ps.WatchAttempts++
+				}
+			}
+			s.logger.Info("watch: firing interventions",
+				"plan", reg.PlanName, "count", len(eligible), "phases", eligible)
+			go s.runWatchInterventions(reg.Ctx, reg, eligible)
+		} else {
+			s.releasePlanLocked(reg, "partial")
+		}
 	}
 }
 

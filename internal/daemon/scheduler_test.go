@@ -645,3 +645,73 @@ func TestRateLimitSignalNoFreeSlotsIsNoop(t *testing.T) {
 		t.Fatalf("expected 0 slots (noop), got %d", len(s.slots))
 	}
 }
+
+func TestListPlansSorted(t *testing.T) {
+	s := NewScheduler(2, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Register in unsorted order.
+	for _, name := range []string{"plan-z", "plan-a", "plan-m"} {
+		reg := makeReg(name, []string{"impl"}, nil)
+		s.registrations[name] = reg
+		s.running[name] = nil
+	}
+
+	plans := s.ListPlans()
+
+	if len(plans) != 3 {
+		t.Fatalf("expected 3 plans, got %d", len(plans))
+	}
+	if plans[0].PlanName != "plan-a" {
+		t.Errorf("plans[0]: got %q, want plan-a", plans[0].PlanName)
+	}
+	if plans[1].PlanName != "plan-m" {
+		t.Errorf("plans[1]: got %q, want plan-m", plans[1].PlanName)
+	}
+	if plans[2].PlanName != "plan-z" {
+		t.Errorf("plans[2]: got %q, want plan-z", plans[2].PlanName)
+	}
+	_ = ctx
+}
+
+func TestBuildPlanStatusBlockedReason(t *testing.T) {
+	s := NewScheduler(2, nil, nil)
+
+	reg := makeReg("test-plan", []string{"impl"}, nil)
+	reg.PhaseStates["impl"].PhaseStatus = "blocked"
+	reg.PhaseStates["impl"].BlockedReason = "gate failed"
+	s.registrations["test-plan"] = reg
+	s.running["test-plan"] = nil
+
+	s.mu.Lock()
+	resp := s.buildPlanStatus(reg)
+	s.mu.Unlock()
+
+	if len(resp.Phases) != 1 {
+		t.Fatalf("expected 1 phase, got %d", len(resp.Phases))
+	}
+	if resp.Phases[0].BlockedReason != "gate failed" {
+		t.Errorf("BlockedReason: got %q, want %q", resp.Phases[0].BlockedReason, "gate failed")
+	}
+}
+
+func TestBuildPlanStatusNonBlockedNoReason(t *testing.T) {
+	s := NewScheduler(2, nil, nil)
+
+	reg := makeReg("test-plan", []string{"impl"}, nil)
+	reg.PhaseStates["impl"].PhaseStatus = "running"
+	s.registrations["test-plan"] = reg
+	s.running["test-plan"] = nil
+
+	s.mu.Lock()
+	resp := s.buildPlanStatus(reg)
+	s.mu.Unlock()
+
+	if len(resp.Phases) != 1 {
+		t.Fatalf("expected 1 phase, got %d", len(resp.Phases))
+	}
+	if resp.Phases[0].BlockedReason != "" {
+		t.Errorf("expected empty BlockedReason for non-blocked phase, got %q", resp.Phases[0].BlockedReason)
+	}
+}

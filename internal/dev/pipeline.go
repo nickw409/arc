@@ -11,11 +11,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
-	"github.com/nwiley/arc/internal/orchestrator"
+	"github.com/nwiley/arc/internal/daemon"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
 )
@@ -33,6 +34,7 @@ type DevOptions struct {
 	CommandName     string // agent binary name for testing
 	SkipReview      bool
 	AutoYes         bool   // skip clarification questions (for CI)
+	SocketPath      string // daemon socket path; empty means daemon.DefaultSocketPath()
 }
 
 // DevResult holds the outcome of an arc dispatch run.
@@ -70,7 +72,7 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	result := &DevResult{}
 
 	// 1. Discovery
-	fmt.Println("[dev] Analyzing task...")
+	fmt.Println("[dispatch] Analyzing task...")
 	discoveryOut, err := RunDiscovery(ctx, DiscoveryOptions{
 		TaskDescription: opts.TaskDescription,
 		Model:           opts.Model,
@@ -114,8 +116,8 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 
 	switch complexity {
 	case ComplexitySimple:
-		fmt.Printf("[dev] Complexity: simple (direct execution)\n")
-		fmt.Printf("[dev] Creating plan: %s\n", planName)
+		fmt.Printf("[dispatch] Complexity: simple (direct execution)\n")
+		fmt.Printf("[dispatch] Creating plan: %s\n", planName)
 
 		_, err := GeneratePlan(GenerateOptions{
 			PlanName:  planName,
@@ -133,8 +135,8 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 		}
 
 	case ComplexityMedium:
-		fmt.Printf("[dev] Complexity: medium (%s workflow)\n", workflowType)
-		fmt.Printf("[dev] Creating plan: %s\n", planName)
+		fmt.Printf("[dispatch] Complexity: medium (%s workflow)\n", workflowType)
+		fmt.Printf("[dispatch] Creating plan: %s\n", planName)
 
 		_, err := GeneratePlan(GenerateOptions{
 			PlanName:  planName,
@@ -158,11 +160,11 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 		}
 
 	case ComplexityComplex:
-		fmt.Printf("[dev] Complexity: complex (custom workflow)\n")
+		fmt.Printf("[dispatch] Complexity: complex (custom workflow)\n")
 
 		var proposal *ArchitectProposal
 
-		fmt.Println("[dev] Generating architecture proposals...")
+		fmt.Println("[dispatch] Generating architecture proposals...")
 		archOut, err := RunArchitects(ctx, ArchitectOptions{
 			Discovery:   discovery,
 			Model:       opts.Model,
@@ -179,7 +181,7 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 
 		result.Proposal = proposal
 
-		fmt.Printf("[dev] Creating plan: %s\n", planName)
+		fmt.Printf("[dispatch] Creating plan: %s\n", planName)
 
 		_, err = GeneratePlan(GenerateOptions{
 			PlanName:  planName,
@@ -204,51 +206,37 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 		}
 	}
 
-	// Capture HEAD before orchestration for diff computation.
-	beforeCommit, _ := getHeadCommit(opts.ProjectDir)
-
-	// Launch orchestrator
-	fmt.Println("[dev] Launching orchestrator...")
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 14400
+	// Submit plan to daemon for execution.
+	fmt.Println("[dispatch] Submitting to daemon...")
+	socketPath := opts.SocketPath
+	if socketPath == "" {
+		socketPath = daemon.DefaultSocketPath()
 	}
-
-	_, err = orchestrator.Launch(ctx, orchestrator.LaunchOptions{
-		PlanName:   planName,
-		PlansDir:   plansDir,
-		ArcHome:    opts.ArcHome,
-		ProjectDir: opts.ProjectDir,
-		Config:     opts.Config,
-		Logger:     opts.Logger,
-		Timeout:    timeout,
+	if err := daemon.EnsureRunning(socketPath); err != nil {
+		return result, fmt.Errorf("starting daemon: %w", err)
+	}
+	client, err := daemon.Connect(socketPath, 5*time.Second)
+	if err != nil {
+		return result, fmt.Errorf("connecting to daemon: %w", err)
+	}
+	defer client.Close()
+	resp, err := client.Submit(daemon.Request{
+		Plan:    planName,
+		Project: opts.ProjectDir,
 	})
 	if err != nil {
-		return result, fmt.Errorf("orchestrator failed: %w", err)
+		return result, fmt.Errorf("submitting plan to daemon: %w", err)
 	}
-
-	// Post-orchestration code review (non-blocking).
-	if beforeCommit != "" {
-		reviewOut, reviewErr := runPostReview(ctx, opts, result, beforeCommit, planName, plansDir)
-		if reviewErr != nil {
-			opts.Logger.Warn("code review failed, continuing", "error", reviewErr)
-		} else if reviewOut != nil {
-			result.CodeReview = reviewOut
-			result.Usage = result.Usage.Add(reviewOut.Usage)
-
-			// Save review output to plan directory.
-			planDir := filepath.Join(plansDir, planName)
-			if saveErr := saveCodeReview(planDir, reviewOut); saveErr != nil {
-				opts.Logger.Warn("failed to save code review", "error", saveErr)
-			}
-		}
+	if !resp.OK {
+		return result, fmt.Errorf("daemon rejected plan: %s", resp.Error)
 	}
+	fmt.Printf("[dispatch] Plan %q submitted (%d phases queued).\n", planName, resp.QueuedPhases)
 
 	return result, nil
 }
 
 func runReviewForPlan(ctx context.Context, opts DevOptions, planDir, planName, plansDir string, result *DevResult) error {
-	fmt.Println("[dev] Running adversarial review...")
+	fmt.Println("[dispatch] Running adversarial review...")
 
 	meta, err := state.ReadPlan(planDir)
 	if err != nil {
@@ -469,12 +457,12 @@ func printReviewSummary(review *CodeReviewOutput) {
 	}
 
 	if len(review.Issues) == 0 {
-		fmt.Println("[dev] Code review: no issues found")
+		fmt.Println("[dispatch] Code review: no issues found")
 	} else {
-		fmt.Printf("[dev] Code review: %d critical, %d warnings, %d suggestions\n", critical, warnings, suggestions)
+		fmt.Printf("[dispatch] Code review: %d critical, %d warnings, %d suggestions\n", critical, warnings, suggestions)
 	}
 	if review.Summary != "" {
-		fmt.Printf("[dev] Review summary: %s\n", review.Summary)
+		fmt.Printf("[dispatch] Review summary: %s\n", review.Summary)
 	}
 }
 
