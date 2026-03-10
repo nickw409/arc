@@ -385,3 +385,64 @@ func TestHandleSubmit_ConditionalReview(t *testing.T) {
 	}
 	orchestrator.ReleasePlanLock(planDir)
 }
+
+func TestHandleListEmpty(t *testing.T) {
+	sched := testScheduler()
+	cfg := tempDaemonConfig(t)
+
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+
+	go HandleConnection(c2, sched, &cfg)
+
+	_ = WriteMessage(c1, Request{Cmd: "list"})
+	var resp Response
+	if err := ReadMessage(c1, &resp); err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	if !resp.OK {
+		t.Errorf("expected OK=true, got error: %s", resp.Error)
+	}
+	if len(resp.ActivePlans) != 0 {
+		t.Errorf("expected 0 active plans, got %d", len(resp.ActivePlans))
+	}
+}
+
+func TestHandleListWithPlans(t *testing.T) {
+	sched := testScheduler()
+	cfg := tempDaemonConfig(t)
+
+	// Register two plans directly in the scheduler.
+	for _, name := range []string{"plan-b", "plan-a"} {
+		reg := makeReg(name, []string{"impl"}, nil)
+		reg.ProjectDir = "/proj/" + name
+		sched.mu.Lock()
+		sched.registrations[name] = reg
+		sched.running[name] = nil
+		sched.mu.Unlock()
+	}
+
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+
+	go HandleConnection(c2, sched, &cfg)
+
+	_ = WriteMessage(c1, Request{Cmd: "list"})
+	var resp Response
+	if err := ReadMessage(c1, &resp); err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	if !resp.OK {
+		t.Errorf("expected OK=true, got error: %s", resp.Error)
+	}
+	if len(resp.ActivePlans) != 2 {
+		t.Fatalf("expected 2 active plans, got %d", len(resp.ActivePlans))
+	}
+	// Sorted: plan-a first.
+	if resp.ActivePlans[0].PlanName != "plan-a" {
+		t.Errorf("ActivePlans[0].PlanName: got %q, want plan-a", resp.ActivePlans[0].PlanName)
+	}
+	if resp.ActivePlans[1].PlanName != "plan-b" {
+		t.Errorf("ActivePlans[1].PlanName: got %q, want plan-b", resp.ActivePlans[1].PlanName)
+	}
+}

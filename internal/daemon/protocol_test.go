@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +86,55 @@ func TestWriteReadResponse(t *testing.T) {
 	}
 	if got.Phases[0].TestsPassing != 10 {
 		t.Errorf("Phases[0].TestsPassing: got %d, want 10", got.Phases[0].TestsPassing)
+	}
+}
+
+func TestActivePlanInfoJSONRoundTrip(t *testing.T) {
+	original := ActivePlanInfo{
+		PlanName:   "my-plan",
+		ProjectDir: "/proj",
+		Phases: []PhaseInfo{
+			{Name: "impl", Status: "blocked", BlockedReason: "gate failed"},
+		},
+		SubmittedAt: "2026-03-09T12:00:00Z",
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// blocked_reason must appear in JSON.
+	if !strings.Contains(string(data), "blocked_reason") {
+		t.Errorf("expected blocked_reason in JSON, got: %s", data)
+	}
+
+	var got ActivePlanInfo
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.PlanName != original.PlanName {
+		t.Errorf("PlanName: got %q, want %q", got.PlanName, original.PlanName)
+	}
+	if got.ProjectDir != original.ProjectDir {
+		t.Errorf("ProjectDir: got %q, want %q", got.ProjectDir, original.ProjectDir)
+	}
+	if got.SubmittedAt != original.SubmittedAt {
+		t.Errorf("SubmittedAt: got %q, want %q", got.SubmittedAt, original.SubmittedAt)
+	}
+	if len(got.Phases) != 1 || got.Phases[0].BlockedReason != "gate failed" {
+		t.Errorf("Phases[0].BlockedReason: got %q, want %q", got.Phases[0].BlockedReason, "gate failed")
+	}
+}
+
+func TestPhaseInfoBlockedReasonOmitEmpty(t *testing.T) {
+	info := PhaseInfo{Name: "test", Status: "running", BlockedReason: ""}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "blocked_reason") {
+		t.Errorf("expected blocked_reason to be omitted when empty, got: %s", data)
 	}
 }

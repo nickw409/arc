@@ -42,6 +42,11 @@ func (c *Client) Drain() (*Response, error) {
 	return c.roundTrip(Request{Cmd: "drain"})
 }
 
+// List requests the list of all active plans from the daemon.
+func (c *Client) List() (*Response, error) {
+	return c.roundTrip(Request{Cmd: "list"})
+}
+
 // Close closes the underlying connection.
 func (c *Client) Close() error {
 	return c.conn.Close()

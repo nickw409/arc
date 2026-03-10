@@ -17,6 +17,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/config"
+	"github.com/nwiley/arc/internal/daemon"
 	"github.com/nwiley/arc/internal/guide"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/plan"
@@ -765,6 +766,23 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 		// List all active jobs — no I/O needed, build output under lock.
 		if len(h.jobs) == 0 {
 			h.mu.Unlock()
+			socketPath := daemon.DefaultSocketPath()
+			plans, err := queryDaemonList(socketPath)
+			if err == nil && len(plans) > 0 {
+				var sb strings.Builder
+				sb.WriteString("Active plans (daemon):\n")
+				for _, p := range plans {
+					fmt.Fprintf(&sb, "\n[%s] %s\n", p.PlanName, p.ProjectDir)
+					for _, ph := range p.Phases {
+						line := fmt.Sprintf("  %-20s %s", ph.Name, ph.Status)
+						if ph.BlockedReason != "" {
+							line += " — " + ph.BlockedReason
+						}
+						sb.WriteString(line + "\n")
+					}
+				}
+				return mcp.NewToolResultText(sb.String()), nil
+			}
 			return mcp.NewToolResultText("No active runs."), nil
 		}
 		var out bytes.Buffer
@@ -843,6 +861,24 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 		}
 		return mcp.NewToolResultText(out.String()), nil
 	}
+}
+
+// queryDaemonList connects to the daemon and returns all active plans.
+// Returns (nil, nil) if the daemon is not running.
+func queryDaemonList(socketPath string) ([]daemon.ActivePlanInfo, error) {
+	client, err := daemon.Connect(socketPath, 500*time.Millisecond)
+	if err != nil {
+		return nil, nil // daemon not running
+	}
+	defer client.Close()
+	resp, err := client.List()
+	if err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		return nil, fmt.Errorf("daemon list: %s", resp.Error)
+	}
+	return resp.ActivePlans, nil
 }
 
 func (h *handlerContext) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

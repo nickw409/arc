@@ -46,11 +46,18 @@ func HandleConnection(conn net.Conn, sched *Scheduler, cfg *DaemonConfig) {
 	case "drain":
 		sched.Drain()
 		resp = Response{OK: true}
+	case "list":
+		resp = handleList(sched)
 	default:
 		resp = Response{OK: false, Error: fmt.Sprintf("unknown command: %q", req.Cmd)}
 	}
 
 	_ = WriteMessage(conn, resp)
+}
+
+func handleList(sched *Scheduler) Response {
+	plans := sched.ListPlans()
+	return Response{OK: true, ActivePlans: plans}
 }
 
 func handleSubmit(req Request, sched *Scheduler, cfg *DaemonConfig) Response {

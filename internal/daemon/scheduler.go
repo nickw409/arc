@@ -235,6 +235,31 @@ func (s *Scheduler) Registrations() []*PlanRegistration {
 	return regs
 }
 
+// ListPlans returns per-plan diagnostics for all active registrations, sorted by plan name.
+func (s *Scheduler) ListPlans() []ActivePlanInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	names := make([]string, 0, len(s.registrations))
+	for name := range s.registrations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	plans := make([]ActivePlanInfo, 0, len(s.registrations))
+	for _, name := range names {
+		reg := s.registrations[name]
+		status := s.buildPlanStatus(reg)
+		plans = append(plans, ActivePlanInfo{
+			PlanName:    reg.PlanName,
+			ProjectDir:  reg.ProjectDir,
+			Phases:      status.Phases,
+			SubmittedAt: reg.SubmittedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return plans
+}
+
 func (s *Scheduler) buildPlanStatus(reg *PlanRegistration) *Response {
 	resp := &Response{
 		OK:       true,
@@ -259,6 +284,9 @@ func (s *Scheduler) buildPlanStatus(reg *PlanRegistration) *Response {
 			info.Status = "running"
 		} else {
 			info.Status = ps.PhaseStatus
+			if ps.PhaseStatus == "blocked" {
+				info.BlockedReason = ps.BlockedReason
+			}
 		}
 		resp.Phases = append(resp.Phases, info)
 	}

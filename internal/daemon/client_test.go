@@ -140,3 +140,67 @@ func TestClientSubmit(t *testing.T) {
 	// Cleanup
 	os.Remove(sockPath)
 }
+
+func TestClientList(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "test.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		var req Request
+		if err := ReadMessage(conn, &req); err != nil {
+			return
+		}
+		if req.Cmd != "list" {
+			WriteMessage(conn, Response{OK: false, Error: "expected list command"})
+			return
+		}
+		WriteMessage(conn, Response{
+			OK: true,
+			ActivePlans: []ActivePlanInfo{
+				{
+					PlanName:    "my-plan",
+					ProjectDir:  "/proj",
+					Phases:      []PhaseInfo{{Name: "impl", Status: "running"}},
+					SubmittedAt: "2026-03-09T12:00:00Z",
+				},
+			},
+		})
+	}()
+
+	client, err := Connect(sockPath, 5e9)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer client.Close()
+
+	resp, err := client.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !resp.OK {
+		t.Errorf("expected OK=true, got error: %s", resp.Error)
+	}
+	if len(resp.ActivePlans) != 1 {
+		t.Fatalf("expected 1 active plan, got %d", len(resp.ActivePlans))
+	}
+	if resp.ActivePlans[0].PlanName != "my-plan" {
+		t.Errorf("PlanName: got %q, want my-plan", resp.ActivePlans[0].PlanName)
+	}
+	if len(resp.ActivePlans[0].Phases) != 1 || resp.ActivePlans[0].Phases[0].Status != "running" {
+		t.Errorf("unexpected phase data: %+v", resp.ActivePlans[0].Phases)
+	}
+
+	os.Remove(sockPath)
+}
