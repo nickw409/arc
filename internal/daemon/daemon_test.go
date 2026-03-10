@@ -206,8 +206,8 @@ func TestShutdownIdempotent(t *testing.T) {
 
 func TestDefaultDaemonConfig(t *testing.T) {
 	cfg := DefaultDaemonConfig()
-	if cfg.MaxParallel != 3 {
-		t.Errorf("expected MaxParallel 3, got %d", cfg.MaxParallel)
+	if cfg.MaxParallel != 7 {
+		t.Errorf("expected MaxParallel 7, got %d", cfg.MaxParallel)
 	}
 	if cfg.SocketPath == "" {
 		t.Error("SocketPath should not be empty")

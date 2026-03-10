@@ -1,27 +1,32 @@
 # Orchestrator
 
-Top-level execution engine that drives an entire plan run. Manages phase scheduling, worktrees, and the state-machine loop for each phase.
+Top-level execution engine that drives an entire plan run. Manages phase scheduling, worktrees, and the gate-based loop for each phase.
 
-**Start here:** `orchestrator.go` for the plan-level loop, `phase.go` for per-phase state machine execution.
+**Start here:** `orchestrator.go` for the plan-level entry point, `gated.go` for per-phase execution.
 
 ## File Map
 
 | File | Purpose |
 |------|---------|
-| `orchestrator.go` | `Launch()` — the top-level entry point. Acquires PID lock, creates shared worktree, schedules phases by dependency, runs them concurrently, merges worktree on completion. |
-| `phase.go` | `RunPhase()` — runs a single phase through all states to terminal. Contains `postIterationActions` (test running, adversary tracking, commits) and `handleDispute` (AI-judged test disputes). |
-| `judge.go` | `JudgeDispute()` — spawns a minimal 1-turn, 0-tools Claude agent to determine if a test or the implementation is wrong. |
-| `direct.go` | `runDirectPlanLoop()` — single-session execution for "direct" workflow. All phases run in one Claude invocation (400 turns, 2hr timeout). |
+| `orchestrator.go` | `Launch()` — the top-level entry point. Acquires PID lock, creates worktree, calls `LaunchGated()`. |
+| `launch_gated.go` | `LaunchGated()` — phase scheduling, dependency ordering, worktrees, regression suite. |
+| `gated.go` | `RunPhaseGated()` — per-phase session→gate→retry loop. `MaxGatedAttempts=2`. |
+| `phase_types.go` | `RunPhaseOptions`, `commitPhase`, `discoverNewTestFiles`. |
+| `classify.go` | `classifyGateFailure()`, `classifySpawnError()` — error tier classification (Transient/Feedback/GiveUp). |
+| `adversary.go` | Post-plan adversarial test session. |
+| `commitment_audit.go` | `CommitmentAudit` — verifies agent committed promised changes. |
+| `observe.go` | `LoadPhaseState()` and state observation helpers. |
 | `report.go` | `generateCompletionReport()` — writes `COMPLETION_REPORT.md` with per-phase status, iterations, tests, costs. |
+| `judge.go` | `JudgeDispute()` — spawns a minimal AI agent to resolve test disputes. |
 
 ## Key Design Decisions
 
-- **`Launch` branches on workflow type**: `"direct"` delegates to `runDirectPlanLoop` (single agent session); all others use the concurrent phase scheduling loop.
-- **Phase scheduling**: `state.PhasesReady()` finds all phases whose dependencies are satisfied, then launches them all as concurrent goroutines. `StopOnFailure` cancels sibling phases via a shared `batchCtx`.
+- **`MaxGatedAttempts=2`**: each phase gets at most 2 gated attempts before being marked failed.
+- **Error tiers**: `classifyGateFailure` buckets failures into Transient (retry immediately), Feedback (retry with gate output), or GiveUp (abort phase).
+- **Gate assertion routing**: after each agent session, gate assertions are evaluated; result determines retry vs. complete vs. escalate.
+- **Phase scheduling**: `LaunchGated` finds all phases whose dependencies are satisfied, then launches them as concurrent goroutines. `StopOnFailure` cancels sibling phases via a shared context.
 - **Lock uses signal-0 probing** (`syscall.Signal(0)`) to detect stale locks from crashed runs.
-- **Double terminal-state check** in `RunPhase`: handles the case where an agent updates state.json to terminal but then crashes/returns non-zero — without this, the phase would be incorrectly blocked.
 - **`discoverNewTestFiles`** only scans top-level `workDir` (not recursive), looking for `_test.go` suffix — hardcoded to Go conventions.
-- **`adversarialPostActions`**: on `bugs_found`, increments `AdversaryRound`, discovers new test files, stores them under `AdversaryTests["round_N"]`.
 
 ## Call Graph
 
@@ -29,13 +34,12 @@ Top-level execution engine that drives an entire plan run. Manages phase schedul
 Launch (orchestrator.go)
   ├── acquireLock / releaseLock
   ├── worktree.Create / MergeBack
-  ├── state.PhasesReady (scheduling)
-  ├── runDirectPlanLoop (direct.go)     ← "direct" workflow only
-  └── RunPhase (phase.go)              ← all other workflows (concurrent per phase)
-        ├── pipeline.RunState           ← one state iteration
-        ├── handleDispute → JudgeDispute (judge.go)
-        ├── runner.RunAll               ← test execution
-        ├── gitops.Commit               ← post-phase commit
-        └── postIterationActions / adversarialPostActions
+  └── LaunchGated (launch_gated.go)
+        └── RunPhaseGated (gated.go)     ← concurrent per phase
+              ├── classifyGateFailure / classifySpawnError (classify.go)
+              ├── CommitmentAudit (commitment_audit.go)
+              ├── JudgeDispute (judge.go)
+              ├── gitops.Commit
+              └── commitPhase / discoverNewTestFiles (phase_types.go)
   └── generateCompletionReport (report.go)
 ```

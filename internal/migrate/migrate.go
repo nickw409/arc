@@ -169,6 +169,7 @@ func MigrateState(data []byte) (*arc.PhaseState, error) {
 	result.Disputes = extractSlice[arc.Dispute](raw, "disputes", defaults.Disputes)
 	result.LastClearedDisputes = extractSlice[arc.Dispute](raw, "last_cleared_disputes", defaults.LastClearedDisputes)
 	result.VerdictsHistory = extractSlice[arc.VerdictEntry](raw, "verdicts_history", defaults.VerdictsHistory)
+	result.AttemptLog = extractSlice[arc.AttemptSummary](raw, "attempt_log", defaults.AttemptLog)
 
 	// Ensure workflow type has a default
 	if result.WorkflowType == "" {

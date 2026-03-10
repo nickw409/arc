@@ -1,6 +1,6 @@
 # Dev
 
-Implements `arc dispatch` — auto-generates a plan from a task description using a pipeline of AI agents, then launches the orchestrator.
+Implements `arc dispatch` — auto-generates a plan from a task description using a pipeline of AI agents, then submits it to the daemon.
 
 **Start here:** `pipeline.go` for the top-level flow.
 
@@ -8,7 +8,7 @@ Implements `arc dispatch` — auto-generates a plan from a task description usin
 
 | File | Purpose |
 |------|---------|
-| `pipeline.go` | `RunDev()` — top-level pipeline: discovery → complexity validation → clarification → plan generation → review → orchestration → code review. |
+| `pipeline.go` | `RunDev()` — top-level pipeline: discovery → complexity validation → clarification → plan generation → review → orchestration. |
 | `types.go` | Shared types: `TaskComplexity` (simple/medium/complex), `FileRef`, `PhaseSpec`, `Clarification`, `DiscoveryResult`, `ArchitectProposal`. |
 | `discovery.go` | `RunDiscovery()` — spawns agent with Read/Glob/Grep/LS tools to analyze the task and codebase. Outputs structured JSON with complexity, approach, suggested phases. |
 | `architect.go` | `RunArchitects()` — spawns 3 concurrent agents with approaches (minimal/clean/pragmatic). Each proposes architecture and writes plan.md content. `SelectProposal` prefers "pragmatic". |
@@ -29,12 +29,11 @@ Task Description
       simple:  GeneratePlan (direct workflow)
       medium:  GeneratePlan (built-in workflow) + optional review
       complex: RunArchitects (3 parallel) → SelectProposal → GeneratePlan (custom workflow) + optional review
-  → orchestrator.Launch
-  → RunCodeReview (on git diff)
+  → daemon.EnsureRunning → client.Submit (non-blocking)
 ```
 
 ## Key Details
 
 - `GeneratePlanName` strips stop words, takes first 4 words, truncates to 40 chars, appends `-N` suffix on conflicts.
-- `BuildCustomWorkflow` generates YAML with work→review state pairs per phase (verdicts: approved/concerns).
+- `BuildCustomWorkflow` generates plan.md content for complex multi-phase plans using 3 parallel architect agents.
 - Discovery agent output is JSON inside a markdown code fence — `ParseDiscoveryOutput` finds the first `` ```json `` block.

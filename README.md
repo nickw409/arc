@@ -1,6 +1,6 @@
 # Arc
 
-A workflow engine for orchestrating complex, multi-phase software engineering tasks through AI agents. It breaks large work into phases, drives each phase through a state machine (QA, review, implementation), and enforces rules so agents stay on track.
+A workflow engine for orchestrating complex, multi-phase software engineering tasks through AI agents. It breaks large work into phases, drives each phase through a session → gate → retry loop, and enforces rules so agents stay on track.
 
 ## Getting Started
 
@@ -48,20 +48,20 @@ arc chat --model opus           # Use a specific model
 
 The chat agent can plan, review, run, and monitor Arc plans conversationally. Orchestrator runs are async — `arc_run` returns immediately and you can poll with `arc_run_status` or cancel with `arc_run_cancel`.
 
-### Quick Start with `arc dev`
+### Quick Start with `arc dispatch`
 
-For the fastest path from idea to code, use `arc dev`:
+For the fastest path from idea to code, use `arc dispatch`:
 
 ```bash
-arc dev "Add user authentication with JWT tokens"
+arc dispatch "Add user authentication with JWT tokens"
 ```
 
-This runs the full pipeline automatically: discovers relevant code, classifies task complexity, generates a plan with phases, runs adversarial review, and launches the orchestrator. Options:
+This runs the full pipeline automatically: discovers relevant code, classifies task complexity, generates a plan with phases, runs adversarial review, and submits to the daemon for execution. Options:
 
 ```bash
-arc dev --skip-review "Fix the login bug"          # Skip adversarial review
-arc dev --timeout 7200 "Refactor the auth module"  # Custom timeout (seconds)
-arc dev --interactive "Add caching layer"           # Prompt before review/launch
+arc dispatch --skip-review "Fix the login bug"          # Skip adversarial review
+arc dispatch --timeout 7200 "Refactor the auth module"  # Custom timeout (seconds)
+arc dispatch --interactive "Add caching layer"           # Prompt before review/launch
 ```
 
 ### Create and Run a Plan Manually
@@ -79,7 +79,6 @@ arc run my-feature                               # Execute through orchestrator
 For step-by-step control instead of full automation:
 
 ```bash
-arc iterate my-feature phase1             # Run one iteration (advances current state)
 arc status my-feature                     # Check plan/phase status
 arc manage my-feature phase1 show         # Inspect phase state.json
 ```
@@ -240,16 +239,12 @@ agents:
 ```
 Plan (e.g., "fix-wasm-rng")
   └── Phase: investigate-variance
-  │     └── States: research → draft → review → complete
   └── Phase: port-pcg-algorithm
-  │     └── States: impl.act → check.adversary → complete
   └── Phase: verify-cross-engine
-        └── States: impl.act → check.adversary → complete
 ```
 
 - **Plan** — The overall work request. Contains one or more phases.
-- **Phase** — A self-contained unit of work with its own state machine, test suite, and `state.json`.
-- **State** — The current position in a workflow's state machine (e.g., `impl.act`, `check.adversary`).
+- **Phase** — A self-contained unit of work with its own gate assertions, test suite, and `state.json`.
 
 ### Execution Flow
 
@@ -260,133 +255,53 @@ arc plan             Create plan directory structure and phase scaffolding
 arc review           Adversarial review validates each phase plan
     │
     ▼
-arc run              Launch the orchestrator agent (read-only, cannot edit code)
+arc run              Launch the orchestrator (submits to daemon)
     │
     ▼
   ┌────────────────────────────────────────────┐
   │  For each phase:                           │
-  │    iterate  ──► spawn sub-agent            │
-  │        │        (writes code/tests)        │
-  │        ▼                                   │
-  │    extract verdict from review output      │
+  │    spawn agent session                     │
   │        │                                   │
   │        ▼                                   │
-  │    resolve next state ──► advance or loop  │
+  │    evaluate gate assertions                │
   │        │                                   │
-  │        ▼                                   │
-  │    run hooks (run_tests, commit, etc.)     │
+  │        ├── pass ──► mark complete          │
+  │        │                                   │
+  │        └── fail ──► retry (up to limit)    │
   └────────────────────────────────────────────┘
     │
     ▼
 COMPLETION_REPORT.md  Generated when all phases finish
 ```
 
-### The Iteration Pipeline
+### Execution Model
 
-Each iteration runs an 8-step pipeline:
-
-1. **Check intervention** — Exit if human input is needed.
-2. **Check escalation** — If stuck, trigger escalation actions (analyze, switch model, auto-split).
-3. **Check pre-constraints** — Verify required input artifacts exist and iteration limits aren't exceeded.
-4. **Render prompt and spawn agent** — Build the prompt from the workflow's template, create an `iteration_NNN/` directory, and launch a sub-agent.
-5. **Extract verdict** — Parse the sub-agent's output for a verdict (e.g., `approved`, `gaps_found`).
-6. **Check post-constraints** — Verify required output artifacts were produced.
-7. **Run after-hooks** — Execute actions like `run_tests` or `commit`.
-8. **Update state** — Increment iteration count, resolve the next state, track stuck iterations.
+Each phase runs agent sessions until gate assertions pass or `MaxGatedAttempts` (2) is exhausted. On exhaustion the phase is marked **blocked**. The daemon watcher monitors blocked phases and auto-retries them up to 3 times before giving up.
 
 ## Work Types
 
-Five workflow types, each with its own state machine and prompt set:
+`workflow_type` is metadata only — it does not define a phase sequence or control flow. All phases run through the same `session → gate → retry` loop regardless of type.
 
-| Type | Entry State | Description |
-|------|-------------|-------------|
-| **feature** | `impl.act` | Implement with tests, then harden with one-shot adversarial review |
-| **bugfix** | `investigate` | Reproduce the bug, write regression tests, fix |
-| **investigation** | `research` | Research only, no code changes, outputs documentation |
-| **refactor** | `characterize` | Characterization tests must pass before and after changes |
-| **performance** | `baseline` | Benchmarks drive optimization, not unit tests |
-| **adversarial** | `impl` | Implement freely, then adversary writes tests to find bugs |
-| **audit** | `adversary` | Adversarial security/quality audit with fix loop |
-| **direct** | `impl` | Single-phase execution for simple tasks (used by `arc dev`) |
+| Type | Typical Use |
+|------|-------------|
+| **feature** | New functionality |
+| **bugfix** | Fixing incorrect behavior |
+| **investigation** | Research and exploration, outputs documentation |
+| **refactor** | Restructuring without behavior change |
+| **performance** | Optimization driven by benchmarks |
+| **direct** | Simple single-phase task (used by `arc dispatch`) |
 
-Workflows are defined as YAML state machines in `internal/resources/workflows/`. The **adversarial**, **audit**, and **direct** workflows are composed from reusable blocks (see Composable Blocks below).
+## Gate Assertions
 
-## Workflow YAML
+Gates enforce objective acceptance criteria after each agent session. Five assertion types are supported:
 
-Workflows are data, not code. A simplified example:
-
-```yaml
-name: feature
-version: 4
-
-pipeline:
-  - block: act
-    name: impl
-    params:
-      prompt: "prompts/feature/impl.md"
-      max_turns: "200"
-  - block: adversary
-    name: check
-    run_once: true      # adversary gets one pass; auto-skips on re-entry
-    skip_exit: no_bugs_found
-    params: {max_turns: "30"}
-    route:
-      bugs_found: impl          # loop back to fix
-      no_bugs_found: complete
-
-terminal_states: [complete, blocked]
-```
-
-Key capabilities by schema version:
-
-| Version | Feature |
-|---------|---------|
-| V1 | Linear state transitions |
-| V2 | Conditional branching (verdict determines next state) |
-| V3 | Parameters and Handlebars-style template variables |
-| V4 | Hooks, constraints, escalation triggers, intervention |
-| V5 | Parallel state execution with join strategies |
-| V6 | Composable block pipeline with `run_once`/`skip_exit` |
-
-All versions are backwards compatible — V1 workflows run on the V5 engine.
-
-## Composable Blocks
-
-Workflows can be composed from reusable, parameterized blocks instead of writing monolithic YAML state machines. A block is a self-contained group of states with entry/exit points:
-
-```yaml
-# blocks/adversary.yaml
-name: adversary
-params:
-  max_rounds: {default: 5}
-  max_turns: {default: 30}
-entry: adversary
-exits: [done]
-states:
-  - name: adversary
-    verdicts: [bugs_found, no_bugs_found]
-    constraints:
-      max_iterations: ${max_rounds}
-    next:
-      bugs_found: adversary
-      no_bugs_found: $done
-```
-
-Workflows compose blocks into pipelines:
-
-```yaml
-# workflows/adversarial.yaml
-name: adversarial
-pipeline:
-  - block: impl
-    params: {max_turns: 45}
-  - block: adversary
-    params: {max_rounds: 3}
-```
-
-The loader resolves blocks into a flat state machine at load time — the runtime always operates on a flat state machine. States are namespaced by block (e.g., `adversary.adversary`). Exit points wire to the next block's entry.
-
-Built-in blocks: `impl`, `qa-loop`, `review`, `adversary`.
+| Type | Description |
+|------|-------------|
+| `file_exists` | Checks that a file path exists on disk |
+| `grep` | Searches for a pattern in the codebase |
+| `build_passes` | Runs a build command and checks it exits 0 |
+| `test_exists` | Verifies a named test function exists in source |
+| `no_untracked` | Fails if untracked files remain (catches debug artifacts) |
 
 ## Git Worktree Isolation
 
@@ -398,9 +313,9 @@ arc run my-plan --worktree    # Each phase gets its own worktree branch
 
 Each phase gets a branch like `arc/my-plan/phase-name` in a temp directory. On completion, the worktree branch is merged back into the main branch. On failure, the branch is preserved for inspection but the worktree directory is cleaned up.
 
-## `arc dev` Pipeline
+## `arc dispatch` Pipeline
 
-`arc dev` automates the full lifecycle from task description to running code:
+`arc dispatch` automates the full lifecycle from task description to running code:
 
 ```
 Task description
@@ -416,7 +331,7 @@ Complexity routing:
                  custom workflow generated, adversarial review
     │
     ▼
-Orchestrator launch ──► Executes plan phases
+Daemon submission ──► Executes plan phases
     │
     ▼
 SUMMARY.md ──► Generated on completion with stats, cost, files changed
@@ -451,30 +366,15 @@ Each phase maintains a `state.json` file:
 ```json
 {
   "phase": "port-pcg",
-  "current_state": "impl",
+  "status": "blocked",
   "iteration": 5,
-  "stuck_iterations": 2,
   "tests_passing": 8,
   "tests_total": 12,
-  "verdicts_history": ["gaps_found", "approved", "concerns", "concerns"],
-  "disputes": [],
-  "escalation_history": ["analyze_stuck@3"]
+  "gate_status": "fail",
+  "notes": ""
 }
 ```
 
-## Stuck Detection and Escalation
-
-A phase is considered **stuck** when the same tests fail for 2+ consecutive iterations with >80% similar error signatures. The escalation ladder:
-
-| Stuck Count | Action |
-|-------------|--------|
-| 0-2 | Normal iteration |
-| 3 | Spawn a read-only investigator agent to diagnose the issue |
-| 4 | Spawn a targeted fix agent |
-| 5 | Switch to a more capable model (opus) |
-| 6+ | Attempt to auto-split the phase into smaller sub-phases |
-
-If max iterations are exceeded, the system requests human intervention.
 
 ## Plan Review
 
@@ -523,9 +423,10 @@ Each phase directory (`.plans/active/<plan>/phases/<phase>/`) contains:
 
 | File | Written By | Purpose |
 |------|------------|---------|
-| `plan.md` | Human / arc dev | Phase specification |
-| `state.json` | Pipeline | Current state, iteration count, test results, verdicts history |
-| `*-memory.md` | Agent | Notes saved between iterations of the same state |
+| `plan.md` | Human / arc dispatch | Phase specification |
+| `state.json` | Orchestrator | Current status, iteration count, test results, gate status |
+| `spec.yaml` | Human / arc plan | Phase spec with gate assertions and role |
+| `gate-status.json` | Gate evaluator | Gate assertion results |
 
 ## Directory Structure
 
@@ -535,31 +436,29 @@ arc/
 ├── internal/         All Go packages
 │   ├── adapter/      Multi-provider AI adapter system (claude, codex, generic)
 │   ├── agent/        Agent spawning
-│   ├── arc/          Core types (verdict, result, errors, state, gate, spec)
-│   ├── block/        Composable workflow block loading & composition
+│   ├── arc/          Core types (result, errors, state, gate, spec)
 │   ├── cli/          Cobra command definitions
 │   ├── config/       .arc.yaml parsing
 │   ├── daemon/       Background orchestration daemon
-│   ├── dev/          Arc dev pipeline (discovery → architecture → plan generation)
+│   ├── dev/          Arc dispatch pipeline (discovery → architecture → plan generation)
+│   ├── gate/         Gate assertion evaluation
 │   ├── gitops/       Git commit operations
 │   ├── guide/        Agent-facing reference guide
+│   ├── intelligence/ Project intelligence store
 │   ├── logging/      Structured logger
 │   ├── mcp/          MCP server and tool handlers (arc chat backend)
 │   ├── migrate/      State migration
 │   ├── monitor/      Live TUI (bubbletea)
 │   ├── orchestrator/ Top-level orchestrator loop
-│   ├── pipeline/     Phase iteration, escalation, hooks
 │   ├── plan/         Plan creation, status & summary generation
 │   ├── project/      Project detection & init
-│   ├── prompt/       Prompt rendering & extraction
-│   ├── resources/    Embedded workflows, prompts, templates & blocks
+│   ├── prompt/       Prompt rendering
+│   ├── resources/    Embedded prompts, templates & guides
 │   ├── review/       Adversarial plan review
-│   ├── runner/       Subprocess runner (claude CLI)
 │   ├── selfupdate/   GitHub Releases-based self-update
 │   ├── state/        Phase state (state.json) management
 │   ├── testcmd/      Test command abstraction (resolution + execution)
 │   ├── validate/     AI-powered test quality audit
-│   ├── workflow/     Workflow YAML loading & validation
 │   └── worktree/     Git worktree isolation for parallel execution
 ├── testdata/         Test fixtures
 └── docs/             Detailed documentation
@@ -590,9 +489,7 @@ your-project/
 | Document | Content |
 |----------|---------|
 | `docs/ARCHITECTURE.md` | System design goals and component overview |
-| `docs/WORKFLOW_SCHEMA.md` | Complete YAML specification |
 | `docs/STATE_SCHEMA.md` | `state.json` field definitions |
 | `docs/ADVERSARY_SYSTEM.md` | Plan review design |
 | `docs/PLANNING_PROCESS.md` | How to write phase plans |
-| `docs/INTERVENTION_SYSTEM.md` | Escape hatches and overrides |
 | `docs/PROMPT_TEMPLATES.md` | Template variable system |

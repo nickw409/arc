@@ -388,7 +388,7 @@ func runPostReview(ctx context.Context, opts DevOptions, result *DevResult, befo
 		return nil, fmt.Errorf("collecting plan content: %w", err)
 	}
 
-	fmt.Println("[dev] Running code review...")
+	fmt.Println("[dispatch] Running code review...")
 	reviewOut, err := RunCodeReview(ctx, ReviewOptions{
 		PlanDir:     filepath.Join(plansDir, planName),
 		ProjectDir:  opts.ProjectDir,

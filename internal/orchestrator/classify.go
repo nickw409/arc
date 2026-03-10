@@ -9,9 +9,9 @@ const (
 	// TierTransient — rate limit, timeout, crash with no output. Auto-retry.
 	TierTransient ErrorTier = 1
 	// TierFeedback — gate failed with actionable feedback. Retry with context.
-	TierFeedback ErrorTier = 2
+	TierFeedback  ErrorTier = 2
 	// TierGiveUp — exhausted all options.
-	TierGiveUp ErrorTier = 3
+	TierGiveUp    ErrorTier = 3
 )
 
 // classifySpawnError determines the retry tier for an agent spawn failure.

@@ -62,7 +62,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		}
 	}
 	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
-		return fmt.Errorf("phase %q has no spec content — fill in spec.yaml before running (checkpoints optional for simple fixes, but spec field is required)", opts.PhaseName)
+		return fmt.Errorf("phase %q has no spec content — fill in the ## Spec block in plan.md before running (checkpoints optional for simple fixes, but spec field is required)", opts.PhaseName)
 	}
 
 	// Resolve adapter
@@ -98,11 +98,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		defer turnsFile.Close()
 	}
 
-	// Stuck detection
 	role := arc.DefaultRole(spec.Role)
-	stuckDetector := NewStuckDetector(role, 0)
-	var stuckCancel context.CancelFunc // set per-attempt to cancel stuck sessions
-	var lastStuckSignal *StuckSignal   // set when stuck detection fires
 
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: turnBudget,
@@ -115,24 +111,11 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 					_, _ = turnsFile.Write(line)
 				}
 			}
-			if sig := stuckDetector.Record(ev); sig != nil {
-				lastStuckSignal = sig
-				opts.Logger.Warn("stuck agent detected",
-					"phase", opts.PhaseName,
-					"pattern", sig.Pattern,
-					"reason", sig.Reason,
-				)
-				_ = state.SetActivity(sf, "stuck: "+sig.Reason)
-				if stuckCancel != nil {
-					stuckCancel()
-				}
-			}
 		},
 	}
 
 	var lastGateResult *arc.GateResult
 	var lastDiff string
-	var stuckGuidance string // injected into prompt after stuck detection
 
 	// Structured logger (nil-safe — callers log methods check for nil)
 	pl := opts.PlanLogger
@@ -142,29 +125,19 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			return ctx.Err()
 		}
 
-		// Reset stuck detector for each attempt
-		stuckDetector.Reset()
-		lastStuckSignal = nil
-
 		if pl != nil {
 			pl.PhaseStarted(opts.PhaseName, attempt)
 		}
 
 		// Build prompt
 		var agentPrompt string
-		if attempt == 1 && stuckGuidance == "" {
+		if attempt == 1 {
 			agentPrompt, err = buildPhasePrompt(spec, opts.PlanName, projectCtx)
 		} else {
 			agentPrompt, err = buildRetryPrompt(spec, opts.PlanName, projectCtx, attempt, lastGateResult, lastDiff)
 		}
 		if err != nil {
 			return fmt.Errorf("building prompt (attempt %d): %w", attempt, err)
-		}
-
-		// Append stuck guidance if we detected stuck on previous attempt
-		if stuckGuidance != "" {
-			agentPrompt = agentPrompt + "\n\n" + stuckGuidance
-			stuckGuidance = "" // consumed
 		}
 
 		attemptCfg := sessionCfg
@@ -189,17 +162,12 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		fmt.Printf("[%s] Attempt %d/%d — spawning %s agent\n",
 			opts.PhaseName, attempt, MaxGatedAttempts, agentAdapter.Name())
 
-		// Create per-attempt context for stuck cancellation
-		var attemptCtx context.Context
-		attemptCtx, stuckCancel = context.WithCancel(ctx)
-
 		// Spawn agent
 		if pl != nil {
 			pl.AgentSpawned(opts.PhaseName, attempt,
 				fmt.Sprintf("adapter=%s turns=%d", agentAdapter.Name(), attemptCfg.MaxTurns))
 		}
-		result, spawnErr := agentAdapter.Spawn(attemptCtx, agentPrompt, workDir, attemptCfg)
-		stuckCancel() // always clean up
+		result, spawnErr := agentAdapter.Spawn(ctx, agentPrompt, workDir, attemptCfg)
 
 		// Persist the agent PID from the result so crash recovery can kill stale
 		// processes. Written immediately after spawn returns (process has exited),
@@ -253,22 +221,6 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 						"max", opts.Config.Budget.MaxCost)
 				}
 			}
-		}
-
-		// Handle stuck detection — inject guidance on next attempt
-		if lastStuckSignal != nil && attempt < MaxGatedAttempts {
-			sig := lastStuckSignal
-			fmt.Printf("[%s] Agent stuck: %s\n", opts.PhaseName, sig.Reason)
-
-			if updateErr := sf.Update(func(s *arc.PhaseState) error {
-				s.Notes = FormatStuckNote(sig, attempt)
-				return nil
-			}); updateErr != nil {
-				opts.Logger.Warn("failed to persist stuck note", "error", updateErr)
-			}
-
-			stuckGuidance = StuckGuidance(sig)
-			continue
 		}
 
 		// Handle spawn-level failures

@@ -223,7 +223,7 @@ func DefaultDaemonConfig() DaemonConfig {
 		PIDPath:     filepath.Join(dir, "daemon.pid"),
 		LockPath:    filepath.Join(dir, "daemon.lock"),
 		StatePath:   filepath.Join(dir, "daemon-state.json"),
-		MaxParallel: 3,
+		MaxParallel: 7,
 	}
 }
 

@@ -1,13 +1,16 @@
 # Prompt
 
-Handles the boundary between the pipeline and AI agents: preparing inputs (rendering prompts) and parsing outputs (extracting verdicts).
+Handles prompt rendering for gate-based phases and verdict extraction for AI verifier phases.
 
 ## File Map
 
 | File | Purpose |
 |------|---------|
 | `render.go` | Turns Markdown prompt templates into concrete strings. `Render` (from path) and `RenderString` (from bytes) are the entry points. Contains `preprocessHandlebars` which translates Handlebars-like syntax to Go templates. |
-| `extract.go` | `ExtractVerdict` — parses agent output for `## Verdict` section, extracts the verdict token. Takes the **last** occurrence (agents may revise mid-output). |
+| `gate_render.go` | `RenderGatePrompt()`, `RenderRetryPrompt()` — builds agent prompts for gate phases. |
+| `gate_types.go` | `GatePromptData`, `RetryPromptData` — template data types for gate prompts. |
+| `context.go` | `LoadProjectContext()` — loads project context string from disk. |
+| `extract.go` | `ExtractVerdict` — parses agent output for `## Verdict` section, extracts the verdict token. Used by AI verifier phases (review/investigate/audit roles). Takes the **last** occurrence (agents may revise mid-output). |
 
 ## Key Design Decisions
 

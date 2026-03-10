@@ -7,6 +7,9 @@ Pure types package — no I/O, no external dependencies beyond stdlib and `gopkg
 | File | Purpose |
 |------|---------|
 | `state.go` | `PhaseState` (per-phase runtime state serialized to `state.json`) and `PlanMeta` (plan-level metadata in `plan.json`). The largest file. |
+| `spec.go` | `PhaseSpec` type — the structured plan spec parsed from plan.md. |
+| `gate.go` | `GateResult`, `GateAssertion` types — gate evaluation results. |
+| `adapter.go` | `AdapterConfig`, `AdapterSpec` types — adapter configuration. |
 | `workflow.go` | `Workflow`, `StateConfig`, `Transition`, `ParallelGroup`, `EscalationRule`, `HookConfig` — internal representation of workflow definitions. |
 | `unmarshal.go` | Custom `UnmarshalYAML` for `Transition` — handles polymorphic `next:` field (scalar string, map, or null). |
 | `verdict.go` | `Verdict` type and constants (`bugs_found`, `no_bugs_found`, `approved`, etc.). `ParseVerdict` normalizes raw agent output. |
@@ -16,7 +19,6 @@ Pure types package — no I/O, no external dependencies beyond stdlib and `gopkg
 
 ## Key Design Decisions
 
-- **`States` and `ParallelGroups` are `yaml:"-"`** in `Workflow` — not decoded from YAML directly. `States` is populated post-load (YAML uses a map, internal uses a list), `ParallelGroups` is synthesized by block composition.
 - **`NewPhaseState` initializes all slices to non-nil** — prevents JSON `null` for empty lists.
 - **`NewPlanMeta` creates phases with no dependencies** — phases run in parallel by default; dependencies must be declared explicitly.
 - **`Transition` key `""` for unconditional transitions** — linear flow uses empty-string verdict key, unifying the routing logic.
