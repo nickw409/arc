@@ -11,6 +11,7 @@ import (
 // scope issues are least critical.
 var adversaryPriority = map[string]int{
 	"executability": 0,
+	"integration":   0,
 	"consistency":   1,
 	"coverage":      2,
 	"ambiguity":     3,
@@ -186,34 +187,19 @@ func ParseSuggestions(adversaryName string, output string) []Suggestion {
 	return suggestions
 }
 
-// MergeSuggestions takes suggestions from multiple adversaries, sorts by priority,
-// and drops lower-priority suggestions whose Original text overlaps with a
-// higher-priority suggestion's Original text.
+// MergeSuggestions sorts suggestions by priority. Conflict detection is deferred
+// to ApplySuggestions which uses try-and-verify: each suggestion is applied only
+// if its Original text still exists in the document after prior replacements.
 func MergeSuggestions(suggestions []Suggestion) []Suggestion {
 	if len(suggestions) == 0 {
 		return nil
 	}
 
-	// Sort by priority (stable to preserve order within same adversary)
 	sorted := make([]Suggestion, len(suggestions))
 	copy(sorted, suggestions)
 	stableSortSuggestions(sorted)
 
-	var merged []Suggestion
-	for _, s := range sorted {
-		conflict := false
-		for _, accepted := range merged {
-			if overlaps(accepted.Original, s.Original) {
-				conflict = true
-				break
-			}
-		}
-		if !conflict {
-			merged = append(merged, s)
-		}
-	}
-
-	return merged
+	return sorted
 }
 
 // ApplySuggestions applies merged suggestions to plan content via string replacement.
@@ -227,13 +213,6 @@ func ApplySuggestions(planMD string, suggestions []Suggestion) (string, int) {
 		}
 	}
 	return planMD, applied
-}
-
-// overlaps returns true if the two strings share any common text that would
-// cause a conflict when both are used as find targets in the same document.
-// A conflict occurs when one original contains the other, or they are identical.
-func overlaps(a, b string) bool {
-	return a == b || strings.Contains(a, b) || strings.Contains(b, a)
 }
 
 // stableSortSuggestions sorts suggestions by priority (ascending) using insertion sort

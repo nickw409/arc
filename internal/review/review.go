@@ -111,6 +111,20 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 				result.Status = "conditional"
 			}
 			result.Iteration = history.Iterations[opts.Phase]
+			// Populate verdicts from cache so the CLI can display results.
+			for _, adv := range adversaries {
+				if phaseHistory, ok := history.Phases[opts.Phase]; ok {
+					if entry, ok := phaseHistory[adv.Name]; ok {
+						result.Verdicts[adv.Name] = AdversaryResult{
+							Name:         adv.Name,
+							Verdict:      entry.Verdict,
+							Status:       "cached",
+							CachedStatus: entry.Status,
+							Required:     adv.Required,
+						}
+					}
+				}
+			}
 			break
 		}
 

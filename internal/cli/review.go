@@ -176,11 +176,11 @@ func newReviewCmd() *cobra.Command {
 					if v.Status == "failed" || v.Status == "error" {
 						statusMark = "FAIL"
 					} else if v.Status == "cached" && v.CachedStatus == "passed" {
-						statusMark = "CACHED"
+						statusMark = "PASS (cached)"
 					} else if v.Status == "cached" {
-						statusMark = "FAIL*"
+						statusMark = "FAIL (cached)"
 					}
-					fmt.Printf("    [%s] %s: verdict=%s\n", statusMark, v.Name, v.Verdict)
+					fmt.Printf("    [%s] %s: %s\n", statusMark, v.Name, v.Verdict)
 				}
 				fmt.Printf("  Phase result: %s\n\n", pr.Result.Status)
 

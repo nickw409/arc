@@ -194,26 +194,39 @@ func TestMergeSuggestionsPriorityOrder(t *testing.T) {
 	}
 
 	merged := MergeSuggestions(suggestions)
-	if len(merged) != 1 {
-		t.Fatalf("expected 1 merged (conflict resolved), got %d", len(merged))
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 merged (conflict deferred to apply), got %d", len(merged))
 	}
+	// Higher priority (lower number) should be first
 	if merged[0].Adversary != "executability" {
-		t.Fatalf("expected executability to win conflict, got %q", merged[0].Adversary)
+		t.Fatalf("expected executability first, got %q", merged[0].Adversary)
 	}
 }
 
-func TestMergeSuggestionsOverlapDetection(t *testing.T) {
+func TestMergeSuggestionsOverlapDeferredToApply(t *testing.T) {
+	// With try-and-verify, MergeSuggestions returns all suggestions sorted by priority.
+	// Overlap conflicts are resolved during ApplySuggestions when the second
+	// suggestion's Original text no longer exists after the first was applied.
 	suggestions := []Suggestion{
 		{Adversary: "consistency", Priority: 1, Original: "func Foo() error {\n    return nil\n}", Suggested: "func Foo() error {\n    return fmt.Errorf(\"x\")\n}"},
 		{Adversary: "coverage", Priority: 2, Original: "return nil", Suggested: "return fmt.Errorf(\"covered\")"},
 	}
 
 	merged := MergeSuggestions(suggestions)
-	if len(merged) != 1 {
-		t.Fatalf("expected 1 merged (overlap detected), got %d", len(merged))
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 merged (overlap deferred to apply), got %d", len(merged))
 	}
-	if merged[0].Adversary != "consistency" {
-		t.Fatalf("expected consistency to win (higher priority), got %q", merged[0].Adversary)
+
+	// Verify that applying to real content resolves the conflict naturally:
+	// consistency replaces the whole block first, then coverage's "return nil"
+	// no longer exists so it's skipped.
+	planMD := "func Foo() error {\n    return nil\n}\n"
+	result, applied := ApplySuggestions(planMD, merged)
+	if applied != 1 {
+		t.Fatalf("expected 1 applied (overlap resolved at apply time), got %d", applied)
+	}
+	if result != "func Foo() error {\n    return fmt.Errorf(\"x\")\n}\n" {
+		t.Fatalf("unexpected result: %q", result)
 	}
 }
 
@@ -279,6 +292,7 @@ func TestAdversaryPriorities(t *testing.T) {
 		priority int
 	}{
 		{"executability", 0},
+		{"integration", 0},
 		{"consistency", 1},
 		{"coverage", 2},
 		{"ambiguity", 3},
@@ -641,23 +655,3 @@ func TestFilterByConfidence_NilInput(t *testing.T) {
 	}
 }
 
-func TestOverlaps(t *testing.T) {
-	tests := []struct {
-		a, b string
-		want bool
-	}{
-		{"abc", "abc", true},
-		{"abc def", "abc", true},
-		{"abc", "abc def", true},
-		{"abc", "xyz", false},
-		{"hello world", "world", true},
-		{"world", "hello world", true},
-	}
-
-	for _, tt := range tests {
-		got := overlaps(tt.a, tt.b)
-		if got != tt.want {
-			t.Errorf("overlaps(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
-		}
-	}
-}
