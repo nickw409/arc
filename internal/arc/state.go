@@ -48,6 +48,8 @@ type PhaseState struct {
 	AdversaryTests      map[string][]string `json:"adversary_tests,omitempty"` // round → test file paths
 	Checksum            string              `json:"checksum,omitempty"`
 	AgentPID            int                 `json:"agent_pid,omitempty"`
+	WatchAttempts       int                 `json:"watch_attempts,omitempty"`
+	AttemptLog          []AttemptSummary    `json:"attempt_log"`
 }
 
 type Iteration struct {
@@ -111,6 +113,16 @@ type Intervention struct {
 	Options     []string `json:"options,omitempty"`
 }
 
+// AttemptSummary records diagnostic info from a single agent attempt.
+// Stored in PhaseState.AttemptLog so arc_manage show is self-sufficient for diagnosis.
+type AttemptSummary struct {
+	Attempt    int               `json:"attempt"`
+	ErrorTier  string            `json:"error_tier"`
+	Assertions []AssertionResult `json:"assertions,omitempty"`
+	AgentTail  string            `json:"agent_tail,omitempty"`
+	Timestamp  string            `json:"timestamp"`
+}
+
 // NewPhaseState creates a PhaseState with all slices/maps initialized (never nil).
 func NewPhaseState(plan, phase, workflowType string) *PhaseState {
 	return &PhaseState{
@@ -127,6 +139,7 @@ func NewPhaseState(plan, phase, workflowType string) *PhaseState {
 		VerdictsHistory:     []VerdictEntry{},
 		TestFiles:           []string{},
 		ExecutedEscalations: []string{},
+		AttemptLog:          []AttemptSummary{},
 	}
 }
 

@@ -419,6 +419,17 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts, prevCheckpointsPassed)
 		prevCheckpointsPassed = countCheckpointsPassed(gateResult)
 
+		// Capture attempt diagnostic for arc_manage show
+		summary := arc.AttemptSummary{
+			Attempt:   attempt,
+			ErrorTier: tierString(tier),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		if gateResult != nil {
+			summary.Assertions = gateResult.Assertions
+		}
+		_ = state.AppendAttemptLog(sf, summary)
+
 		opts.Logger.Info("gate failed",
 			"attempt", attempt,
 			"tier", tier,
@@ -833,4 +844,17 @@ func captureDiff(dir string) string {
 		diff = diff[:4096] + "\n... (truncated)"
 	}
 	return diff
+}
+
+func tierString(t ErrorTier) string {
+	switch t {
+	case TierTransient:
+		return "transient"
+	case TierFeedback:
+		return "feedback"
+	case TierGiveUp:
+		return "giveup"
+	default:
+		return "unknown"
+	}
 }

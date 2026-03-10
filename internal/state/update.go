@@ -157,6 +157,14 @@ func UpdateParallelBranch(sf *StateFile, branch, status string, exitCode int) er
 	})
 }
 
+// AppendAttemptLog appends a gate attempt summary to the phase's attempt_log.
+func AppendAttemptLog(sf *StateFile, summary arc.AttemptSummary) error {
+	return sf.Update(func(s *arc.PhaseState) error {
+		s.AttemptLog = append(s.AttemptLog, summary)
+		return nil
+	})
+}
+
 // FinishParallel sets the final verdict and finished_at timestamp on parallel execution.
 func FinishParallel(sf *StateFile, verdict string) error {
 	return sf.Update(func(s *arc.PhaseState) error {
