@@ -5,7 +5,7 @@ import (
 )
 
 func TestNewDevCmd_RequiresArg(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	if err == nil {
@@ -14,7 +14,7 @@ func TestNewDevCmd_RequiresArg(t *testing.T) {
 }
 
 func TestNewDevCmd_AcceptsDescription(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	// We just test that argument parsing succeeds — execution will fail
 	// because there's no project context, but that's fine.
 	err := cmd.ParseFlags([]string{})
@@ -27,14 +27,14 @@ func TestNewDevCmd_AcceptsDescription(t *testing.T) {
 }
 
 func TestNewDevCmd_MultipleArgs(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	if err := cmd.Args(cmd, []string{"add", "OAuth", "support"}); err != nil {
 		t.Fatalf("expected multiple args to be accepted: %v", err)
 	}
 }
 
 func TestNewDevCmd_InteractiveFlag(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	cmd.SetArgs([]string{"--interactive", "test task"})
 	if err := cmd.ParseFlags([]string{"--interactive"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -49,7 +49,7 @@ func TestNewDevCmd_InteractiveFlag(t *testing.T) {
 }
 
 func TestNewDevCmd_SkipReviewFlag(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	if err := cmd.ParseFlags([]string{"--skip-review"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestNewDevCmd_SkipReviewFlag(t *testing.T) {
 }
 
 func TestNewDevCmd_TimeoutFlag(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	if err := cmd.ParseFlags([]string{"--timeout", "3600"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestNewDevCmd_TimeoutFlag(t *testing.T) {
 }
 
 func TestNewDevCmd_ModelFlag(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	if err := cmd.ParseFlags([]string{"--model", "sonnet"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestNewDevCmd_ModelFlag(t *testing.T) {
 }
 
 func TestNewDevCmd_DefaultTimeout(t *testing.T) {
-	cmd := newDevCmd()
+	cmd := newDispatchCmd()
 	val, err := cmd.Flags().GetInt("timeout")
 	if err != nil {
 		t.Fatalf("getting timeout flag: %v", err)

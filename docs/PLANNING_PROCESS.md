@@ -33,12 +33,12 @@ After creating the plan, you fill in each `spec.yaml` with:
 - `gate.assertions`: what "done" looks like (file_exists, test_exists, build_passes, ...)
 - `checkpoints`: named milestones with test commands
 
-## Automated Planning (`arc dev`)
+## Automated Planning (`arc dispatch`)
 
-`arc dev` automates the full lifecycle from a task description:
+`arc dispatch` automates the full lifecycle from a task description:
 
 ```
-arc dev "Add JWT authentication to the user API"
+arc dispatch "Add JWT authentication to the user API"
 ```
 
 ### Pipeline

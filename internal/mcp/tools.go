@@ -82,6 +82,8 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("workflow_type", mcp.Description("Workflow type (stored in plan metadata): feature, bugfix, investigation, refactor, etc. Defaults to 'feature'.")),
 		mcp.WithArray("phases", mcp.Required(), mcp.WithStringItems(), mcp.Description("Ordered list of phase names")),
 		mcp.WithString("role", mcp.Description("Default role for all phases: impl, review, investigate, or audit (default: impl)")),
+		mcp.WithObject("plan_content", mcp.Description("Optional map of phase_name to markdown content. Phases in the map get that content as their plan.md instead of the default template.")),
+		mcp.WithObject("dependencies", mcp.Description("Optional map of phase_name to array of dependency phase names. Applied after plan creation.")),
 	), h.handlePlan)
 
 	s.AddTool(mcp.NewTool("arc_run",
@@ -97,6 +99,7 @@ func (h *handlerContext) registerTools(s *server.MCPServer) {
 		mcp.WithString("plan_name", mcp.Required(), mcp.Description("Name of the plan to review")),
 		mcp.WithString("phase", mcp.Description("Review a single phase instead of all phases")),
 		mcp.WithString("model", mcp.Description("Model override for review agents")),
+		mcp.WithNumber("max_iterations", mcp.Description("Maximum review iterations per phase (default: 2)")),
 	), h.handleReview)
 
 	s.AddTool(mcp.NewTool("arc_manage",
@@ -233,15 +236,46 @@ func (h *handlerContext) handlePlan(_ context.Context, req mcp.CallToolRequest) 
 		}
 	}
 
+	// Parse plan_content: map of phase_name → markdown string
+	var planContent map[string]string
+	if rawContent, ok := args["plan_content"].(map[string]any); ok && len(rawContent) > 0 {
+		planContent = make(map[string]string, len(rawContent))
+		for k, v := range rawContent {
+			if s, ok := v.(string); ok {
+				planContent[k] = s
+			}
+		}
+	}
+
 	meta, err := plan.Create(plan.CreateOptions{
 		PlansDir:     h.plansDir(),
 		Name:         name,
 		Phases:       phases,
 		WorkflowType: workflowType,
 		PhaseRoles:   phaseRoles,
+		PlanContent:  planContent,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Apply dependencies if provided
+	if rawDeps, ok := args["dependencies"].(map[string]any); ok && len(rawDeps) > 0 {
+		for phaseName, rawDepList := range rawDeps {
+			depList, ok := rawDepList.([]any)
+			if !ok {
+				return mcp.NewToolResultError(fmt.Sprintf("dependencies[%q] must be an array of phase names", phaseName)), nil
+			}
+			var deps []string
+			for _, d := range depList {
+				if s, ok := d.(string); ok {
+					deps = append(deps, s)
+				}
+			}
+			if err := plan.UpdateDeps(h.plansDir(), name, phaseName, deps); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("setting dependencies for phase %q: %v", phaseName, err)), nil
+			}
+		}
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("Created plan %q with phases: %s (workflow: %s)", meta.Name, strings.Join(meta.Phases, ", "), meta.WorkflowType)), nil
@@ -357,6 +391,10 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 	planName, _ := args["plan_name"].(string)
 	phaseFilter, _ := args["phase"].(string)
 	model, _ := args["model"].(string)
+	maxIterations := 2
+	if v, ok := args["max_iterations"].(float64); ok && v > 0 {
+		maxIterations = int(v)
+	}
 
 	if err := validateName(planName, "plan_name"); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -469,7 +507,7 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 				Phase:          p,
 				Model:          model,
 				Logger:         h.logger,
-				MaxIterations:  1,
+				MaxIterations:  maxIterations,
 				ProjectContext: projectCtx,
 			})
 			resultsCh <- phaseResult{Phase: p, Result: result, Err: err}

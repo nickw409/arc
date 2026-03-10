@@ -19,7 +19,7 @@ internal/
   cli/                Cobra command definitions (arc plan, arc run, arc manage, ...)
   config/             .arc.yaml parsing
   daemon/             Background orchestration daemon (persistent, multi-plan)
-  dev/                arc dev pipeline (discovery → architecture → plan generation)
+  dev/                arc dispatch pipeline (discovery → architecture → plan generation)
   gate/               Gate assertion evaluation (file_exists, grep, build_passes, ...)
   gitops/             Git commit operations
   guide/              Agent-facing reference guide (arc guide)
@@ -94,7 +94,7 @@ Plan: fix-wasm-rng
 
 ## Execution Model
 
-### 1. Plan creation (`arc plan` / `arc dev`)
+### 1. Plan creation (`arc plan` / `arc dispatch`)
 
 `plan.Create` always writes `spec.yaml` for every phase. The gate orchestrator requires `spec.yaml` — plans without it cannot run.
 
@@ -234,7 +234,7 @@ Gate prompts (`gate/impl.md`, `gate/retry.md`, etc.) use raw Go template syntax 
 
 Dev pipeline prompts (`dev/discovery.md`, `dev/architect.md`, etc.) use the Handlebars shim via `prompt.Render`.
 
-## Automated Plan Generation (`arc dev`, `internal/dev/`)
+## Automated Plan Generation (`arc dispatch`, `internal/dev/`)
 
 ```
 Task description

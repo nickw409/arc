@@ -94,7 +94,7 @@ func TestAddPhase(t *testing.T) {
 		t.Fatalf("AddPhase: %v", err)
 	}
 
-	// Verify spec.yaml was written
+	// Verify spec was written to plan.md
 	got, err := ReadSpec(plansDir, "my-plan", "phase-b")
 	if err != nil {
 		t.Fatalf("ReadSpec after AddPhase: %v", err)

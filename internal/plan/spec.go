@@ -183,35 +183,72 @@ func ExtractSpecFromPlanMD(planMD string) (*arc.PhaseSpec, bool) {
 	return &spec, true
 }
 
-// SyncSpecFromPlanMD reads plan.md for a phase, extracts the ## Spec yaml block,
-// and writes it to spec.yaml. Returns true if spec.yaml was updated, false if no
-// parseable spec block was found. Does not return an error if plan.md is absent.
-func SyncSpecFromPlanMD(plansDir, planName, phaseName string) (bool, error) {
-	phaseDir := filepath.Join(plansDir, planName, "phases", phaseName)
-	data, err := os.ReadFile(filepath.Join(phaseDir, "plan.md"))
-	if err != nil {
-		return false, nil // no plan.md — not an error
-	}
-
-	spec, ok := ExtractSpecFromPlanMD(string(data))
-	if !ok {
-		return false, nil
-	}
-
-	if err := WriteSpec(plansDir, planName, phaseName, spec); err != nil {
-		return false, err
-	}
-	return true, nil
+// SyncSpecFromPlanMD is a no-op stub retained for backward compatibility.
+// Plan.md is now the authoritative spec source; no sync to spec.yaml is needed.
+func SyncSpecFromPlanMD(_, _, _ string) (bool, error) {
+	return false, nil
 }
 
-// specPath returns the path to spec.yaml for a phase.
-func specPath(plansDir, planName, phaseName string) string {
-	return filepath.Join(plansDir, planName, "phases", phaseName, "spec.yaml")
+// ReplaceSpecInPlanMD finds the ```yaml block under the ## Spec heading in planMD
+// and replaces it with the marshaled spec. Returns the updated planMD string.
+// Returns an error if the ## Spec heading or a ```yaml block after it are not found.
+func ReplaceSpecInPlanMD(planMD string, spec *arc.PhaseSpec) (string, error) {
+	data, err := yaml.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("marshal spec: %w", err)
+	}
+	lines := strings.Split(planMD, "\n")
+
+	specIdx := -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "## Spec") {
+			specIdx = i
+			break
+		}
+	}
+	if specIdx < 0 {
+		return "", fmt.Errorf("## Spec heading not found in plan.md")
+	}
+
+	openIdx := -1
+	for i := specIdx + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			break // another heading — stop looking
+		}
+		if strings.TrimSpace(lines[i]) == "```yaml" {
+			openIdx = i
+			break
+		}
+	}
+	if openIdx < 0 {
+		return "", fmt.Errorf("```yaml block not found after ## Spec in plan.md")
+	}
+
+	closeIdx := -1
+	for i := openIdx + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			closeIdx = i
+			break
+		}
+	}
+	if closeIdx < 0 {
+		return "", fmt.Errorf("closing ``` not found after yaml block in plan.md")
+	}
+
+	newBlock := []string{"```yaml"}
+	newBlock = append(newBlock, strings.Split(strings.TrimRight(string(data), "\n"), "\n")...)
+	newBlock = append(newBlock, "```")
+
+	result := make([]string, 0, len(lines))
+	result = append(result, lines[:openIdx]...)
+	result = append(result, newBlock...)
+	result = append(result, lines[closeIdx+1:]...)
+	return strings.Join(result, "\n"), nil
 }
 
 // WriteSpec writes a PhaseSpec to the phase directory.
 // It updates the ## Spec YAML block in plan.md (so ReadSpec can read it back),
-// and also writes spec.yaml for backward compatibility with older tooling.
+// and also writes spec.yaml for backward compatibility with external callers.
 // The plan.md update is skipped when the spec has no meaningful content
 // (empty spec field) to avoid polluting template or custom plan.md files.
 func WriteSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error {
@@ -222,14 +259,12 @@ func WriteSpec(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error 
 	yamlContent := string(data)
 
 	// Write spec.yaml for backward compatibility.
-	specFilePath := specPath(plansDir, planName, phaseName)
+	specFilePath := filepath.Join(plansDir, planName, "phases", phaseName, "spec.yaml")
 	if err := os.WriteFile(specFilePath, []byte(yamlContent), 0644); err != nil {
 		return fmt.Errorf("write spec.yaml: %w", err)
 	}
 
-	// Only update plan.md when the spec has real content. Specs with an empty
-	// spec field are placeholder stubs (e.g. from arc plan scaffolding) and
-	// should not overwrite or pollute custom plan.md content.
+	// Only update plan.md when the spec has real content.
 	if strings.TrimSpace(spec.Spec) == "" {
 		return nil
 	}
@@ -347,9 +382,20 @@ func AddPhase(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error {
 		return fmt.Errorf("create phase directory: %w", err)
 	}
 
-	// Write spec.yaml
-	if err := WriteSpec(plansDir, planName, phaseName, spec); err != nil {
-		return err
+	// Write plan.md with embedded ## Spec YAML block so ReadSpec can find the spec.
+	spec.Name = phaseName
+	specData, err := yaml.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal spec: %w", err)
+	}
+	planMDContent := "# Phase: " + phaseName + "\n\n## Objective\n\n" + strings.TrimSpace(spec.Spec) + "\n\n## Spec\n\n```yaml\n" + string(specData) + "```\n"
+	if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), []byte(planMDContent), 0644); err != nil {
+		return fmt.Errorf("write plan.md: %w", err)
+	}
+
+	// Write spec.yaml for backward compatibility with external tooling.
+	if err := os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), specData, 0644); err != nil {
+		return fmt.Errorf("write spec.yaml: %w", err)
 	}
 
 	// Write state.json
@@ -360,15 +406,6 @@ func AddPhase(plansDir, planName, phaseName string, spec *arc.PhaseSpec) error {
 	}
 	if err := os.WriteFile(filepath.Join(phaseDir, "state.json"), stateData, 0644); err != nil {
 		return fmt.Errorf("write state.json: %w", err)
-	}
-
-	// Write plan.md when spec.Spec is empty (WriteSpec skips plan.md in that case).
-	// When spec.Spec is non-empty, WriteSpec already embedded the spec block in plan.md.
-	if strings.TrimSpace(spec.Spec) == "" {
-		planMDContent := "# Phase: " + phaseName + "\n\n## Objective\n\n(no spec provided)\n\n## Spec\n\n```yaml\nname: " + phaseName + "\nrole: " + spec.Role + "\nspec: |\n  TODO: fill in the spec\n```\n"
-		if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), []byte(planMDContent), 0644); err != nil {
-			return fmt.Errorf("write plan.md: %w", err)
-		}
 	}
 
 	// Update plan.json: add phase to Phases list, set PhaseOrder, add Dependencies
@@ -480,11 +517,19 @@ func UpdateSpec(plansDir, planName, phaseName string, update *arc.PhaseSpec) err
 		return fmt.Errorf("phase %q has status %q; only pending or blocked phases can have their spec updated", phaseName, phaseState.PhaseStatus)
 	}
 
-	// Read existing spec and merge — only overwrite fields that are non-zero in update.
-	existing, err := ReadSpec(plansDir, planName, phaseName)
+	// Read plan.md and extract existing spec (fallback to empty on error).
+	phaseDir := filepath.Join(plansDir, planName, "phases", phaseName)
+	planMDPath := filepath.Join(phaseDir, "plan.md")
+	planMDBytes, err := os.ReadFile(planMDPath)
 	if err != nil {
+		return fmt.Errorf("read plan.md: %w", err)
+	}
+	existing, _ := ExtractSpecFromPlanMD(string(planMDBytes))
+	if existing == nil {
 		existing = &arc.PhaseSpec{}
 	}
+
+	// Merge non-zero fields from update into existing.
 	if update.Spec != "" {
 		existing.Spec = update.Spec
 	}
@@ -508,8 +553,17 @@ func UpdateSpec(plansDir, planName, phaseName string, update *arc.PhaseSpec) err
 	}
 	// Gate is only updated via UpdateGate — not merged here.
 
-	// WriteSpec handles updating plan.md when spec.Spec is non-empty.
-	return WriteSpec(plansDir, planName, phaseName, existing)
+	// Write updated spec back into plan.md.
+	updated, err := ReplaceSpecInPlanMD(string(planMDBytes), existing)
+	if err != nil {
+		// No ## Spec block yet — embed one.
+		data, merr := yaml.Marshal(existing)
+		if merr != nil {
+			return fmt.Errorf("marshal spec: %w", merr)
+		}
+		updated = embedSpecInPlanMD(string(planMDBytes), string(data))
+	}
+	return os.WriteFile(planMDPath, []byte(updated), 0644)
 }
 
 // UpdateGate updates just the gate section of a phase's spec.
@@ -529,12 +583,29 @@ func UpdateGate(plansDir, planName, phaseName string, gate arc.GateSpec) error {
 		return fmt.Errorf("phase %q has status %q; only pending or blocked phases can have their gate updated", phaseName, phaseState.PhaseStatus)
 	}
 
-	spec, err := ReadSpec(plansDir, planName, phaseName)
+	// Read plan.md and extract existing spec.
+	phaseDir := filepath.Join(plansDir, planName, "phases", phaseName)
+	planMDPath := filepath.Join(phaseDir, "plan.md")
+	planMDBytes, err := os.ReadFile(planMDPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("read plan.md: %w", err)
+	}
+	spec, _ := ExtractSpecFromPlanMD(string(planMDBytes))
+	if spec == nil {
+		spec = &arc.PhaseSpec{}
 	}
 	spec.Gate = gate
-	return WriteSpec(plansDir, planName, phaseName, spec)
+
+	// Write updated spec back into plan.md.
+	updated, err := ReplaceSpecInPlanMD(string(planMDBytes), spec)
+	if err != nil {
+		data, merr := yaml.Marshal(spec)
+		if merr != nil {
+			return fmt.Errorf("marshal spec: %w", merr)
+		}
+		updated = embedSpecInPlanMD(string(planMDBytes), string(data))
+	}
+	return os.WriteFile(planMDPath, []byte(updated), 0644)
 }
 
 // UpdateDeps updates the dependency edges for a phase in plan.json.

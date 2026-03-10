@@ -330,7 +330,7 @@ execute → complete
 
 **Actual `current_state` values:** `execute.act` → `complete`
 
-**When to use:** Simple, well-scoped tasks where one agent pass is enough. Used by `arc dev` for straightforward automation.
+**When to use:** Simple, well-scoped tasks where one agent pass is enough. Used by `arc dispatch` for straightforward automation.
 
 ### Terminal States
 

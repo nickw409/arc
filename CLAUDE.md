@@ -32,7 +32,7 @@ internal/         All Go packages:
   cli/            Cobra command definitions
   config/         .arc.yaml parsing
   daemon/         Background orchestration daemon (persistent, multi-plan)
-  dev/            arc dev pipeline (discovery → architecture → plan generation)
+  dev/            arc dispatch pipeline (discovery → architecture → plan generation)
   gate/           Gate assertion evaluation (file_exists, grep, build_passes, ...)
   gitops/         Git commit operations
   guide/          Agent-facing reference guide (arc guide)
@@ -103,7 +103,7 @@ arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
 arc validate [paths...]                     # Audit test quality using AI agent
-arc dev <task description...>               # Auto-generate plan from description and run it
+arc dispatch <task description...>               # Auto-generate plan from description and run it
 
 # Interactive / MCP
 arc chat                                    # Launch Claude session with Arc MCP tools
@@ -136,7 +136,7 @@ arc manage reset-review <plan> <phase>     # Clear review cache and iteration co
 | `investigation` | Research / exploration |
 | `refactor` | Restructuring without behavior change |
 | `performance` | Optimization |
-| `direct` | Simple single-phase task (used by `arc dev`) |
+| `direct` | Simple single-phase task (used by `arc dispatch`) |
 
 ### Phase Roles
 Phases have a `role` that determines their prompt and gate behavior:

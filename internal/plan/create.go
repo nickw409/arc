@@ -119,19 +119,8 @@ func Create(opts CreateOptions) (*arc.PlanMeta, error) {
 			return nil, fmt.Errorf("write plan.md for %s: %w", phase, err)
 		}
 
-		// Write spec.yaml — always, so the gate orchestrator picks up the plan.
-		// Use the role from PhaseRoles if provided, defaulting to "impl".
-		role := "impl"
-		if opts.PhaseRoles != nil {
-			if r, ok := opts.PhaseRoles[phase]; ok && r != "" {
-				role = r
-			}
-		}
-		spec := &arc.PhaseSpec{Role: role}
-		if err := WriteSpec(opts.PlansDir, dirName, phase, spec); err != nil {
-			return nil, fmt.Errorf("write spec.yaml for %s: %w", phase, err)
-		}
 	}
+
 
 	return meta, nil
 }

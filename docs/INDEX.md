@@ -41,7 +41,7 @@ arc/
 │   ├── cli/          Cobra commands
 │   ├── config/       .arc.yaml parsing
 │   ├── daemon/       Background orchestration daemon
-│   ├── dev/          arc dev pipeline (discovery → plan generation)
+│   ├── dev/          arc dispatch pipeline (discovery → plan generation)
 │   ├── gate/         Gate assertion evaluation
 │   ├── gitops/       Git commit operations
 │   ├── guide/        Agent-facing reference guide

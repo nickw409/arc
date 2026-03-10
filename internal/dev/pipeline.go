@@ -20,7 +20,7 @@ import (
 	"github.com/nwiley/arc/internal/state"
 )
 
-// DevOptions configures the arc dev pipeline.
+// DevOptions configures the arc dispatch pipeline.
 type DevOptions struct {
 	TaskDescription string
 	ProjectDir      string
@@ -35,7 +35,7 @@ type DevOptions struct {
 	AutoYes         bool   // skip clarification questions (for CI)
 }
 
-// DevResult holds the outcome of an arc dev run.
+// DevResult holds the outcome of an arc dispatch run.
 type DevResult struct {
 	PlanName   string            `json:"plan_name"`
 	Complexity TaskComplexity    `json:"complexity"`
@@ -46,7 +46,7 @@ type DevResult struct {
 	Usage      arc.Usage         `json:"usage"`
 }
 
-// RunDev executes the full arc dev pipeline:
+// RunDev executes the full arc dispatch pipeline:
 //  1. Spawn discovery agent → get DiscoveryResult
 //  2. Validate and possibly override complexity
 //  3. Branch by complexity:

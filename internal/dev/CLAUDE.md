@@ -1,6 +1,6 @@
 # Dev
 
-Implements `arc dev` — auto-generates a plan from a task description using a pipeline of AI agents, then launches the orchestrator.
+Implements `arc dispatch` — auto-generates a plan from a task description using a pipeline of AI agents, then launches the orchestrator.
 
 **Start here:** `pipeline.go` for the top-level flow.
 
