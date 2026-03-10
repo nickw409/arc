@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/project"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/spf13/cobra"
 )
@@ -91,6 +92,27 @@ func newReviewCmd() *cobra.Command {
 				return fmt.Errorf("spec validation failed — fix spec.yaml errors before reviewing")
 			}
 
+			// Build project context for adversaries
+			det := project.Detect(".")
+			projectCtx := fmt.Sprintf("Language: %s\nBuild: %s\nTest: %s", det.Language, det.BuildCommand, det.TestCommand)
+
+			// Determine which phases need review (skip unchanged if not force-targeted)
+			forcePhase := phaseFilter != ""
+			var phasesToReview []string
+			for _, phase := range phases {
+				planMDPath := filepath.Join(planDir, "phases", phase, "plan.md")
+				currentHash, _ := review.ComputePlanHash(planMDPath)
+				if !forcePhase && meta.PhaseReview != nil {
+					if pr, ok := meta.PhaseReview[phase]; ok && pr.Hash == currentHash && currentHash != "" {
+						if pr.Status == "approved" || pr.Status == "conditional" {
+							fmt.Printf("Phase: %s (unchanged, skipped)\n", phase)
+							continue
+						}
+					}
+				}
+				phasesToReview = append(phasesToReview, phase)
+			}
+
 			// Run phases in batches to avoid overwhelming the system
 			const maxConcurrentPhases = 3
 
@@ -100,11 +122,11 @@ func newReviewCmd() *cobra.Command {
 				Err    error
 			}
 
-			resultsCh := make(chan phaseResult, len(phases))
+			resultsCh := make(chan phaseResult, len(phasesToReview))
 			sem := make(chan struct{}, maxConcurrentPhases)
 
 			var wg sync.WaitGroup
-			for _, phase := range phases {
+			for _, phase := range phasesToReview {
 				wg.Add(1)
 				go func(p string) {
 					defer wg.Done()
@@ -112,12 +134,13 @@ func newReviewCmd() *cobra.Command {
 					defer func() { <-sem }()
 
 					result, err := review.Run(context.Background(), review.ReviewOptions{
-						PlanName: planName,
-						PlansDir: plansDir,
-						ArcHome:  arcHome,
-						Phase:    p,
-						Model:    model,
-						Logger:   logger,
+						PlanName:       planName,
+						PlansDir:       plansDir,
+						ArcHome:        arcHome,
+						Phase:          p,
+						Model:          model,
+						Logger:         logger,
+						ProjectContext: projectCtx,
 					})
 					resultsCh <- phaseResult{Phase: p, Result: result, Err: err}
 				}(phase)
@@ -127,23 +150,21 @@ func newReviewCmd() *cobra.Command {
 			close(resultsCh)
 
 			// Collect results keyed by phase
-			phaseResults := make(map[string]phaseResult, len(phases))
+			phaseResults := make(map[string]phaseResult, len(phasesToReview))
 			for r := range resultsCh {
 				phaseResults[r.Phase] = r
 			}
 
-			// Print in phase order
-			overallStatus := "approved"
+			// Print in phase order (only reviewed phases)
 			maxIteration := 0
 			totalSuggestions := 0
 			reviewResults := make(map[string]string)
-			for _, phase := range phases {
+			for _, phase := range phasesToReview {
 				pr := phaseResults[phase]
 
 				if pr.Err != nil {
 					fmt.Printf("Phase: %s\n", phase)
 					fmt.Printf("  ERROR: %v\n\n", pr.Err)
-					overallStatus = "needs_review"
 					continue
 				}
 
@@ -191,26 +212,33 @@ func newReviewCmd() *cobra.Command {
 					}
 					reviewResults[v.Name] = effectiveStatus
 				}
-
-				if pr.Result.Status == "needs_review" {
-					overallStatus = "needs_review"
-				} else if pr.Result.Status == "conditional" && overallStatus == "approved" {
-					overallStatus = "conditional"
-				}
 			}
 
 			if totalSuggestions > 0 {
 				fmt.Printf("Total suggestions applied: %d\n", totalSuggestions)
 			}
-			fmt.Printf("Review complete: status=%s\n", overallStatus)
 
-			// Update plan.json with review results
+			// Update plan.json with per-phase review status and recompute plan-level status
 			metaBytes, err = os.ReadFile(filepath.Join(planDir, "plan.json"))
 			if err == nil {
 				var updatedMeta arc.PlanMeta
 				if err := json.Unmarshal(metaBytes, &updatedMeta); err == nil {
-					updatedMeta.ReviewStatus = overallStatus
-					updatedMeta.ReviewedAt = time.Now().UTC().Format(time.RFC3339)
+					if updatedMeta.PhaseReview == nil {
+						updatedMeta.PhaseReview = make(map[string]arc.PhaseReviewStatus)
+					}
+					now := time.Now().UTC().Format(time.RFC3339)
+					for _, phase := range phasesToReview {
+						pr := phaseResults[phase]
+						if pr.Err == nil {
+							updatedMeta.PhaseReview[phase] = arc.PhaseReviewStatus{
+								Status:     pr.Result.Status,
+								ReviewedAt: now,
+								Hash:       pr.Result.Hash,
+							}
+						}
+					}
+					updatedMeta.ReviewStatus = computePlanReviewStatus(updatedMeta.PhaseReview, updatedMeta.Phases)
+					updatedMeta.ReviewedAt = now
 					updatedMeta.ReviewIterations = maxIteration
 					updatedMeta.ReviewResults = reviewResults
 					if data, err := json.MarshalIndent(updatedMeta, "", "  "); err == nil {
@@ -218,6 +246,8 @@ func newReviewCmd() *cobra.Command {
 					}
 				}
 			}
+
+			fmt.Printf("Review complete: status=%s\n", computePlanReviewStatus(meta.PhaseReview, meta.Phases))
 
 			return nil
 		},
@@ -227,4 +257,20 @@ func newReviewCmd() *cobra.Command {
 	cmd.Flags().String("phase", "", "Review a single phase instead of all phases")
 
 	return cmd
+}
+
+// computePlanReviewStatus returns the worst-case status across all phases in the plan.
+// Phases not yet reviewed are treated as "needs_review".
+func computePlanReviewStatus(phaseReview map[string]arc.PhaseReviewStatus, phases []string) string {
+	status := "approved"
+	for _, p := range phases {
+		pr, ok := phaseReview[p]
+		if !ok || pr.Status == "needs_review" {
+			return "needs_review"
+		}
+		if pr.Status == "conditional" {
+			status = "conditional"
+		}
+	}
+	return status
 }

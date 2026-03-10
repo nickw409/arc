@@ -61,7 +61,7 @@ type historyFile struct {
 }
 
 // RunAdversary spawns a single adversary agent and extracts its verdict.
-func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string, iteration int) (*AdversaryResult, error) {
+func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName string, planMD string, model string, iteration int, projectContext string) (*AdversaryResult, error) {
 	// Compute hash of plan.md
 	planMDPath := filepath.Join(planDir, "phases", phaseName, "plan.md")
 	hash, err := computePlanHash(planMDPath)
@@ -143,7 +143,11 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 			"You MUST still output a valid verdict line.\n"
 	}
 
-	fullPrompt := string(promptBytes) + "\n\n## Plan Under Review\n\n" + planMD + postPlanReminder
+	fullPrompt := string(promptBytes)
+	if projectContext != "" {
+		fullPrompt += "\n\n## Project Context\n\n" + projectContext
+	}
+	fullPrompt += "\n\n## Plan Under Review\n\n" + planMD + postPlanReminder
 
 	// Spawn agent with 120s timeout (review agents are read-only analysis,
 	// but need enough time to produce analysis + verdict + suggestion blocks)
@@ -198,6 +202,12 @@ func RunAdversary(ctx context.Context, adv Adversary, planDir string, phaseName 
 }
 
 func computePlanHash(path string) (string, error) {
+	return ComputePlanHash(path)
+}
+
+// ComputePlanHash computes the SHA-256 hex digest of a file.
+// Exported for use by callers that need to check plan.md hashes without running a review.
+func ComputePlanHash(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

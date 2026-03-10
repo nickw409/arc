@@ -130,6 +130,13 @@ func NewPhaseState(plan, phase, workflowType string) *PhaseState {
 	}
 }
 
+// PhaseReviewStatus tracks the review state for a single phase in plan.json.
+type PhaseReviewStatus struct {
+	Status     string `json:"status"`
+	ReviewedAt string `json:"reviewed_at"`
+	Hash       string `json:"hash"`
+}
+
 // PlanMeta is the metadata for a plan, serialized to plan.json.
 type PlanMeta struct {
 	SchemaVersion int                 `json:"schema_version,omitempty"`
@@ -143,6 +150,7 @@ type PlanMeta struct {
 	ReviewedAt       string              `json:"reviewed_at,omitempty"`
 	ReviewIterations int                 `json:"review_iterations,omitempty"`
 	ReviewResults    map[string]string   `json:"review_results,omitempty"`
+	PhaseReview      map[string]PhaseReviewStatus `json:"phase_review,omitempty"`
 	WorkflowType string              `json:"workflow_type"`
 	SplitPhases  map[string][]string `json:"split_phases,omitempty"`
 	ArchivedAt   string              `json:"archived_at,omitempty"`

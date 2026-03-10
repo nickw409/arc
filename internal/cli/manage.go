@@ -306,7 +306,8 @@ func newManageResetReviewCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planName := args[0]
 			phase := args[1]
-			planDir := filepath.Join(".plans", "active", planName)
+			plansDir := filepath.Join(".plans", "active")
+			planDir := filepath.Join(plansDir, planName)
 
 			histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
 			history := review.LoadHistory(histPath)
@@ -316,6 +317,14 @@ func newManageResetReviewCmd() *cobra.Command {
 
 			if err := review.CleanupOutputFiles(planDir, []string{phase}); err != nil {
 				return fmt.Errorf("cleaning up output files: %w", err)
+			}
+
+			if err := plan.ManageResetReview(plan.ManageOptions{
+				PlansDir: plansDir,
+				PlanName: planName,
+				Phase:    phase,
+			}); err != nil {
+				return fmt.Errorf("clearing phase review entry: %w", err)
 			}
 
 			fmt.Printf("Reset review for %s/%s\n", planName, phase)

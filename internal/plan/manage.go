@@ -315,6 +315,53 @@ func ManageResetPlan(opts ManageOptions) error {
 	return nil
 }
 
+// ManageResetReview clears the per-phase review entry from plan.json and
+// recomputes the plan-level review status from remaining entries.
+func ManageResetReview(opts ManageOptions) error {
+	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
+	metaPath := filepath.Join(planDir, "plan.json")
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return fmt.Errorf("read plan.json: %w", err)
+	}
+	var meta arc.PlanMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return fmt.Errorf("parse plan.json: %w", err)
+	}
+
+	if meta.PhaseReview != nil {
+		delete(meta.PhaseReview, opts.Phase)
+	}
+
+	// Recompute plan-level review status from remaining entries.
+	if len(meta.PhaseReview) == 0 {
+		meta.ReviewStatus = "unreviewed"
+	} else {
+		status := "approved"
+		for _, p := range meta.Phases {
+			pr, ok := meta.PhaseReview[p]
+			if !ok || pr.Status == "needs_review" {
+				status = "needs_review"
+				break
+			}
+			if pr.Status == "conditional" {
+				status = "conditional"
+			}
+		}
+		meta.ReviewStatus = status
+	}
+
+	out, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal plan.json: %w", err)
+	}
+	return os.WriteFile(metaPath, out, 0644)
+}
+
 // ManageShow writes the phase state to the writer in formatted JSON.
 func ManageShow(w io.Writer, opts ManageOptions) error {
 	if err := validateManageOpts(opts); err != nil {

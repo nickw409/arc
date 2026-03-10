@@ -16,22 +16,22 @@ For EVERY function in the plan's specification:
 - [ ] Are boundary conditions tested?
 
 ### Type Coverage
-For EVERY struct/enum:
+For EVERY type/struct/enum:
 - [ ] Is construction tested?
 - [ ] Are all variants used in tests?
 - [ ] Is serialization/deserialization tested (if applicable)?
 
 ### Edge Cases
 For EVERY function:
-- [ ] Empty input (vec![], "", None)
+- [ ] Empty input (empty collection, empty string, null/nil)
 - [ ] Zero values
 - [ ] Negative values (if numeric)
-- [ ] Maximum values (u32::MAX, etc.)
+- [ ] Maximum/boundary values
 - [ ] Invalid state combinations
 
 ### Error Handling
-For EVERY Result-returning function:
-- [ ] Is every error variant tested?
+For EVERY function that can return errors:
+- [ ] Is every error case tested?
 - [ ] Is error propagation tested?
 
 ## Output Format

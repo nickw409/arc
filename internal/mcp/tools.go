@@ -20,6 +20,7 @@ import (
 	"github.com/nwiley/arc/internal/guide"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/plan"
+	"github.com/nwiley/arc/internal/project"
 	"github.com/nwiley/arc/internal/resources"
 	"github.com/nwiley/arc/internal/review"
 	"github.com/nwiley/arc/internal/state"
@@ -419,6 +420,28 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 		return mcp.NewToolResultError(msg), nil
 	}
 
+	// Build project context for adversaries
+	det := project.Detect(".")
+	projectCtx := fmt.Sprintf("Language: %s\nBuild: %s\nTest: %s", det.Language, det.BuildCommand, det.TestCommand)
+
+	// Determine which phases need review (skip unchanged if not force-targeted)
+	forcePhase := phaseFilter != ""
+	var phasesToReview []string
+	var out bytes.Buffer
+	for _, phase := range phases {
+		planMDPath := filepath.Join(planDir, "phases", phase, "plan.md")
+		currentHash, _ := review.ComputePlanHash(planMDPath)
+		if !forcePhase && meta.PhaseReview != nil {
+			if pr, ok := meta.PhaseReview[phase]; ok && pr.Hash == currentHash && currentHash != "" {
+				if pr.Status == "approved" || pr.Status == "conditional" {
+					fmt.Fprintf(&out, "Phase %s: skipped (unchanged)\n", phase)
+					continue
+				}
+			}
+		}
+		phasesToReview = append(phasesToReview, phase)
+	}
+
 	// Run phases concurrently (max 3)
 	const maxConcurrent = 3
 
@@ -428,11 +451,11 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 		Err    error
 	}
 
-	resultsCh := make(chan phaseResult, len(phases))
+	resultsCh := make(chan phaseResult, len(phasesToReview))
 	sem := make(chan struct{}, maxConcurrent)
 
 	var wg sync.WaitGroup
-	for _, phase := range phases {
+	for _, phase := range phasesToReview {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
@@ -440,13 +463,14 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 			defer func() { <-sem }()
 
 			result, err := review.Run(ctx, review.ReviewOptions{
-				PlanName:      planName,
-				PlansDir:      h.plansDir(),
-				ArcHome:       h.arcHome,
-				Phase:         p,
-				Model:         model,
-				Logger:        h.logger,
-				MaxIterations: 1,
+				PlanName:       planName,
+				PlansDir:       h.plansDir(),
+				ArcHome:        h.arcHome,
+				Phase:          p,
+				Model:          model,
+				Logger:         h.logger,
+				MaxIterations:  1,
+				ProjectContext: projectCtx,
 			})
 			resultsCh <- phaseResult{Phase: p, Result: result, Err: err}
 		}(phase)
@@ -456,21 +480,18 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 	close(resultsCh)
 
 	// Collect and format results
-	phaseResults := make(map[string]phaseResult, len(phases))
+	phaseResults := make(map[string]phaseResult, len(phasesToReview))
 	for r := range resultsCh {
 		phaseResults[r.Phase] = r
 	}
 
-	var out bytes.Buffer
-	overallStatus := "approved"
 	reviewResults := make(map[string]string)
 	maxIteration := 0
 
-	for _, phase := range phases {
+	for _, phase := range phasesToReview {
 		pr := phaseResults[phase]
 		if pr.Err != nil {
 			fmt.Fprintf(&out, "Phase %s: ERROR: %v\n", phase, pr.Err)
-			overallStatus = "needs_review"
 			continue
 		}
 
@@ -486,26 +507,37 @@ func (h *handlerContext) handleReview(ctx context.Context, req mcp.CallToolReque
 		if pr.Result.Iteration > maxIteration {
 			maxIteration = pr.Result.Iteration
 		}
-		if pr.Result.Status == "needs_review" {
-			overallStatus = "needs_review"
-		} else if pr.Result.Status == "conditional" && overallStatus == "approved" {
-			overallStatus = "conditional"
-		}
 	}
 
-	fmt.Fprintf(&out, "Review complete: status=%s\n", overallStatus)
-
-	// Update plan.json
+	// Update plan.json with per-phase review status and recompute plan-level status
 	metaBytes, err = os.ReadFile(filepath.Join(planDir, "plan.json"))
 	if err == nil {
 		var updatedMeta arc.PlanMeta
 		if err := json.Unmarshal(metaBytes, &updatedMeta); err == nil {
+			if updatedMeta.PhaseReview == nil {
+				updatedMeta.PhaseReview = make(map[string]arc.PhaseReviewStatus)
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			for _, phase := range phasesToReview {
+				pr := phaseResults[phase]
+				if pr.Err == nil {
+					updatedMeta.PhaseReview[phase] = arc.PhaseReviewStatus{
+						Status:     pr.Result.Status,
+						ReviewedAt: now,
+						Hash:       pr.Result.Hash,
+					}
+				}
+			}
+			overallStatus := mcpComputePlanReviewStatus(updatedMeta.PhaseReview, updatedMeta.Phases)
 			updatedMeta.ReviewStatus = overallStatus
-			updatedMeta.ReviewedAt = time.Now().UTC().Format(time.RFC3339)
+			updatedMeta.ReviewedAt = now
 			updatedMeta.ReviewIterations = maxIteration
 			updatedMeta.ReviewResults = reviewResults
 			if data, err := json.MarshalIndent(updatedMeta, "", "  "); err == nil {
 				os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644)
+				fmt.Fprintf(&out, "Review complete: status=%s\n", overallStatus)
+			} else {
+				fmt.Fprintf(&out, "Review complete\n")
 			}
 		}
 	}
@@ -668,9 +700,43 @@ func (h *handlerContext) handleManage(_ context.Context, req mcp.CallToolRequest
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Reset %s/%s", planName, phase)), nil
 
+	case "reset-review":
+		if phase == "" {
+			return mcp.NewToolResultError("reset-review requires a phase name"), nil
+		}
+		planDir := filepath.Join(h.plansDir(), planName)
+		histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
+		history := review.LoadHistory(histPath)
+		delete(history.Phases, phase)
+		delete(history.Iterations, phase)
+		review.SaveHistory(histPath, history)
+		if err := review.CleanupOutputFiles(planDir, []string{phase}); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("cleaning up output files: %v", err)), nil
+		}
+		if err := plan.ManageResetReview(opts); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Reset review for %s/%s", planName, phase)), nil
+
 	default:
-		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — valid actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity, reset", action)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — valid actions: complete, pending, defer, block, tests, packages, note, iteration, copy-from, show, activity, reset, reset-review", action)), nil
 	}
+}
+
+// mcpComputePlanReviewStatus returns the worst-case status across all phases.
+// Phases not yet reviewed are treated as "needs_review".
+func mcpComputePlanReviewStatus(phaseReview map[string]arc.PhaseReviewStatus, phases []string) string {
+	status := "approved"
+	for _, p := range phases {
+		pr, ok := phaseReview[p]
+		if !ok || pr.Status == "needs_review" {
+			return "needs_review"
+		}
+		if pr.Status == "conditional" {
+			status = "conditional"
+		}
+	}
+	return status
 }
 
 func (h *handlerContext) handleGuide(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

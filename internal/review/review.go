@@ -20,13 +20,14 @@ const MaxReviewIterations = 5
 
 // ReviewOptions configures the adversarial review loop.
 type ReviewOptions struct {
-	PlanName      string
-	PlansDir      string
-	ArcHome       string
-	Phase         string
-	Model         string
-	Logger        *slog.Logger
-	MaxIterations int // if > 0, overrides MaxReviewIterations (default 5)
+	PlanName       string
+	PlansDir       string
+	ArcHome        string
+	Phase          string
+	Model          string
+	Logger         *slog.Logger
+	MaxIterations  int    // if > 0, overrides MaxReviewIterations (default 5)
+	ProjectContext string // language, build command, test command for adversaries
 }
 
 // ReviewResult holds the outcome of a review.
@@ -37,6 +38,7 @@ type ReviewResult struct {
 	SuggestionsApplied int
 	IterationDetails   []IterationDetail
 	Usage              arc.Usage
+	Hash               string // SHA-256 of the final plan.md content
 }
 
 // IterationDetail records what happened in a single iteration of the review loop.
@@ -130,7 +132,7 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 
 		// Run all adversaries in parallel
 		iteration := history.Iterations[opts.Phase] + 1
-		verdicts := runAdversaries(ctx, adversaries, planDir, opts.Phase, planMD, opts.Model, iteration)
+		verdicts := runAdversaries(ctx, adversaries, planDir, opts.Phase, planMD, opts.Model, iteration, opts.ProjectContext)
 
 		// Aggregate usage from this iteration's adversaries
 		for _, v := range verdicts {
@@ -268,6 +270,11 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		opts.Logger.Info("synced spec.yaml from plan.md", "phase", opts.Phase)
 	}
 
+	// Compute hash of the final plan.md for incremental review skip tracking.
+	if finalHash, err := computePlanHash(planMDPath); err == nil {
+		result.Hash = finalHash
+	}
+
 	opts.Logger.Info("review complete", "status", result.Status, "phase", opts.Phase)
 	return result, nil
 }
@@ -290,7 +297,7 @@ func failureSignature(verdicts map[string]AdversaryResult) string {
 }
 
 // runAdversaries spawns all adversaries concurrently and returns their results.
-func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, iteration int) map[string]AdversaryResult {
+func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, iteration int, projectContext string) map[string]AdversaryResult {
 	var wg sync.WaitGroup
 	resultsCh := make(chan AdversaryResult, len(adversaries))
 
@@ -309,7 +316,7 @@ func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string
 				return
 			}
 
-			advResult, err := RunAdversary(ctx, a, planDir, phase, planMD, model, iteration)
+			advResult, err := RunAdversary(ctx, a, planDir, phase, planMD, model, iteration, projectContext)
 			if err != nil {
 				resultsCh <- AdversaryResult{
 					Name:     a.Name,

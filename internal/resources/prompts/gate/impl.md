@@ -1,3 +1,5 @@
+Before doing anything else: use ToolSearch with query `select:Edit,Write,Bash,Read,Glob,Grep` to load your file editing tools. You cannot modify files without doing this first.
+
 You are implementing a phase of a software engineering plan.
 
 ## Task
