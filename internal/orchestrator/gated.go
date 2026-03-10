@@ -130,9 +130,6 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		},
 	}
 
-	// Gate spec path
-	specPath := filepath.Join(phaseDir, "spec.yaml")
-
 	var lastGateResult *arc.GateResult
 	var lastDiff string
 	prevCheckpointsPassed := 0
@@ -368,7 +365,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 					gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
 			}
 			var gateErr error
-			gateResult, gateErr = gate.Run(ctx, specPath, workDir, gateOpts...)
+			gateResult, gateErr = gate.Run(ctx, spec, workDir, gateOpts...)
 			if gateErr != nil {
 				opts.Logger.Warn("gate execution error", "error", gateErr)
 				if attempt < MaxGatedAttempts {

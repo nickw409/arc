@@ -69,6 +69,7 @@ func setupGatedPlan(t *testing.T, phases []string, deps map[string][]string, spe
 		if err := os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), data, 0o644); err != nil {
 			t.Fatalf("write spec: %v", err)
 		}
+		writeTestPlanMD(t, phaseDir, spec)
 
 		// Write state.json
 		sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))

@@ -22,16 +22,14 @@ func TestShouldRunCommitmentAudit_AllSimpleSkips(t *testing.T) {
 	tmpDir := t.TempDir()
 	planName := "test-plan"
 
-	// Create spec.yaml files with complexity: simple
+	// Create plan.md files with complexity: simple
 	for _, phaseName := range []string{"phase1", "phase2"} {
 		phaseDir := filepath.Join(tmpDir, planName, "phases", phaseName)
 		if err := os.MkdirAll(phaseDir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		specContent := "complexity: simple\n"
-		if err := os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), []byte(specContent), 0644); err != nil {
-			t.Fatal(err)
-		}
+		spec := &arc.PhaseSpec{Name: phaseName, Spec: "Implement " + phaseName, Complexity: "simple"}
+		writeTestPlanMD(t, phaseDir, spec)
 	}
 
 	meta := &arc.PlanMeta{
@@ -56,10 +54,8 @@ func TestShouldRunCommitmentAudit_MediumRuns(t *testing.T) {
 	if err := os.MkdirAll(phaseDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	specContent := "complexity: medium\n"
-	if err := os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), []byte(specContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	spec := &arc.PhaseSpec{Name: phaseName, Spec: "Implement " + phaseName, Complexity: "medium"}
+	writeTestPlanMD(t, phaseDir, spec)
 
 	meta := &arc.PlanMeta{
 		WorkflowType: "feature",

@@ -49,14 +49,18 @@ func ShouldRunVerifier(override *bool, configVerifier string, specVerifier bool,
 	}
 }
 
-// Run executes gate checks for a phase. It reads the spec from specPath,
+// Run executes gate checks for a phase. It accepts an already-parsed spec,
 // runs all assertions against workdir, and returns a GateResult.
 //
-// specPath must point to a spec.yaml file.
+// spec must not be nil.
 // workdir is the directory against which file-system assertions are evaluated.
 //
 // If ctx has no deadline, a default 5-minute timeout is applied.
-func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption) (*arc.GateResult, error) {
+func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOption) (*arc.GateResult, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("gate.Run: spec must not be nil")
+	}
+
 	// Apply a default timeout if the caller did not set one.
 	var ro runOptions
 	for _, opt := range opts {
@@ -67,16 +71,6 @@ func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
-	}
-
-	data, err := os.ReadFile(specPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading spec file %q: %w", specPath, err)
-	}
-
-	var spec arc.PhaseSpec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		return nil, fmt.Errorf("parsing spec file %q: %w", specPath, err)
 	}
 
 	// Fail fast if the spec has nothing to verify — an empty gate is misconfigured,
@@ -127,7 +121,7 @@ func Run(ctx context.Context, specPath string, workdir string, opts ...RunOption
 	if runVerifier && result.Passed {
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer verifyCancel()
-		passed, reasoning, verifyErr := RunVerifier(verifyCtx, &spec, workdir)
+		passed, reasoning, verifyErr := RunVerifier(verifyCtx, spec, workdir)
 		if verifyErr != nil {
 			// Verifier error is non-fatal — log but don't fail.
 			result.ScopedTestSkipped = false

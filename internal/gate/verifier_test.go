@@ -233,7 +233,6 @@ func TestRunVerifier_SkipsAgentWhenNoDiff(t *testing.T) {
 
 func TestRun_VerifierAgent_False_Skipped(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -242,10 +241,10 @@ gate:
   assertions: []
   verifier_agent: false
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
 	// Should pass with no assertions and verifier disabled.
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -258,7 +257,6 @@ gate:
 // there is no diff (not a git repo or no changes), Run still completes without error.
 func TestRun_VerifierAgent_True_NoDiff(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 	initGitRepo(t, workdir)
 
 	spec := `
@@ -268,11 +266,11 @@ gate:
   assertions: []
   verifier_agent: true
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
 	// With no diff, RunVerifier returns (true, "no changes to verify", nil)
 	// so gate.Run should still pass.
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

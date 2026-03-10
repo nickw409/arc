@@ -84,7 +84,27 @@ func (m *mockAdapter) Spawn(_ context.Context, prompt string, workdir string, cf
 	return result, err
 }
 
-// setupGatedTest creates a temp directory with a plan, phase, spec.yaml, and state.json.
+// writeTestPlanMD writes a plan.md file with an embedded ## Spec YAML block
+// so that plan.ReadSpec can find the spec in the standard location.
+// If spec.Spec is empty, a default description is used (required by ExtractSpecFromPlanMD).
+func writeTestPlanMD(t *testing.T, phaseDir string, spec *arc.PhaseSpec) {
+	t.Helper()
+	if spec.Spec == "" {
+		cp := *spec
+		cp.Spec = "Implement " + spec.Name
+		spec = &cp
+	}
+	data, err := yaml.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec for plan.md: %v", err)
+	}
+	content := "## Spec\n```yaml\n" + string(data) + "```\n"
+	if err := os.WriteFile(filepath.Join(phaseDir, "plan.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+}
+
+// setupGatedTest creates a temp directory with a plan, phase, spec.yaml, plan.md, and state.json.
 // Returns the plans dir, a cleanup func, and the phase dir.
 func setupGatedTest(t *testing.T, spec *arc.PhaseSpec) (plansDir, phaseDir string) {
 	t.Helper()
@@ -97,7 +117,7 @@ func setupGatedTest(t *testing.T, spec *arc.PhaseSpec) (plansDir, phaseDir strin
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// Write spec.yaml
+	// Write spec.yaml and plan.md
 	spec.Name = "test-phase"
 	data, err := yaml.Marshal(spec)
 	if err != nil {
@@ -106,6 +126,7 @@ func setupGatedTest(t *testing.T, spec *arc.PhaseSpec) (plansDir, phaseDir strin
 	if err := os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), data, 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
+	writeTestPlanMD(t, phaseDir, spec)
 
 	// Write plan.json
 	meta := &arc.PlanMeta{

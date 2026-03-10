@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nwiley/arc/internal/gate"
+	"github.com/nwiley/arc/internal/plan"
 	"github.com/spf13/cobra"
 )
 
@@ -45,17 +46,18 @@ Exit code 0 means all checks passed. Exit code 1 means one or more checks failed
 			// Use git's common git dir to locate the main worktree root.
 			projectRoot := findProjectRoot(workdir)
 
-			// Resolve spec path.
-			specPath := filepath.Join(projectRoot, ".plans", "active", planName, "phases", phaseName, "spec.yaml")
-			if _, err := os.Stat(specPath); os.IsNotExist(err) {
-				return fmt.Errorf("spec not found at %s — does phase %q exist in plan %q?", specPath, phaseName, planName)
-			}
-
 			// Determine the phase directory for status persistence.
 			phaseDir := filepath.Join(projectRoot, ".plans", "active", planName, "phases", phaseName)
 
+			// Load the phase spec from plan.md.
+			plansDir := filepath.Join(projectRoot, ".plans", "active")
+			spec, err := plan.ReadSpec(plansDir, planName, phaseName)
+			if err != nil {
+				return fmt.Errorf("reading phase spec: %w", err)
+			}
+
 			// Run gate.
-			result, err := gate.Run(cmd.Context(), specPath, workdir)
+			result, err := gate.Run(cmd.Context(), spec, workdir)
 			if err != nil {
 				return fmt.Errorf("running gate: %w", err)
 			}

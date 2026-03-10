@@ -9,13 +9,25 @@ import (
 	"testing"
 
 	"github.com/nwiley/arc/internal/arc"
+	"gopkg.in/yaml.v3"
 )
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// writeSpec writes a spec.yaml into dir and returns its path.
+// parseSpec parses a YAML string into *arc.PhaseSpec for use in gate.Run.
+func parseSpec(t *testing.T, content string) *arc.PhaseSpec {
+	t.Helper()
+	var spec arc.PhaseSpec
+	if err := yaml.Unmarshal([]byte(content), &spec); err != nil {
+		t.Fatalf("parsing spec YAML: %v", err)
+	}
+	return &spec
+}
+
+// writeSpec writes YAML content to spec.yaml in dir and returns the path.
+// Used only by HasAssertions tests which still read from spec.yaml.
 func writeSpec(t *testing.T, dir, content string) string {
 	t.Helper()
 	specPath := filepath.Join(dir, "spec.yaml")
@@ -44,7 +56,6 @@ func writeFile(t *testing.T, dir, name, content string) string {
 
 func TestRun_FileExists_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Create the target file.
 	writeFile(t, workdir, "internal/api/auth.go", "package api\n")
@@ -56,9 +67,9 @@ gate:
     - description: "auth.go exists"
       file_exists: internal/api/auth.go
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -75,7 +86,6 @@ gate:
 
 func TestRun_FileExists_Fail(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -84,9 +94,9 @@ gate:
     - description: "missing.go exists"
       file_exists: internal/missing.go
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -107,7 +117,6 @@ gate:
 
 func TestRun_Grep_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "internal/api/auth.go", `package api
 
@@ -121,9 +130,9 @@ gate:
     - description: "NewMiddleware exists"
       grep: "func NewMiddleware"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -137,7 +146,6 @@ gate:
 
 func TestRun_Grep_Fail(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "internal/api/auth.go", "package api\n")
 
@@ -148,9 +156,9 @@ gate:
     - description: "NewMiddleware exists"
       grep: "func NewMiddleware"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -168,7 +176,6 @@ gate:
 
 func TestRun_TestExists_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "internal/api/auth_test.go", `package api
 
@@ -184,9 +191,9 @@ gate:
     - description: "TestTokenExpiry exists"
       test_exists: TestTokenExpiry
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -200,7 +207,6 @@ gate:
 
 func TestRun_TestExists_Fail(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Write a test file that does NOT contain the searched function.
 	writeFile(t, workdir, "internal/api/auth_test.go", `package api
@@ -217,9 +223,9 @@ gate:
     - description: "TestTokenExpiry exists"
       test_exists: TestTokenExpiry
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -234,7 +240,6 @@ gate:
 // Verify that grep only searches .go files, not _test.go.
 func TestRun_TestExists_DoesNotMatchRegularGoFiles(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Function is in a regular .go file, NOT a _test.go file.
 	writeFile(t, workdir, "pkg/foo.go", `package pkg
@@ -249,9 +254,9 @@ gate:
     - description: "TestLookalike in test file"
       test_exists: TestLookalike
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -267,7 +272,6 @@ gate:
 
 func TestRun_BuildPasses_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -276,9 +280,9 @@ gate:
     - description: "true exits 0"
       build_passes: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -295,7 +299,6 @@ gate:
 
 func TestRun_BuildPasses_Fail(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -304,9 +307,9 @@ gate:
     - description: "false exits 1"
       build_passes: "false"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -326,7 +329,6 @@ gate:
 
 func TestRun_BuildPasses_TypeTarget(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -336,9 +338,9 @@ gate:
       type: build_passes
       target: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -349,7 +351,6 @@ gate:
 
 func TestRun_BuildPasses_OutputCaptured(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// A command that produces output and fails.
 	spec := `
@@ -359,9 +360,9 @@ gate:
     - description: "failing build with output"
       build_passes: "echo 'syntax error'; exit 1"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -379,7 +380,6 @@ gate:
 
 func TestRun_NoUntracked_Pass_NoSuspicious(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Initialize a git repo so git ls-files works.
 	if out, err := runGit(t, workdir, "init"); err != nil {
@@ -396,9 +396,9 @@ gate:
     - description: "no debug artifacts"
       no_untracked: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -409,7 +409,6 @@ gate:
 
 func TestRun_NoUntracked_Fail_TmpFile(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	if out, err := runGit(t, workdir, "init"); err != nil {
 		t.Skipf("git init failed (%v): %s", err, out)
@@ -424,9 +423,9 @@ gate:
     - description: "no debug artifacts"
       no_untracked: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -440,7 +439,6 @@ gate:
 
 func TestRun_NoUntracked_Fail_DebugPrefix(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	if out, err := runGit(t, workdir, "init"); err != nil {
 		t.Skipf("git init failed (%v): %s", err, out)
@@ -454,9 +452,9 @@ gate:
     - description: "no debug artifacts"
       no_untracked: "yes"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -467,7 +465,6 @@ gate:
 
 func TestRun_NoUntracked_Pass_NormalUntrackedFile(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	if out, err := runGit(t, workdir, "init"); err != nil {
 		t.Skipf("git init failed (%v): %s", err, out)
@@ -482,9 +479,9 @@ gate:
     - description: "no debug artifacts"
       no_untracked: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -495,7 +492,6 @@ gate:
 
 func TestRun_NoUntracked_TypeField(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	if out, err := runGit(t, workdir, "init"); err != nil {
 		t.Skipf("git init failed (%v): %s", err, out)
@@ -508,9 +504,9 @@ gate:
     - description: "no debug artifacts via type"
       type: no_untracked
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -591,7 +587,6 @@ func runGit(t *testing.T, dir string, args ...string) (string, error) {
 
 func TestRun_TypeTarget_FileExists(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "myfile.go", "package main\n")
 
@@ -603,9 +598,9 @@ gate:
       type: file_exists
       target: myfile.go
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -616,7 +611,6 @@ gate:
 
 func TestRun_TypeTarget_Grep(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "main.go", "package main\n\nfunc main() {}\n")
 
@@ -628,9 +622,9 @@ gate:
       type: grep
       target: "func main"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -641,7 +635,6 @@ gate:
 
 func TestRun_TypeTarget_TestExists(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "main_test.go", `package main
 
@@ -658,9 +651,9 @@ gate:
       type: test_exists
       target: TestFoo
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -673,11 +666,11 @@ gate:
 // Run — missing spec file
 // ---------------------------------------------------------------------------
 
-func TestRun_MissingSpec(t *testing.T) {
+func TestRun_NilSpec(t *testing.T) {
 	workdir := t.TempDir()
-	_, err := Run(context.Background(), filepath.Join(workdir, "nonexistent.yaml"), workdir)
+	_, err := Run(context.Background(), nil, workdir)
 	if err == nil {
-		t.Fatal("expected error for missing spec file, got nil")
+		t.Fatal("expected error for nil spec, got nil")
 	}
 }
 
@@ -687,7 +680,6 @@ func TestRun_MissingSpec(t *testing.T) {
 
 func TestRun_EmptyAssertions_WithSpec_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Empty assertions are OK if the spec has content (verifier can check it).
 	spec := `
@@ -696,9 +688,9 @@ spec: "implement the feature"
 gate:
   assertions: []
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -716,7 +708,6 @@ func TestRun_ScopedTest_AlwaysSkipped(t *testing.T) {
 	// for the verifier agent, not a shell command. Gate always marks scoped test
 	// as skipped+passed regardless of verify content.
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -724,9 +715,9 @@ verify: "Ensure all API endpoints return 200"
 gate:
   assertions: []
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -743,7 +734,6 @@ gate:
 
 func TestRun_NoScopedTest_Skipped(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -751,9 +741,9 @@ spec: "placeholder spec"
 gate:
   assertions: []
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -764,16 +754,15 @@ gate:
 
 func TestRun_EmptySpec_Fails(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
 gate:
   assertions: []
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -791,7 +780,6 @@ gate:
 
 func TestRun_Checkpoint_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -802,9 +790,9 @@ checkpoints:
     description: "Always passing"
     test: "true"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -821,7 +809,6 @@ checkpoints:
 
 func TestRun_Checkpoint_Fail(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -832,9 +819,9 @@ checkpoints:
     description: "Always failing"
     test: "false"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -848,7 +835,6 @@ checkpoints:
 
 func TestRun_Checkpoint_NoTest_NotRun(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	spec := `
 name: test-phase
@@ -858,9 +844,9 @@ checkpoints:
   - name: cp1
     description: "No test command"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -878,7 +864,6 @@ checkpoints:
 
 func TestRun_Idempotent(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	writeFile(t, workdir, "pkg/foo.go", "package pkg\n\nfunc Bar() {}\n")
 
@@ -891,13 +876,13 @@ gate:
     - description: "Bar func"
       grep: "func Bar"
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	r1, err := Run(context.Background(), specPath, workdir)
+	r1, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	r2, err := Run(context.Background(), specPath, workdir)
+	r2, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -1188,7 +1173,6 @@ func TestFormat_LoopDetection_Above_Threshold(t *testing.T) {
 
 func TestRun_Integration_MultipleAssertions(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Set up files.
 	writeFile(t, workdir, "internal/api/auth.go", `package api
@@ -1216,9 +1200,9 @@ gate:
     - description: "TestTokenExpiry test"
       test_exists: TestTokenExpiry
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -1232,7 +1216,6 @@ gate:
 
 func TestRun_Integration_MixedResults(t *testing.T) {
 	workdir := t.TempDir()
-	phaseDir := t.TempDir()
 
 	// Only create some of the expected artifacts.
 	writeFile(t, workdir, "internal/api/auth.go", "package api\n")
@@ -1249,9 +1232,9 @@ gate:
     - description: "TestTokenExpiry test"
       test_exists: TestTokenExpiry
 `
-	specPath := writeSpec(t, phaseDir, spec)
+	parsedSpec := parseSpec(t, spec)
 
-	result, err := Run(context.Background(), specPath, workdir)
+	result, err := Run(context.Background(), parsedSpec, workdir)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}

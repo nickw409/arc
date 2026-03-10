@@ -241,14 +241,14 @@ func buildAdversaryPrompt(changedFiles []string, testCmd, projectCtx string) (st
 func collectChangedFiles(plansDir, planName, workDir string) ([]string, error) {
 	// First try to collect from phase specs
 	planDir := filepath.Join(plansDir, planName)
-	phaseDirs, err := filepath.Glob(filepath.Join(planDir, "phases", "*", "spec.yaml"))
+	planMDs, err := filepath.Glob(filepath.Join(planDir, "phases", "*", "plan.md"))
 	if err != nil {
 		return nil, err
 	}
 
 	fileSet := make(map[string]bool)
-	for _, specPath := range phaseDirs {
-		spec, err := plan.ReadSpec(plansDir, planName, filepath.Base(filepath.Dir(specPath)))
+	for _, planMD := range planMDs {
+		spec, err := plan.ReadSpec(plansDir, planName, filepath.Base(filepath.Dir(planMD)))
 		if err != nil {
 			continue
 		}

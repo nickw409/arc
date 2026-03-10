@@ -25,10 +25,12 @@ func TestCollectChangedFiles_FromSpecs(t *testing.T) {
 
 	spec := &arc.PhaseSpec{
 		Name:  "phase-a",
+		Spec:  "Implement foo and bar",
 		Files: []string{"internal/foo.go", "internal/bar.go"},
 	}
 	data, _ := yaml.Marshal(spec)
 	os.WriteFile(filepath.Join(planDir, "spec.yaml"), data, 0o644)
+	writeTestPlanMD(t, planDir, spec)
 
 	files, err := collectChangedFiles(plansDir, "test-plan", t.TempDir())
 	if err != nil {
@@ -58,9 +60,10 @@ func TestCollectChangedFiles_MultiplePhases(t *testing.T) {
 	for phase, files := range phases {
 		phaseDir := filepath.Join(planDir, "phases", phase)
 		os.MkdirAll(phaseDir, 0o755)
-		spec := &arc.PhaseSpec{Name: phase, Files: files}
+		spec := &arc.PhaseSpec{Name: phase, Spec: "Implement " + phase, Files: files}
 		data, _ := yaml.Marshal(spec)
 		os.WriteFile(filepath.Join(phaseDir, "spec.yaml"), data, 0o644)
+		writeTestPlanMD(t, phaseDir, spec)
 	}
 
 	files, err := collectChangedFiles(plansDir, "test-plan", t.TempDir())
@@ -120,9 +123,10 @@ func TestRunAdversary_NoBugsFound(t *testing.T) {
 	planDir := filepath.Join(plansDir, "test-plan", "phases", "phase-a")
 	os.MkdirAll(planDir, 0o755)
 
-	spec := &arc.PhaseSpec{Name: "phase-a", Files: []string{"main.go"}}
+	spec := &arc.PhaseSpec{Name: "phase-a", Spec: "Implement main", Files: []string{"main.go"}}
 	data, _ := yaml.Marshal(spec)
 	os.WriteFile(filepath.Join(planDir, "spec.yaml"), data, 0o644)
+	writeTestPlanMD(t, planDir, spec)
 
 	workDir := t.TempDir()
 
