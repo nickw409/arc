@@ -39,12 +39,20 @@ type runJob struct {
 
 // handlerContext holds shared state for all tool handlers.
 type handlerContext struct {
-	projectDir string
-	arcHome    string
-	logger     *slog.Logger
-	mu         sync.Mutex
-	jobs       map[string]*runJob // keyed by plan name
-	jobsCtx    context.Context    // parent context for all background jobs; cancelled on server shutdown
+	projectDir   string
+	arcHome      string
+	logger       *slog.Logger
+	mu           sync.Mutex
+	jobs         map[string]*runJob // keyed by plan name
+	jobsCtx      context.Context    // parent context for all background jobs; cancelled on server shutdown
+	daemonSocket string             // override for daemon socket path; defaults to daemon.DefaultSocketPath()
+}
+
+func (h *handlerContext) daemonSocketPath() string {
+	if h.daemonSocket != "" {
+		return h.daemonSocket
+	}
+	return daemon.DefaultSocketPath()
 }
 
 func (h *handlerContext) plansDir() string {
@@ -870,8 +878,7 @@ func (h *handlerContext) handleRunStatus(_ context.Context, req mcp.CallToolRequ
 		// List all active jobs — no I/O needed, build output under lock.
 		if len(h.jobs) == 0 {
 			h.mu.Unlock()
-			socketPath := daemon.DefaultSocketPath()
-			plans, err := queryDaemonList(socketPath)
+			plans, err := queryDaemonList(h.daemonSocketPath())
 			if err == nil && len(plans) > 0 {
 				var sb strings.Builder
 				sb.WriteString("Active plans (daemon):\n")

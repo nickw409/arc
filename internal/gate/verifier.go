@@ -78,11 +78,22 @@ Respond with PASS or FAIL on the first line, followed by your reasoning.
 		return true, "verifier produced no output (assuming pass)", nil
 	}
 
-	// Parse PASS/FAIL from first line.
-	upper := strings.ToUpper(strings.TrimSpace(output))
-	if strings.HasPrefix(upper, "PASS") {
-		return true, output, nil
+	// Parse PASS/FAIL verdict. Scan the first 5 lines — agents sometimes emit
+	// a preamble before the verdict token despite the prompt instruction.
+	lines := strings.SplitN(output, "\n", 6)
+	for i, line := range lines {
+		if i >= 5 {
+			break
+		}
+		upper := strings.ToUpper(strings.TrimSpace(line))
+		if strings.HasPrefix(upper, "PASS") {
+			return true, output, nil
+		}
+		if strings.HasPrefix(upper, "FAIL") {
+			return false, output, nil
+		}
 	}
+	// No clear verdict in first 5 lines — assume fail to be conservative.
 	return false, output, nil
 }
 

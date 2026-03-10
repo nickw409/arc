@@ -16,9 +16,7 @@ type AgentAdapter interface {
 	// It blocks until the agent exits and returns the result.
 	Spawn(ctx context.Context, prompt string, workdir string, config SessionConfig) (*AgentResult, error)
 
-	// Preflight validates that the agent is available and properly configured.
-	// Returns nil if the adapter is ready to spawn agents.
-	Preflight(ctx context.Context, workdir string) error
+
 }
 
 // ToolUse represents a single tool invocation within an agent turn.

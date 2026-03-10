@@ -215,7 +215,7 @@ func newPlanUpdateGateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("verifier-agent") {
-				gate.VerifierAgent = verifierAgent
+				gate.VerifierAgent = &verifierAgent
 			}
 
 			if err := plan.UpdateGate(plansDir(), planName, phaseName, gate); err != nil {

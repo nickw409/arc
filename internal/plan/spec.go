@@ -125,6 +125,10 @@ func isEmptyAssertion(a arc.GateAssertion) bool {
 		a.TestExists == "" &&
 		a.BuildPasses == "" &&
 		a.NoUntracked == "" &&
+		a.FileAbsent == "" &&
+		a.GrepNot == "" &&
+		a.NoModified == "" &&
+		a.FilesOnly == "" &&
 		!(a.Type != "" && a.Target != "")
 }
 

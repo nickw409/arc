@@ -3,7 +3,7 @@ package arc
 // GateSpec defines the verification gate for a phase.
 type GateSpec struct {
 	Assertions    []GateAssertion `json:"assertions,omitempty" yaml:"assertions,omitempty"`
-	VerifierAgent bool            `json:"verifier_agent,omitempty" yaml:"verifier_agent,omitempty"`
+	VerifierAgent *bool           `json:"verifier_agent,omitempty" yaml:"verifier_agent,omitempty"`
 }
 
 // Checkpoint is a named milestone within a phase with an optional test command.

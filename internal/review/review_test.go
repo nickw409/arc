@@ -86,8 +86,8 @@ func setupReviewPlan(t *testing.T, planName string, phases []string) string {
 
 func TestReviewDefaultAdversaries(t *testing.T) {
 	advs := DefaultAdversaries()
-	if len(advs) != 6 {
-		t.Fatalf("expected 6 adversaries, got %d", len(advs))
+	if len(advs) != 7 {
+		t.Fatalf("expected 7 adversaries, got %d", len(advs))
 	}
 
 	expected := map[string]struct {
@@ -100,6 +100,7 @@ func TestReviewDefaultAdversaries(t *testing.T) {
 		"consistency":   {required: true, failVerdict: "inconsistent"},
 		"executability": {required: true, failVerdict: "blocked"},
 		"integration":   {required: true, failVerdict: "integration_gaps"},
+		"gate-coverage": {required: true, failVerdict: "gate_gaps"},
 	}
 
 	for _, adv := range advs {
@@ -133,8 +134,8 @@ func TestReviewRunBasic(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if len(result.Verdicts) != 6 {
-		t.Fatalf("expected 6 verdicts, got %d", len(result.Verdicts))
+	if len(result.Verdicts) != 7 {
+		t.Fatalf("expected 7 verdicts, got %d", len(result.Verdicts))
 	}
 }
 
@@ -577,25 +578,43 @@ func TestReviewAutoRemediation(t *testing.T) {
 	// The mock agent uses MOCK_SCRIPT_DIR for sequential responses.
 	scriptDir := t.TempDir()
 
-	// We have 6 adversaries running in parallel, and each uses the same mock binary.
+	// We have 7 adversaries running in parallel, and each uses the same mock binary.
 	// Since we can't control which adversary gets which script call, we use
 	// MOCK_OUTPUT to return a consistent passing response with a suggestion.
 	// The first run: all agents return failure with a suggestion
 	// After remediation: plan.md changes, cache invalidates, second run: all pass
 
-	// Use MOCK_OUTPUT env to make all agents return a failure with suggestions on first call
-	failOutput := "## Coverage Analysis\n\nMissing error return.\n\n## Suggestions\n\n<<<ORIGINAL\nfunc Foo() {\n>>>\n<<<SUGGESTED\nfunc Foo() error {\n>>>\n\n## Verdict\ncoverage_gaps\n"
+	// Groups run in parallel with non-deterministic call ordering, so each scripted
+	// response must contain section markers for ALL 7 adversaries. Any group can then
+	// extract its relevant sections regardless of which call number it receives.
+
+	// First run (3 group calls): coverage fails with a suggestion; all others pass.
+	failOutput := "" +
+		"=== CHECK: coverage ===\n## Verdict\ncoverage_gaps\n\n## Suggestions\n\n<<<ORIGINAL\nfunc Foo() {\n>>>\n<<<SUGGESTED\nfunc Foo() error {\n>>>\n=== END CHECK: coverage ===\n" +
+		"=== CHECK: ambiguity ===\n## Verdict\nunambiguous\n=== END CHECK: ambiguity ===\n" +
+		"=== CHECK: scope ===\n## Verdict\nscope_appropriate\n=== END CHECK: scope ===\n" +
+		"=== CHECK: consistency ===\n## Verdict\nconsistent\n=== END CHECK: consistency ===\n" +
+		"=== CHECK: executability ===\n## Verdict\nexecutable\n=== END CHECK: executability ===\n" +
+		"=== CHECK: integration ===\n## Verdict\nintegration_complete\n=== END CHECK: integration ===\n" +
+		"=== CHECK: gate-coverage ===\n## Verdict\ngate_sufficient\n=== END CHECK: gate-coverage ===\n"
 
 	// For this test, use scripted responses:
-	// call_0 through call_5 (first run, 6 adversaries): all fail with suggestions
-	// call_6 through call_11 (second run, 6 adversaries): all pass
-	for i := 0; i < 6; i++ {
+	// call_0 through call_2 (first run, 3 groups): coverage fails with suggestion
+	// call_3 through call_5 (second run, 3 groups): all pass
+	for i := 0; i < 3; i++ {
 		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(failOutput), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	passOutput := "## Coverage Analysis\n\nAll good.\n\n## Verdict\ncoverage_sufficient\n"
-	for i := 6; i < 12; i++ {
+	passOutput := "" +
+		"=== CHECK: coverage ===\n## Verdict\ncoverage_sufficient\n=== END CHECK: coverage ===\n" +
+		"=== CHECK: ambiguity ===\n## Verdict\nunambiguous\n=== END CHECK: ambiguity ===\n" +
+		"=== CHECK: scope ===\n## Verdict\nscope_appropriate\n=== END CHECK: scope ===\n" +
+		"=== CHECK: consistency ===\n## Verdict\nconsistent\n=== END CHECK: consistency ===\n" +
+		"=== CHECK: executability ===\n## Verdict\nexecutable\n=== END CHECK: executability ===\n" +
+		"=== CHECK: integration ===\n## Verdict\nintegration_complete\n=== END CHECK: integration ===\n" +
+		"=== CHECK: gate-coverage ===\n## Verdict\ngate_sufficient\n=== END CHECK: gate-coverage ===\n"
+	for i := 3; i < 6; i++ {
 		if err := os.WriteFile(filepath.Join(scriptDir, fmt.Sprintf("call_%d.txt", i)), []byte(passOutput), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -692,8 +711,8 @@ func TestReviewIterationDetails(t *testing.T) {
 	if detail.Iteration != 1 {
 		t.Fatalf("expected first iteration to be 1, got %d", detail.Iteration)
 	}
-	if len(detail.Verdicts) != 6 {
-		t.Fatalf("expected 6 verdict entries, got %d", len(detail.Verdicts))
+	if len(detail.Verdicts) != 7 {
+		t.Fatalf("expected 7 verdict entries, got %d", len(detail.Verdicts))
 	}
 }
 
@@ -719,7 +738,7 @@ func TestReviewHistoryFirstRun(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if len(result.Verdicts) != 6 {
-		t.Fatalf("expected 6 verdicts, got %d", len(result.Verdicts))
+	if len(result.Verdicts) != 7 {
+		t.Fatalf("expected 7 verdicts, got %d", len(result.Verdicts))
 	}
 }

@@ -24,19 +24,6 @@ type CodexAdapter struct{}
 // Name returns the adapter identifier.
 func (a *CodexAdapter) Name() string { return "codex" }
 
-// Preflight checks that the codex binary exists in PATH and that workdir is
-// accessible and writable.
-func (a *CodexAdapter) Preflight(ctx context.Context, workdir string) error {
-	if _, err := exec.LookPath("codex"); err != nil {
-		return fmt.Errorf("codex binary not found in PATH: %w", err)
-	}
-
-	if err := checkWorkdirWritable(workdir); err != nil {
-		return fmt.Errorf("workdir %q is not accessible: %w", workdir, err)
-	}
-
-	return nil
-}
 
 // Spawn runs a Codex session with the given prompt and session config.
 // Usage tracking is not available from codex and will be zero-valued.

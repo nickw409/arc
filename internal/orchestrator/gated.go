@@ -44,25 +44,17 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	// Read phase spec
 	spec, err := plan.ReadSpec(opts.PlansDir, opts.PlanName, opts.PhaseName)
 	if err != nil {
+		blockPhaseOnStartupError(sf, fmt.Sprintf("reading phase spec: %v", err))
 		return fmt.Errorf("reading phase spec: %w", err)
 	}
 
 	// Require spec content before spawning. An empty spec wastes an agent
 	// session — the gate rejects it immediately as misconfigured. Simple phases
 	// don't need checkpoints or assertions, but the spec field is mandatory.
-	// Safety net: if spec.yaml is empty, attempt to sync from the ## Spec block
-	// in plan.md (e.g. when arc review was skipped or plan.md was edited after review).
 	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
-		if synced, syncErr := plan.SyncSpecFromPlanMD(opts.PlansDir, opts.PlanName, opts.PhaseName); syncErr == nil && synced {
-			opts.Logger.Info("auto-synced spec.yaml from plan.md", "phase", opts.PhaseName)
-			spec, err = plan.ReadSpec(opts.PlansDir, opts.PlanName, opts.PhaseName)
-			if err != nil {
-				return fmt.Errorf("reading phase spec after sync: %w", err)
-			}
-		}
-	}
-	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
-		return fmt.Errorf("phase %q has no spec content — fill in the ## Spec block in plan.md before running (checkpoints optional for simple fixes, but spec field is required)", opts.PhaseName)
+		msg := fmt.Sprintf("phase %q has no spec content — fill in the ## Spec block in plan.md before running", opts.PhaseName)
+		blockPhaseOnStartupError(sf, msg)
+		return fmt.Errorf("%s", msg)
 	}
 
 	// Resolve adapter
@@ -79,11 +71,6 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		if workDir == "" {
 			workDir, _ = os.Getwd()
 		}
-	}
-
-	// Pre-flight check
-	if err := agentAdapter.Preflight(ctx, workDir); err != nil {
-		return fmt.Errorf("adapter preflight failed: %w", err)
 	}
 
 	// Load project context
@@ -120,7 +107,12 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 	// Structured logger (nil-safe — callers log methods check for nil)
 	pl := opts.PlanLogger
 
-	for attempt := 1; attempt <= MaxGatedAttempts; attempt++ {
+	// effectiveMax starts at MaxGatedAttempts but is incremented by 1 if the
+	// orchestrator intervention runs and signals that a retry is warranted.
+	effectiveMax := MaxGatedAttempts
+	orchestratorRan := false
+
+	for attempt := 1; attempt <= effectiveMax; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -156,11 +148,11 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		opts.Logger.Info("spawning agent",
 			"phase", opts.PhaseName,
 			"attempt", attempt,
-			"max_attempts", MaxGatedAttempts,
+			"max_attempts", effectiveMax,
 			"adapter", agentAdapter.Name(),
 		)
 		fmt.Printf("[%s] Attempt %d/%d — spawning %s agent\n",
-			opts.PhaseName, attempt, MaxGatedAttempts, agentAdapter.Name())
+			opts.PhaseName, attempt, effectiveMax, agentAdapter.Name())
 
 		// Spawn agent
 		if pl != nil {
@@ -226,7 +218,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Handle spawn-level failures
 		if spawnErr != nil {
 			tier := classifySpawnError(result, spawnErr)
-			if tier == TierTransient && attempt < MaxGatedAttempts {
+			if tier == TierTransient && attempt < effectiveMax {
 				opts.Logger.Warn("transient spawn error, retrying",
 					"attempt", attempt, "error", spawnErr)
 				isRateLimit := result != nil && result.RateLimit
@@ -247,7 +239,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		}
 
 		// Back off if the agent was rate-limited but exited without a spawn error.
-		if spawnErr == nil && result != nil && result.RateLimit && attempt < MaxGatedAttempts {
+		if spawnErr == nil && result != nil && result.RateLimit && attempt < effectiveMax {
 			opts.Logger.Warn("agent rate-limited, backing off", "attempt", attempt)
 			if opts.OnRateLimit != nil {
 				opts.OnRateLimit()
@@ -269,7 +261,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			passed, reasoning, verifyErr := gate.RunVerifier(ctx, spec, workDir)
 			if verifyErr != nil {
 				opts.Logger.Warn("verifier execution error", "error", verifyErr)
-				if attempt < MaxGatedAttempts {
+				if attempt < effectiveMax {
 					continue
 				}
 				return fmt.Errorf("verifier failed on final attempt: %w", verifyErr)
@@ -294,7 +286,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			gateResult, gateErr = gate.Run(ctx, spec, workDir, gateOpts...)
 			if gateErr != nil {
 				opts.Logger.Warn("gate execution error", "error", gateErr)
-				if attempt < MaxGatedAttempts {
+				if attempt < effectiveMax {
 					continue
 				}
 				return fmt.Errorf("gate execution failed on final attempt: %w", gateErr)
@@ -324,13 +316,13 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		lastGateResult = gateResult
 		formatted := gate.FormatWithRunCount(gateResult, runCount)
 		fmt.Printf("[%s] Gate FAILED (attempt %d/%d):\n%s\n",
-			opts.PhaseName, attempt, MaxGatedAttempts, formatted)
+			opts.PhaseName, attempt, effectiveMax, formatted)
 
 		// Capture diff for retry context
 		lastDiff = captureDiff(workDir)
 
 		// Classify failure
-		tier := classifyGateFailure(gateResult, attempt, MaxGatedAttempts)
+		tier := classifyGateFailure(gateResult, attempt, effectiveMax)
 
 		// Capture attempt diagnostic for arc_manage show
 		summary := arc.AttemptSummary{
@@ -350,6 +342,29 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 		switch tier {
 		case TierGiveUp:
+			// Before giving up, run the orchestrator agent once to make a
+			// strategic decision (modify spec, adjust gate, fix code, or give up).
+			// Skip in ChatMode — the human handles it interactively.
+			if !orchestratorRan && !opts.ChatMode {
+				orchestratorRan = true
+				currentState, _ := sf.Read()
+				var attemptLog []arc.AttemptSummary
+				if currentState != nil {
+					attemptLog = currentState.AttemptLog
+				}
+				intervened, interventionErr := runOrchestratorIntervention(
+					ctx, opts, spec, workDir, attemptLog, lastGateResult, lastDiff)
+				if interventionErr != nil {
+					opts.Logger.Warn("orchestrator intervention error", "error", interventionErr)
+				} else if intervened {
+					// Re-read spec — intervention may have modified plan.md
+					if newSpec, specErr := plan.ReadSpec(opts.PlansDir, opts.PlanName, opts.PhaseName); specErr == nil {
+						spec = newSpec
+					}
+					effectiveMax++ // allow one more attempt with updated spec/code
+					continue
+				}
+			}
 			// Fall through to mark failed below
 		default:
 			continue
@@ -359,11 +374,11 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 	// Exhausted all attempts — mark phase as blocked
 	if pl != nil {
-		pl.PhaseFailed(opts.PhaseName, MaxGatedAttempts, "exhausted all attempts")
+		pl.PhaseFailed(opts.PhaseName, effectiveMax, "exhausted all attempts")
 	}
-	reason := fmt.Sprintf("gate did not pass after %d attempts", MaxGatedAttempts)
+	reason := fmt.Sprintf("gate did not pass after %d attempts", effectiveMax)
 	if lastGateResult != nil {
-		reason = fmt.Sprintf("gate failed after %d attempts:\n%s", MaxGatedAttempts, gate.Format(lastGateResult))
+		reason = fmt.Sprintf("gate failed after %d attempts:\n%s", effectiveMax, gate.Format(lastGateResult))
 	}
 
 	if updateErr := sf.Update(func(s *arc.PhaseState) error {
@@ -374,7 +389,7 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		return fmt.Errorf("persisting blocked state: %w", updateErr)
 	}
 
-	return fmt.Errorf("phase %s blocked: gate did not pass after %d attempts", opts.PhaseName, MaxGatedAttempts)
+	return fmt.Errorf("phase %s blocked: gate did not pass after %d attempts", opts.PhaseName, effectiveMax)
 }
 
 // gatedPhaseComplete handles the success path: commit changes and mark phase complete.
@@ -692,4 +707,18 @@ func tierString(t ErrorTier) string {
 	default:
 		return "unknown"
 	}
+}
+
+// blockPhaseOnStartupError writes a blocked state to disk when RunPhaseGated
+// encounters a permanent configuration error before spawning an agent.
+// This prevents the scheduler from immediately re-queuing a phase that will
+// never succeed without manual intervention (e.g. missing or unparseable spec).
+func blockPhaseOnStartupError(sf *state.StateFile, reason string) {
+	_ = sf.Update(func(s *arc.PhaseState) error {
+		s.PhaseStatus = "blocked"
+		s.BlockedReason = reason
+		s.BlockedAt = time.Now().UTC().Format(time.RFC3339)
+		s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+		return nil
+	})
 }

@@ -262,37 +262,3 @@ func isGenericRateLimit(stdout, stderr string) bool {
 		strings.Contains(combined, "429")
 }
 
-// Preflight checks that the command exists in PATH and that workdir is
-// accessible and writable.
-func (a *GenericAdapter) Preflight(ctx context.Context, workdir string) error {
-	if _, err := exec.LookPath(a.Command); err != nil {
-		return fmt.Errorf("command %q not found in PATH: %w", a.Command, err)
-	}
-
-	if err := checkWorkdirWritable(workdir); err != nil {
-		return fmt.Errorf("workdir %q is not accessible: %w", workdir, err)
-	}
-
-	return nil
-}
-
-// checkWorkdirWritable verifies that dir exists and is writable by attempting
-// to create and immediately remove a temporary file inside it.
-func checkWorkdirWritable(dir string) error {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return fmt.Errorf("stat failed: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory")
-	}
-
-	// Attempt to create a temporary file to confirm write access.
-	tmp, err := os.CreateTemp(dir, ".arc-preflight-*")
-	if err != nil {
-		return fmt.Errorf("directory is not writable: %w", err)
-	}
-	tmp.Close()
-	os.Remove(tmp.Name())
-	return nil
-}

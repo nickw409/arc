@@ -21,6 +21,18 @@ type GateAssertion struct {
 	// NoUntracked checks that no debug/temp artifact files are untracked in git.
 	// The value is ignored; any non-empty string enables this assertion.
 	NoUntracked string `json:"no_untracked,omitempty" yaml:"no_untracked,omitempty"`
+	// FileAbsent checks that the given path does NOT exist relative to workdir.
+	FileAbsent string `json:"file_absent,omitempty" yaml:"file_absent,omitempty"`
+	// GrepNot searches all .go files in workdir and fails if the pattern IS found.
+	// Complement of Grep.
+	GrepNot string `json:"grep_not,omitempty" yaml:"grep_not,omitempty"`
+	// NoModified checks that the given path (relative to workdir) has no uncommitted
+	// changes according to git diff HEAD. Fails if the file was modified.
+	NoModified string `json:"no_modified,omitempty" yaml:"no_modified,omitempty"`
+	// FilesOnly checks that every file changed (git diff HEAD --name-only) matches
+	// at least one of the comma-separated glob patterns. Fails if any changed file
+	// falls outside the allowed set.
+	FilesOnly string `json:"files_only,omitempty" yaml:"files_only,omitempty"`
 }
 
 // AssertionResult is the outcome of a single assertion check.

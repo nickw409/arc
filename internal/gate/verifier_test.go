@@ -29,7 +29,6 @@ func (m *mockAdapter) Spawn(_ context.Context, _ string, _ string, _ arc.Session
 	return &arc.AgentResult{Output: m.output}, nil
 }
 
-func (m *mockAdapter) Preflight(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // parseVerifierOutput tests — validate PASS/FAIL parsing logic directly

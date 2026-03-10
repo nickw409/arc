@@ -1,28 +1,48 @@
-A phase has failed {{.AttemptCount}} attempts. The orchestrator has exhausted
-mechanical retries and needs a strategic decision.
+A phase has failed {{.AttemptCount}} gate attempt(s). Mechanical retries are exhausted.
+Your job: read the context, make one strategic change, then exit.
 
 ## Phase
-{{.PhaseName}}: {{.SpecSummary}}
+**{{.PhaseName}}**
+
+Spec:
+{{.SpecSummary}}
+
+## Plan File
+The phase spec lives at: `{{.PlanMDPath}}`
+
+Read it now. The `## Spec` yaml block defines what was attempted and what the gate checks.
 
 ## Attempt History
-{{range $i, $a := .Attempts}}### Attempt {{add $i 1}}
+{{range $i, $a := .Attempts}}
+### Attempt {{add $i 1}}
 Gate output:
 ```
 {{$a.GateOutput}}
 ```
-Checkpoints passed: {{$a.CheckpointsPassed}} / {{$a.CheckpointsTotal}}
 {{end}}
 
-## Current Code State
+## Current Code State (git diff --stat)
 ```
 {{.DiffSummary}}
 ```
 
-## Decision Required
-Choose ONE action:
-1. **MODIFY_SPEC** — Simplify the spec or change the approach. Provide the new spec.
-2. **ADJUST_GATE** — Relax gate criteria that are too strict. Specify which assertions to change.
-3. **SPLIT_PHASE** — Break into smaller phases. Provide the new phase definitions.
-4. **GIVE_UP** — The task is not achievable in its current form. Explain why.
+## Decision
 
-Respond with your decision and the specific changes to make.
+Choose ONE action and execute it:
+
+**MODIFY_SPEC** — The spec is too ambitious, wrong approach, or missing context.
+Simplify the spec field or change the approach in `{{.PlanMDPath}}`.
+Preserve the `## Spec` yaml block structure — only edit the `spec:` text inside it.
+
+**ADJUST_GATE** — A gate assertion is wrong, too strict, or checking the wrong thing.
+Fix the `gate.assertions` list in `{{.PlanMDPath}}`.
+Preserve the `## Spec` yaml block structure — only edit the assertions.
+
+**FIX_CODE** — The spec and gate are correct but code needs a direct fix.
+Make the code change now. Run tests to verify. Do NOT edit plan.md.
+
+**GIVE_UP** — This phase cannot succeed in its current form and needs human review.
+Do NOT edit any files. Just stop.
+
+Pick the ONE action most likely to unblock this phase. Do not attempt multiple actions.
+The gate will be re-evaluated automatically after you exit.

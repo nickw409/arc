@@ -12,6 +12,7 @@ import (
 var adversaryPriority = map[string]int{
 	"executability": 0,
 	"integration":   0,
+	"gate-coverage": 0,
 	"consistency":   1,
 	"coverage":      2,
 	"ambiguity":     3,

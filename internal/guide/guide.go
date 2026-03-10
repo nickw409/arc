@@ -7,7 +7,7 @@ import (
 	"github.com/nwiley/arc/internal/resources"
 )
 
-var sections = []string{"setup", "plans", "workflows", "execution", "mistakes"}
+var sections = []string{"setup", "plans", "execution", "mistakes"}
 
 // ValidSections returns the list of valid section names for the guide.
 func ValidSections() []string {

@@ -54,7 +54,6 @@ type mockCall struct {
 
 func (m *mockAdapter) Name() string { return m.name }
 
-func (m *mockAdapter) Preflight(_ context.Context, _ string) error { return nil }
 
 func (m *mockAdapter) Spawn(_ context.Context, prompt string, workdir string, cfg arc.SessionConfig) (*arc.AgentResult, error) {
 	m.calls = append(m.calls, mockCall{Prompt: prompt, WorkDir: workdir, Config: cfg})

@@ -9,6 +9,8 @@ import (
 	"github.com/nwiley/arc/internal/state"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 // makeTestPlan creates a plan in a temp directory and returns plansDir.
 func makeTestPlan(t *testing.T, planName string, phases []string) string {
 	t.Helper()
@@ -37,7 +39,7 @@ func TestWriteReadSpec(t *testing.T) {
 			Assertions: []arc.GateAssertion{
 				{Type: "file_exists", Target: "internal/foo/bar.go", FileExists: "internal/foo/bar.go"},
 			},
-			VerifierAgent: true,
+			VerifierAgent: boolPtr(true),
 		},
 	}
 
@@ -76,8 +78,10 @@ func TestWriteReadSpec(t *testing.T) {
 	} else if len(spec.Gate.Assertions) > 0 && got.Gate.Assertions[0] != spec.Gate.Assertions[0] {
 		t.Errorf("Gate.Assertions[0]: got %q, want %q", got.Gate.Assertions[0], spec.Gate.Assertions[0])
 	}
-	if got.Gate.VerifierAgent != spec.Gate.VerifierAgent {
-		t.Errorf("Gate.VerifierAgent: got %v, want %v", got.Gate.VerifierAgent, spec.Gate.VerifierAgent)
+	wantVA := spec.Gate.VerifierAgent != nil && *spec.Gate.VerifierAgent
+	gotVA := got.Gate.VerifierAgent != nil && *got.Gate.VerifierAgent
+	if gotVA != wantVA {
+		t.Errorf("Gate.VerifierAgent: got %v, want %v", gotVA, wantVA)
 	}
 }
 
@@ -279,7 +283,7 @@ func TestUpdateGate(t *testing.T) {
 			{Type: "file_exists", Target: "go.mod", FileExists: "go.mod"},
 			{Type: "grep", Target: "package main", Grep: "package main"},
 		},
-		VerifierAgent: true,
+		VerifierAgent: boolPtr(true),
 	}
 	if err := UpdateGate(plansDir, "my-plan", "phase-a", newGate); err != nil {
 		t.Fatalf("UpdateGate: %v", err)
@@ -292,7 +296,7 @@ func TestUpdateGate(t *testing.T) {
 	if len(got.Gate.Assertions) != 2 {
 		t.Errorf("Gate.Assertions length: got %d, want 2", len(got.Gate.Assertions))
 	}
-	if !got.Gate.VerifierAgent {
+	if got.Gate.VerifierAgent == nil || !*got.Gate.VerifierAgent {
 		t.Errorf("Gate.VerifierAgent: got false, want true")
 	}
 	// Original spec field must be preserved
@@ -376,7 +380,7 @@ func TestUpdateGateRunningBlocked(t *testing.T) {
 		t.Fatalf("update state: %v", err)
 	}
 
-	gate := arc.GateSpec{VerifierAgent: true}
+	gate := arc.GateSpec{VerifierAgent: boolPtr(true)}
 	if err := UpdateGate(plansDir, "my-plan", "phase-a", gate); err == nil {
 		t.Fatal("expected error updating gate on running phase, got nil")
 	}
@@ -400,7 +404,7 @@ func TestUpdateGateCompleteBlocked(t *testing.T) {
 		t.Fatalf("update state: %v", err)
 	}
 
-	gate := arc.GateSpec{VerifierAgent: true}
+	gate := arc.GateSpec{VerifierAgent: boolPtr(true)}
 	if err := UpdateGate(plansDir, "my-plan", "phase-a", gate); err == nil {
 		t.Fatal("expected error updating gate on complete phase, got nil")
 	}
@@ -465,7 +469,7 @@ func TestUpdateSpecMergesFields(t *testing.T) {
 		Complexity: "complex",
 		Files:      []string{"main.go", "lib.go"},
 		Gate: arc.GateSpec{
-			VerifierAgent: true,
+			VerifierAgent: boolPtr(true),
 			Assertions: []arc.GateAssertion{
 				{Type: "file_exists", FileExists: "main.go", Target: "main.go"},
 			},
@@ -497,7 +501,7 @@ func TestUpdateSpecMergesFields(t *testing.T) {
 	if len(got.Files) != 2 {
 		t.Errorf("Files was wiped: got %v, want [main.go lib.go]", got.Files)
 	}
-	if !got.Gate.VerifierAgent {
+	if got.Gate.VerifierAgent == nil || !*got.Gate.VerifierAgent {
 		t.Error("Gate.VerifierAgent was wiped")
 	}
 	if len(got.Gate.Assertions) != 1 {

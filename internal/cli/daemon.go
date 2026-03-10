@@ -27,6 +27,7 @@ func newDaemonCmd() *cobra.Command {
 		newDaemonStatusCmd(),
 		newDaemonSubmitCmd(),
 		newDaemonCancelCmd(),
+		newDaemonSyncCmd(),
 		newDaemonCalibrateCmd(),
 	)
 	return cmd
@@ -231,6 +232,38 @@ func newDaemonCancelCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Plan %q cancelled.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newDaemonSyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync <plan-name>",
+		Short: "Reload phase states from disk into the daemon",
+		Long:  "Reloads all phase states from disk for the named plan. Useful after arc manage modifies a phase directly.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			socketPath := daemon.DefaultSocketPath()
+			if !daemon.IsRunning(socketPath) {
+				return fmt.Errorf("daemon is not running")
+			}
+
+			client, err := daemon.Connect(socketPath, 5*time.Second)
+			if err != nil {
+				return fmt.Errorf("connecting to daemon: %w", err)
+			}
+			defer client.Close()
+
+			resp, err := client.Sync(args[0])
+			if err != nil {
+				return fmt.Errorf("syncing plan: %w", err)
+			}
+			if !resp.OK {
+				return fmt.Errorf("sync failed: %s", resp.Error)
+			}
+
+			fmt.Printf("Plan %q synced — daemon reloaded phase states from disk.\n", args[0])
 			return nil
 		},
 	}

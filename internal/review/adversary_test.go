@@ -313,10 +313,39 @@ func TestDefaultAdversaries_HasIntegration(t *testing.T) {
 	t.Error("no adversary named 'integration' found in DefaultAdversaries()")
 }
 
-func TestDefaultAdversaries_SixEntries(t *testing.T) {
+func TestDefaultAdversaries_SevenEntries(t *testing.T) {
 	advs := DefaultAdversaries()
-	if len(advs) != 6 {
-		t.Errorf("len(DefaultAdversaries()) = %d, want 6", len(advs))
+	if len(advs) != 7 {
+		t.Errorf("len(DefaultAdversaries()) = %d, want 7", len(advs))
+	}
+}
+
+func TestDefaultAdversaries_HasGateCoverage(t *testing.T) {
+	advs := DefaultAdversaries()
+	for _, a := range advs {
+		if a.Name == "gate-coverage" {
+			if a.PassVerdict != "gate_sufficient" {
+				t.Errorf("gate-coverage PassVerdict = %q, want %q", a.PassVerdict, "gate_sufficient")
+			}
+			if a.FailVerdict != "gate_gaps" {
+				t.Errorf("gate-coverage FailVerdict = %q, want %q", a.FailVerdict, "gate_gaps")
+			}
+			if !a.Required {
+				t.Error("gate-coverage adversary must be Required=true")
+			}
+			return
+		}
+	}
+	t.Error("no adversary named 'gate-coverage' found in DefaultAdversaries()")
+}
+
+func TestGateCoverageAdversary_PromptExists(t *testing.T) {
+	data, err := resources.PromptBytes("adversaries/gate-coverage.md")
+	if err != nil {
+		t.Fatalf("gate-coverage.md prompt not found: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("gate-coverage.md prompt is empty")
 	}
 }
 

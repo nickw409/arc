@@ -22,11 +22,12 @@ func newTestHandler(t *testing.T) (*handlerContext, string) {
 	t.Helper()
 	dir := t.TempDir()
 	return &handlerContext{
-		projectDir: dir,
-		arcHome:    dir,
-		logger:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		jobs:       make(map[string]*runJob),
-		jobsCtx:    context.Background(),
+		projectDir:   dir,
+		arcHome:      dir,
+		logger:       slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		jobs:         make(map[string]*runJob),
+		jobsCtx:      context.Background(),
+		daemonSocket: filepath.Join(dir, "no-daemon.sock"), // never connects to real daemon
 	}, dir
 }
 
@@ -332,7 +333,7 @@ func TestHandleGuideSection(t *testing.T) {
 	h, _ := newTestHandler(t)
 
 	result, err := callTool(context.Background(), h, h.handleGuide, map[string]any{
-		"section": "workflows",
+		"section": "execution",
 	})
 	if err != nil {
 		t.Fatal(err)

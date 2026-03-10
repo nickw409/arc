@@ -41,14 +41,14 @@ func TestRenderPlansSection(t *testing.T) {
 	}
 }
 
-func TestRenderWorkflowsSection(t *testing.T) {
-	data, err := Render("workflows")
+func TestRenderExecutionSection(t *testing.T) {
+	data, err := Render("execution")
 	if err != nil {
-		t.Fatalf("Render('workflows') error: %v", err)
+		t.Fatalf("Render('execution') error: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "feature") {
-		t.Fatal("workflows section does not contain 'feature'")
+	if !strings.Contains(content, "arc run") {
+		t.Fatal("execution section does not contain 'arc run'")
 	}
 }
 

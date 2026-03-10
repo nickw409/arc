@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwiley/arc/internal/arc"
 	"github.com/nwiley/arc/internal/intelligence"
 	"github.com/nwiley/arc/internal/orchestrator"
 	"github.com/nwiley/arc/internal/state"
@@ -185,6 +186,31 @@ func (s *Scheduler) Cancel(planName string) error {
 	return nil
 }
 
+// Sync reloads all phase states from disk for the named plan and re-evaluates
+// scheduling. This is useful after an external tool (e.g. arc manage) modifies
+// a phase state directly without going through the daemon.
+func (s *Scheduler) Sync(planName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reg, ok := s.registrations[planName]
+	if !ok {
+		return fmt.Errorf("plan %q not found in daemon (not submitted or already finalized)", planName)
+	}
+
+	pd := planDir(reg)
+	updated := orchestrator.LoadAllPhaseStates(pd, reg.Meta.Phases)
+	for phase, ps := range updated {
+		reg.PhaseStates[phase] = ps
+	}
+	s.dirty[planName] = true
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
 // Drain stops accepting new plans and shuts down once all current plans finish.
 func (s *Scheduler) Drain() {
 	s.mu.Lock()
@@ -274,6 +300,9 @@ func (s *Scheduler) buildPlanStatus(reg *PlanRegistration) *Response {
 
 	running := s.running[reg.PlanName]
 	for phaseName, ps := range reg.PhaseStates {
+		if ps == nil {
+			continue
+		}
 		info := PhaseInfo{
 			Name:         phaseName,
 			Iteration:    ps.Iteration.Current,
@@ -484,6 +513,30 @@ func (s *Scheduler) handlePhaseResult(result PhaseResult) {
 	// Remove from running map.
 	if running, ok := s.running[result.PlanName]; ok {
 		delete(running, result.PhaseName)
+	}
+
+	// If the runner returned an error and the phase is still pending on disk,
+	// the runner failed before it could write any state (e.g. unparseable spec).
+	// Block the phase so the scheduler does not immediately re-queue it.
+	if result.Err != nil {
+		ps := reg.PhaseStates[result.PhaseName]
+		if ps == nil || ps.PhaseStatus == "pending" {
+			reason := result.Err.Error()
+			statePath := filepath.Join(planDir, "phases", result.PhaseName, "state.json")
+			sf := state.NewStateFile(statePath)
+			if blockErr := sf.Update(func(s *arc.PhaseState) error {
+				s.PhaseStatus = "blocked"
+				s.BlockedReason = reason
+				s.BlockedAt = time.Now().UTC().Format(time.RFC3339)
+				s.Blocked = arc.BlockedInfo{IsBlocked: true, Reason: &reason}
+				return nil
+			}); blockErr != nil {
+				s.logger.Warn("could not block phase after runner error", "phase", result.PhaseName, "err", blockErr)
+			}
+			if updated := orchestrator.LoadPhaseState(planDir, result.PhaseName); updated != nil {
+				reg.PhaseStates[result.PhaseName] = updated
+			}
+		}
 	}
 
 	// Mark plan dirty for re-evaluation.

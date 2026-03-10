@@ -1359,21 +1359,23 @@ func TestShouldRunVerifier(t *testing.T) {
 		name           string
 		override       *bool
 		configVerifier string
-		specVerifier   bool
+		specVerifier   *bool
 		complexity     string
 		want           bool
 	}{
-		{"override true wins", &tr, "never", false, "simple", true},
-		{"override false wins", &fa, "always", true, "complex", false},
-		{"config always", nil, "always", false, "simple", true},
-		{"config never", nil, "never", true, "complex", false},
-		{"auto + complex", nil, "auto", false, "complex", true},
-		{"auto + medium", nil, "auto", false, "medium", true},
-		{"auto + simple", nil, "auto", false, "simple", false},
-		{"auto + spec true", nil, "auto", true, "simple", true},
-		{"auto + empty complexity", nil, "auto", false, "", false},
-		{"empty config + complex", nil, "", false, "complex", true},
-		{"empty config + simple", nil, "", false, "simple", false},
+		{"override true wins", &tr, "never", &fa, "simple", true},
+		{"override false wins", &fa, "always", &tr, "complex", false},
+		{"config always", nil, "always", nil, "simple", true},
+		{"config never", nil, "never", &tr, "complex", false},
+		{"auto + complex", nil, "auto", nil, "complex", true},
+		{"auto + medium", nil, "auto", nil, "medium", true},
+		{"auto + simple", nil, "auto", nil, "simple", false},
+		{"auto + spec true", nil, "auto", &tr, "simple", true},
+		{"auto + spec false", nil, "auto", &fa, "medium", false},
+		{"auto + empty complexity", nil, "auto", nil, "", false},
+		{"empty config + complex", nil, "", nil, "complex", true},
+		{"empty config + simple", nil, "", nil, "simple", false},
+		{"spec false overrides medium", nil, "", &fa, "medium", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1383,5 +1385,261 @@ func TestShouldRunVerifier(t *testing.T) {
 					tt.override, tt.configVerifier, tt.specVerifier, tt.complexity, got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// file_absent
+// ---------------------------------------------------------------------------
+
+func TestRun_FileAbsent_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - file_absent: docs/WORKFLOW_SCHEMA.md
+`)
+	res, err := Run(context.Background(), spec, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("expected pass when file absent, got fail: %s", res.Assertions[0].Detail)
+	}
+}
+
+func TestRun_FileAbsent_Fail(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "docs/WORKFLOW_SCHEMA.md", "content")
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - file_absent: docs/WORKFLOW_SCHEMA.md
+`)
+	res, err := Run(context.Background(), spec, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Error("expected fail when file exists, got pass")
+	}
+	if !strings.Contains(res.Assertions[0].Detail, "WORKFLOW_SCHEMA.md") {
+		t.Errorf("detail should mention file name, got: %s", res.Assertions[0].Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// grep_not
+// ---------------------------------------------------------------------------
+
+func TestRun_GrepNot_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "pkg/foo.go", "package pkg\n\nfunc Good() {}\n")
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - grep_not: "OldBadPattern"
+`)
+	res, err := Run(context.Background(), spec, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("expected pass when pattern absent, got fail: %s", res.Assertions[0].Detail)
+	}
+}
+
+func TestRun_GrepNot_Fail(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "pkg/foo.go", "package pkg\n\nfunc OldBadPattern() {}\n")
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - grep_not: "OldBadPattern"
+`)
+	res, err := Run(context.Background(), spec, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Error("expected fail when pattern present, got pass")
+	}
+	if !strings.Contains(res.Assertions[0].Detail, "OldBadPattern") {
+		t.Errorf("detail should mention pattern, got: %s", res.Assertions[0].Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// no_modified
+// ---------------------------------------------------------------------------
+
+func TestRun_NoModified_Pass(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - no_modified: .gitkeep
+`)
+	res, err := Run(context.Background(), spec, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("expected pass for unmodified file, got fail: %s", res.Assertions[0].Detail)
+	}
+}
+
+func TestRun_NoModified_Fail(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - no_modified: .gitkeep
+`)
+	res, err := Run(context.Background(), spec, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Error("expected fail for modified file, got pass")
+	}
+	if !strings.Contains(res.Assertions[0].Detail, ".gitkeep") {
+		t.Errorf("detail should mention file, got: %s", res.Assertions[0].Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// files_only
+// ---------------------------------------------------------------------------
+
+func TestRun_FilesOnly_Pass(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	// Add a file under docs/ and modify it.
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "README.md"), []byte("new doc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.CombinedOutput()
+	}
+	run("add", "docs/README.md")
+	run("commit", "-m", "add doc")
+	// Now modify the doc — it should be in diff HEAD~1..HEAD.
+	// Actually for files_only we need uncommitted changes: modify after last commit.
+	if err := os.WriteFile(filepath.Join(dir, "docs", "README.md"), []byte("updated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - files_only: "docs/**"
+`)
+	res, err := Run(context.Background(), spec, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("expected pass: only docs/ modified, got fail: %s", res.Assertions[0].Detail)
+	}
+}
+
+func TestRun_FilesOnly_Fail(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	// Modify the tracked .gitkeep (outside docs/).
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - files_only: "docs/**"
+`)
+	res, err := Run(context.Background(), spec, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Error("expected fail: file outside docs/ was modified")
+	}
+	if !strings.Contains(res.Assertions[0].Detail, ".gitkeep") {
+		t.Errorf("detail should name the violating file, got: %s", res.Assertions[0].Detail)
+	}
+}
+
+func TestRun_FilesOnly_MultiplePatterns(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	// Modify .gitkeep — allowed by "*.md, .gitkeep" but not by "docs/**" alone.
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := parseSpec(t, `
+name: test
+spec: "test"
+gate:
+  assertions:
+    - files_only: "docs/**, .gitkeep"
+`)
+	res, err := Run(context.Background(), spec, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Errorf("expected pass with multi-pattern allowlist, got fail: %s", res.Assertions[0].Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// matchGlob unit tests
+// ---------------------------------------------------------------------------
+
+func TestMatchGlob(t *testing.T) {
+	cases := []struct {
+		file    string
+		pattern string
+		want    bool
+	}{
+		{"docs/README.md", "docs/**", true},
+		{"docs/sub/deep.md", "docs/**", true},
+		{"docs", "docs/**", true},
+		{"internal/foo.go", "docs/**", false},
+		{"README.md", "*.md", true},
+		{"internal/foo.go", "*.md", false},
+		{".gitkeep", ".gitkeep", true},
+		{"other", ".gitkeep", false},
+	}
+	for _, tc := range cases {
+		got := matchGlob(tc.file, tc.pattern)
+		if got != tc.want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", tc.file, tc.pattern, got, tc.want)
+		}
 	}
 }

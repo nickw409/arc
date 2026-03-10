@@ -116,11 +116,14 @@ func TestRenderGatePromptOrchestrator(t *testing.T) {
 		t.Fatalf("RenderGatePrompt orchestrator: unexpected error: %v", err)
 	}
 
-	if !strings.Contains(result, "failed 3 attempts") {
+	if !strings.Contains(result, "3 gate attempt") {
 		t.Error("expected attempt count in orchestrator output")
 	}
-	if !strings.Contains(result, "impl: Add widget factory") {
-		t.Error("expected phase name and spec in orchestrator output")
+	if !strings.Contains(result, "impl") {
+		t.Error("expected phase name in orchestrator output")
+	}
+	if !strings.Contains(result, "Add widget factory") {
+		t.Error("expected spec summary in orchestrator output")
 	}
 	if !strings.Contains(result, "### Attempt 1") {
 		t.Error("expected attempt 1 header in orchestrator output")
@@ -130,9 +133,6 @@ func TestRenderGatePromptOrchestrator(t *testing.T) {
 	}
 	if !strings.Contains(result, "FAIL: test_exists TestNewFactory") {
 		t.Error("expected first attempt gate output")
-	}
-	if !strings.Contains(result, "Checkpoints passed: 0 / 2") {
-		t.Error("expected checkpoint counts")
 	}
 	if !strings.Contains(result, "MODIFY_SPEC") {
 		t.Error("expected MODIFY_SPEC option in decision section")

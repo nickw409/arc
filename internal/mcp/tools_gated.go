@@ -317,9 +317,9 @@ func (h *handlerContext) handlePlanUpdateGate(_ context.Context, req mcp.CallToo
 		assertions = append(assertions, a)
 	}
 
-	verifierAgent := false
+	var verifierAgent *bool
 	if v, ok := args["verifier_agent"].(bool); ok {
-		verifierAgent = v
+		verifierAgent = &v
 	}
 
 	gate := arc.GateSpec{

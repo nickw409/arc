@@ -37,6 +37,11 @@ func (c *Client) Cancel(planName string) (*Response, error) {
 	return c.roundTrip(Request{Cmd: "cancel", Plan: planName})
 }
 
+// Sync reloads all phase states from disk for the named plan.
+func (c *Client) Sync(planName string) (*Response, error) {
+	return c.roundTrip(Request{Cmd: "sync", Plan: planName})
+}
+
 // Drain requests the daemon to drain (stop accepting new work and shut down after completion).
 func (c *Client) Drain() (*Response, error) {
 	return c.roundTrip(Request{Cmd: "drain"})

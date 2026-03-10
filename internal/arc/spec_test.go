@@ -25,7 +25,7 @@ func TestPhaseSpecJSON(t *testing.T) {
 				{Grep: "func NewMiddleware"},
 				{TestExists: "TestTokenExpiry"},
 			},
-			VerifierAgent: false,
+			VerifierAgent: nil,
 		},
 	}
 
@@ -76,7 +76,7 @@ gate:
 	if spec.Complexity != "simple" {
 		t.Errorf("Complexity = %q, want %q", spec.Complexity, "simple")
 	}
-	if !spec.Gate.VerifierAgent {
+	if spec.Gate.VerifierAgent == nil || !*spec.Gate.VerifierAgent {
 		t.Error("VerifierAgent = false, want true")
 	}
 	if len(spec.Gate.Assertions) != 2 {

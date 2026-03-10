@@ -48,6 +48,12 @@ func HandleConnection(conn net.Conn, sched *Scheduler, cfg *DaemonConfig) {
 		resp = Response{OK: true}
 	case "list":
 		resp = handleList(sched)
+	case "sync":
+		if err := sched.Sync(req.Plan); err != nil {
+			resp = Response{OK: false, Error: err.Error()}
+		} else {
+			resp = Response{OK: true}
+		}
 	default:
 		resp = Response{OK: false, Error: fmt.Sprintf("unknown command: %q", req.Cmd)}
 	}

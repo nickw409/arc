@@ -40,6 +40,7 @@ type OrchestratorData struct {
 	SpecSummary  string
 	Attempts     []AttemptData
 	DiffSummary  string
+	PlanMDPath   string // absolute path to the phase's plan.md
 }
 
 // AttemptData describes a single failed attempt in the orchestrator prompt.

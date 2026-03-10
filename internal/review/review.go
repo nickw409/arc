@@ -296,46 +296,32 @@ func failureSignature(verdicts map[string]AdversaryResult) string {
 	return strings.Join(names, ",")
 }
 
-// runAdversaries spawns all adversaries concurrently and returns their results.
+// runAdversaries spawns adversary groups concurrently and returns their results.
+// Each group runs as a single agent call; results are merged by adversary name.
 func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, iteration int, projectContext string) map[string]AdversaryResult {
+	groups := DefaultGroups()
+
+	type groupResults []AdversaryResult
+	resultsCh := make(chan groupResults, len(groups))
+
 	var wg sync.WaitGroup
-	resultsCh := make(chan AdversaryResult, len(adversaries))
-
-	for _, adv := range adversaries {
+	for _, grp := range groups {
 		wg.Add(1)
-		go func(a Adversary) {
+		go func(g AdversaryGroup) {
 			defer wg.Done()
-
-			if ctx.Err() != nil {
-				resultsCh <- AdversaryResult{
-					Name:     a.Name,
-					Status:   "error",
-					Output:   ctx.Err().Error(),
-					Required: a.Required,
-				}
-				return
-			}
-
-			advResult, err := RunAdversary(ctx, a, planDir, phase, planMD, model, iteration, projectContext)
-			if err != nil {
-				resultsCh <- AdversaryResult{
-					Name:     a.Name,
-					Status:   "error",
-					Output:   err.Error(),
-					Required: a.Required,
-				}
-				return
-			}
-			resultsCh <- *advResult
-		}(adv)
+			results := RunAdversaryGroup(ctx, g, planDir, phase, planMD, model, iteration, projectContext)
+			resultsCh <- results
+		}(grp)
 	}
 
 	wg.Wait()
 	close(resultsCh)
 
 	verdicts := make(map[string]AdversaryResult, len(adversaries))
-	for r := range resultsCh {
-		verdicts[r.Name] = r
+	for results := range resultsCh {
+		for _, r := range results {
+			verdicts[r.Name] = r
+		}
 	}
 	return verdicts
 }
