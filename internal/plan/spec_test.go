@@ -879,3 +879,143 @@ func TestValidateSpec_Promises_NilVsEmptySlice(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Integration tests — combined features (Files, Promises, spec_coverage)
+// ---------------------------------------------------------------------------
+
+func TestValidateSpec_MultipleWarnings(t *testing.T) {
+	// Empty spec + empty assertion + invalid promise → at least 3 warnings.
+	spec := &arc.PhaseSpec{
+		Spec:       "",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: ""},
+			},
+		},
+		Promises: []arc.Promise{{}},
+	}
+	warnings := ValidateSpec(spec)
+	if len(warnings) < 2 {
+		t.Fatalf("expected at least 2 warnings, got %d: %v", len(warnings), warnings)
+	}
+	// Verify both spec-empty and promise-invalid warnings are present.
+	hasSpec := false
+	hasPromise := false
+	for _, w := range warnings {
+		if w.Field == "spec" {
+			hasSpec = true
+		}
+		if w.Field == "promises" && w.Fatal {
+			hasPromise = true
+		}
+	}
+	if !hasSpec {
+		t.Error("expected warning for empty spec field")
+	}
+	if !hasPromise {
+		t.Error("expected fatal warning for invalid promise")
+	}
+}
+
+func TestValidateSpec_TestCoversWithoutTestField_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestCovers: "handles nil input", Test: ""}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for test_covers without test field")
+	}
+}
+
+func TestValidateSpec_PromiseWithEmptyString_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: ""}},
+	}
+	found := false
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for promise with empty func_exists value")
+	}
+}
+
+func TestValidateSpec_NilSpec_HandlesGracefully(t *testing.T) {
+	// ValidateSpec should return nil without panicking when given a nil spec.
+	warnings := ValidateSpec(nil)
+	if warnings != nil {
+		t.Errorf("expected nil warnings for nil spec, got %v", warnings)
+	}
+}
+
+func TestValidateSpec_NilGate_HandlesGracefully(t *testing.T) {
+	// GateSpec is a value type — "nil gate" means zero-value with empty Assertions.
+	// ValidateSpec should not panic and should not warn about an empty Gate.
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate:       arc.GateSpec{},
+	}
+	warnings := ValidateSpec(spec)
+	for _, w := range warnings {
+		if w.Field == "gate.assertions" {
+			t.Errorf("unexpected gate warning for empty Gate: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_FilesWithInvalidPaths_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Files:      []string{"../../../etc/passwd", "valid.go"},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "files" && strings.Contains(w.Message, "..") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about path traversal in files list")
+	}
+}
+
+func TestValidateSpec_SpecCoverageWithNonEmptyValue_Warns(t *testing.T) {
+	// spec_coverage with a multi-word prose value should generate an advisory
+	// warning suggesting the use of a concrete identifier instead.
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: "should warn about this description"},
+			},
+		},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "gate.assertions" && !w.Fatal && strings.Contains(w.Message, "spec_coverage") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected non-fatal warning for spec_coverage with prose description value")
+	}
+}

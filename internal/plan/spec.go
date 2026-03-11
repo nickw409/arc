@@ -36,7 +36,20 @@ func (w SpecWarning) String() string {
 // ValidateSpec checks a PhaseSpec for common mistakes and returns warnings.
 // It does not return errors — all issues are advisory so the caller can decide.
 func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
+	if spec == nil {
+		return nil
+	}
 	var warnings []SpecWarning
+
+	// Files: check for path traversal attempts.
+	for _, f := range spec.Files {
+		if strings.Contains(f, "..") {
+			warnings = append(warnings, SpecWarning{
+				Field:   "files",
+				Message: fmt.Sprintf("path %q contains '..' — path traversal in spec files is not allowed", f),
+			})
+		}
+	}
 
 	// Spec content: must have something for the agent and gate to work with.
 	if strings.TrimSpace(spec.Spec) == "" && strings.TrimSpace(spec.Verify) == "" {
@@ -102,6 +115,14 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 				Field:   "gate.assertions",
 				Message: fmt.Sprintf("assertion %d has no recognized field — use 'grep:', 'file_exists:', 'test_exists:', 'build_passes:', 'no_untracked:', or 'spec_coverage:' (or legacy type+target)", i+1),
 				Fatal:   true,
+			})
+		}
+		// spec_coverage with a multi-word prose description is likely a mistake;
+		// use a concrete identifier (function name, type name, string literal).
+		if a.SpecCoverage != "" && strings.Contains(a.SpecCoverage, " ") {
+			warnings = append(warnings, SpecWarning{
+				Field:   "gate.assertions",
+				Message: fmt.Sprintf("assertion %d spec_coverage value %q looks like prose — use a concrete identifier or code snippet for reliable text matching in test files", i+1, truncate(a.SpecCoverage, 40)),
 			})
 		}
 	}

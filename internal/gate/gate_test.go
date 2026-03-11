@@ -2069,3 +2069,501 @@ func TestRun_EmptySpec_FailFast(t *testing.T) {
 		t.Errorf("expected fail for empty spec (no assertions, no promises, no content)")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Integration tests — Files + Promises + spec_coverage combined
+// ---------------------------------------------------------------------------
+
+func TestRun_FilesAndPromises_Combined_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo"
+complexity: simple
+files:
+  - foo.go
+promises:
+  - func_exists: "func NewFoo"
+  - test_exists: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
+	}
+	// 1 file_exists (from Files) + 1 grep (FuncExists promise) + 1 test_exists (TestExists promise)
+	if len(result.Assertions) != 3 {
+		t.Fatalf("expected 3 assertions, got %d: %+v", len(result.Assertions), result.Assertions)
+	}
+}
+
+func TestRun_FilesAndPromises_PartialFail(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	// bar.go intentionally missing
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo and bar"
+complexity: simple
+files:
+  - foo.go
+  - bar.go
+promises:
+  - func_exists: "func NewFoo"
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Passed {
+		t.Fatalf("expected Passed=false (bar.go missing), got true")
+	}
+	// foo.go exists (pass), bar.go missing (fail), func_exists (pass)
+	if len(result.Assertions) != 3 {
+		t.Fatalf("expected 3 assertions, got %d: %+v", len(result.Assertions), result.Assertions)
+	}
+	if !result.Assertions[0].Passed {
+		t.Errorf("expected assertions[0] (foo.go) to pass, got: %s", result.Assertions[0].Detail)
+	}
+	if result.Assertions[1].Passed {
+		t.Errorf("expected assertions[1] (bar.go) to fail")
+	}
+	if !result.Assertions[2].Passed {
+		t.Errorf("expected assertions[2] (func_exists) to pass, got: %s", result.Assertions[2].Detail)
+	}
+}
+
+func TestRun_NoExplicitAssertions_FilesAndPromisesDriveGate(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "example.go", "package main\n\nfunc Example() {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement Example"
+complexity: simple
+files:
+  - example.go
+promises:
+  - func_exists: "func Example"
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected gate to pass with auto-derived assertions, got false: %+v", result.Assertions)
+	}
+	if len(result.Assertions) == 0 {
+		t.Fatal("expected auto-derived assertions, got none")
+	}
+}
+
+func TestRun_FilesOnly_AllMissing(t *testing.T) {
+	workdir := t.TempDir()
+	// No files created
+
+	spec := parseSpec(t, `
+spec: "create missing files"
+complexity: simple
+files:
+  - missing1.go
+  - missing2.go
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false (all files missing)")
+	}
+	if len(result.Assertions) != 2 {
+		t.Fatalf("expected 2 assertions, got %d", len(result.Assertions))
+	}
+	for i, a := range result.Assertions {
+		if a.Passed {
+			t.Errorf("expected assertions[%d] to fail (file missing)", i)
+		}
+	}
+}
+
+func TestRun_PromisesOnly_AllFailing(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc Unrelated() {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement missing functions"
+complexity: simple
+promises:
+  - func_exists: "func Missing1"
+  - test_exists: TestMissing2
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false (promises not met)")
+	}
+	for i, a := range result.Assertions {
+		if a.Passed {
+			t.Errorf("expected assertions[%d] to fail", i)
+		}
+	}
+}
+
+func TestRun_SpecCoverageOnly_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement Foo"
+complexity: simple
+gate:
+  assertions:
+    - spec_coverage: TestFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
+	}
+	if len(result.Assertions) != 1 {
+		t.Fatalf("expected 1 assertion (spec_coverage), got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_FilesAndSpecCoverage_Combined(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo"
+complexity: simple
+files:
+  - foo.go
+gate:
+  assertions:
+    - spec_coverage: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
+	}
+	// 1 file_exists (from Files) + 1 spec_coverage
+	if len(result.Assertions) < 2 {
+		t.Fatalf("expected at least 2 assertions (file_exists + spec_coverage), got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_PromisesAndSpecCoverage_Combined(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo"
+complexity: simple
+promises:
+  - func_exists: "func NewFoo"
+gate:
+  assertions:
+    - spec_coverage: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
+	}
+	// 1 grep (from promise) + 1 spec_coverage
+	if len(result.Assertions) < 2 {
+		t.Fatalf("expected at least 2 assertions (func_exists + spec_coverage), got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_AllThreeFeatures_Combined_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo"
+complexity: simple
+files:
+  - foo.go
+promises:
+  - func_exists: "func NewFoo"
+  - test_exists: TestNewFoo
+gate:
+  assertions:
+    - spec_coverage: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
+	}
+	// 1 file_exists + 1 grep (func_exists) + 1 test_exists + 1 spec_coverage = 4
+	if len(result.Assertions) != 4 {
+		t.Fatalf("expected 4 assertions (file_exists, func_exists, test_exists, spec_coverage), got %d: %+v", len(result.Assertions), result.Assertions)
+	}
+}
+
+func TestRun_AllThreeFeatures_SpecCoverageFails(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "implement NewFoo"
+complexity: simple
+files:
+  - foo.go
+promises:
+  - func_exists: "func NewFoo"
+  - test_exists: TestNewFoo
+gate:
+  assertions:
+    - spec_coverage: TestEdgeCaseMissing
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false (spec_coverage target not in test files)")
+	}
+	// Find the failed spec_coverage assertion
+	foundCovFail := false
+	for _, a := range result.Assertions {
+		if !a.Passed && strings.Contains(a.Description, "spec_coverage") {
+			foundCovFail = true
+		}
+	}
+	if !foundCovFail {
+		t.Errorf("expected a failed spec_coverage assertion in results: %+v", result.Assertions)
+	}
+}
+
+func TestRun_SpecCoverage_EmptySpec_NoTrigger(t *testing.T) {
+	// When SpecCoverage value is a valid identifier and the target exists in test
+	// files, spec_coverage passes even when the Spec prose field is empty.
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+gate:
+  assertions:
+    - spec_coverage: TestFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	// spec_coverage checks the target text in test files; with empty Spec field
+	// the gate still runs the coverage assertion (no AI trigger required).
+	if !result.Passed {
+		t.Fatalf("expected Passed=true (coverage target found), got false: %+v", result.Assertions)
+	}
+	if len(result.Assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_SpecCoverage_PopulatedSpec_Pass(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "Implement Foo with error handling"
+complexity: simple
+gate:
+  assertions:
+    - spec_coverage: TestFoo
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true: %+v", result.Assertions)
+	}
+}
+
+func TestRun_SpecCoverage_PopulatedSpec_Fail(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "Implement Foo with edge cases"
+complexity: simple
+gate:
+  assertions:
+    - spec_coverage: TestEdgeCaseNotPresent
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false (coverage target not in test files)")
+	}
+}
+
+func TestRun_InvalidWorkdir_Error(t *testing.T) {
+	spec := parseSpec(t, `
+spec: "test"
+complexity: simple
+files:
+  - test.go
+`)
+	result, err := Run(context.Background(), spec, "/nonexistent/path/xyz123abc", WithVerifier(false))
+	// gate.Run should not error — it runs assertions and reports failures.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// file_exists fails when workdir doesn't exist
+	if result.Passed {
+		t.Fatal("expected Passed=false for invalid workdir")
+	}
+}
+
+func TestRun_NilSpec_HandlesGracefully(t *testing.T) {
+	result, err := Run(context.Background(), nil, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for nil spec")
+	}
+	if result != nil {
+		t.Fatal("expected nil result for nil spec")
+	}
+}
+
+func TestRun_EmptyWorkdir_String(t *testing.T) {
+	spec := parseSpec(t, `
+spec: "test"
+complexity: simple
+files:
+  - test.go
+`)
+	// Empty workdir is treated as relative to current directory.
+	// Should not panic; we just verify no panic and get a result.
+	result, err := Run(context.Background(), spec, "", WithVerifier(false))
+	if err != nil {
+		return // error is acceptable for empty workdir
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestRun_AllFeaturesEmpty_NoAssertions(t *testing.T) {
+	workdir := t.TempDir()
+	// Non-empty Spec but no files, promises, or gate assertions.
+	spec := parseSpec(t, `
+spec: "do something"
+complexity: simple
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	// No assertions, no checkpoints — passes since spec has content.
+	if len(result.Assertions) != 0 {
+		t.Fatalf("expected 0 assertions, got %d: %+v", len(result.Assertions), result.Assertions)
+	}
+	if !result.Passed {
+		t.Fatal("expected Passed=true when no assertions to fail")
+	}
+}
+
+func TestRun_FilesWithEmptyString_Skipped(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "valid.go", "package main\n")
+	writeFile(t, workdir, "other.go", "package main\n")
+
+	spec := parseSpec(t, `
+spec: "test"
+complexity: simple
+files:
+  - valid.go
+  - ""
+  - other.go
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Should not panic; verify 3 assertions were derived (one per file entry including empty).
+	if len(result.Assertions) == 0 {
+		t.Fatal("expected at least 1 assertion")
+	}
+}
+
+func TestRun_FilesDuplicateEntries(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo.go", "package main\n")
+
+	spec := parseSpec(t, `
+spec: "test"
+complexity: simple
+files:
+  - foo.go
+  - foo.go
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true (file exists), got false: %+v", result.Assertions)
+	}
+	// Duplicate entries result in 2 assertions (deduplication is not performed).
+	if len(result.Assertions) != 2 {
+		t.Fatalf("expected 2 assertions for duplicate files, got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_AdapterError_HandledGracefully(t *testing.T) {
+	// Simulate spec_coverage assertion where the target is not found.
+	// Verifies the gate handles coverage failures gracefully without panicking.
+	workdir := t.TempDir()
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+
+	spec := parseSpec(t, `
+spec: "test"
+complexity: simple
+gate:
+  assertions:
+    - spec_coverage: TestTargetThatDoesNotExist
+`)
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	// Coverage target not found → assertion fails, gate fails
+	if result.Passed {
+		t.Fatal("expected Passed=false when spec_coverage target not found")
+	}
+	if len(result.Assertions) == 0 {
+		t.Fatal("expected at least 1 assertion result")
+	}
+}

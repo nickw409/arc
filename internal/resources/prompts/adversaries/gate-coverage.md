@@ -85,8 +85,23 @@ Always use shorthand assertion types:
   - no_modified: path/to/file.go
   - files_only: "docs/**, README.md"
   - grep_not: "forbiddenPattern"
+  - spec_coverage: ""           # AI checks all spec behaviors have tests
 
 NEVER use the legacy `type: grep / file: / pattern:` format — it is invalid.
+
+### Promises
+
+Promises are declared in the phase spec's `promises:` field and auto-derive gate assertions:
+
+  - func_exists: "func NewFoo(x int) *Foo"
+  - test_exists: TestNewFoo
+  - file_exists: path/to/file.go
+  - test_covers: "returns error on nil input"
+    test: TestFooNilInput
+
+### Files
+
+Files listed in the phase spec's `files:` field auto-derive `file_exists` assertions. A file listed in `files:` is automatically verified without needing an explicit assertion.
 
 RULES for suggestions:
 - The markers <<<ORIGINAL, <<<SUGGESTED, and >>> must each be on their own line as raw text
