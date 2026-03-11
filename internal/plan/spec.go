@@ -106,6 +106,43 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 		}
 	}
 
+	// Promises: each must have exactly one recognized field set.
+	for i, p := range spec.Promises {
+		fields := 0
+		if strings.TrimSpace(p.FuncExists) != "" {
+			fields++
+		}
+		if strings.TrimSpace(p.TestExists) != "" {
+			fields++
+		}
+		if strings.TrimSpace(p.FileExists) != "" {
+			fields++
+		}
+		if strings.TrimSpace(p.TestCovers) != "" {
+			fields++
+			if strings.TrimSpace(p.Test) == "" {
+				warnings = append(warnings, SpecWarning{
+					Field:   "promises",
+					Message: fmt.Sprintf("promise %d has test_covers but no test — test field is required with test_covers", i+1),
+					Fatal:   true,
+				})
+			}
+		}
+		if fields == 0 {
+			warnings = append(warnings, SpecWarning{
+				Field:   "promises",
+				Message: fmt.Sprintf("promise %d has no recognized field — use func_exists, test_exists, file_exists, or test_covers", i+1),
+				Fatal:   true,
+			})
+		} else if fields > 1 {
+			warnings = append(warnings, SpecWarning{
+				Field:   "promises",
+				Message: fmt.Sprintf("promise %d has multiple promise types set — exactly one of func_exists, test_exists, file_exists, or test_covers must be set", i+1),
+				Fatal:   true,
+			})
+		}
+	}
+
 	return warnings
 }
 

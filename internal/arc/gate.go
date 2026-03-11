@@ -69,6 +69,9 @@ type GateResult struct {
 	ScopedTestOutput string `json:"scoped_test_output,omitempty"`
 	// ScopedTestSkipped is true when no scoped test command was configured.
 	ScopedTestSkipped bool `json:"scoped_test_skipped"`
+	// TestCoversQueue holds coverage targets collected from promise test_covers fields.
+	// These are queued for coverage verification in subsequent phases.
+	TestCoversQueue []string `json:"test_covers_queue,omitempty"`
 }
 
 // GateStatus is the persistent state written to gate-status.json.

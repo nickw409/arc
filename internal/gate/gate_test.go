@@ -1643,3 +1643,429 @@ func TestMatchGlob(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// derivePromiseAssertions tests
+// ---------------------------------------------------------------------------
+
+func TestDerivePromiseAssertions_Empty(t *testing.T) {
+	assertions, items := derivePromiseAssertions(nil)
+	if assertions != nil {
+		t.Errorf("expected nil assertions, got %v", assertions)
+	}
+	if items != nil {
+		t.Errorf("expected nil testCoversItems, got %v", items)
+	}
+}
+
+func TestDerivePromiseAssertions_EmptySlice(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions, got %d", len(assertions))
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 testCoversItems, got %d", len(items))
+	}
+}
+
+func TestDerivePromiseAssertions_FuncExists(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{FuncExists: "func NewFoo()"}})
+	if len(assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(assertions))
+	}
+	if assertions[0].Grep != "func NewFoo()" {
+		t.Errorf("Grep = %q, want %q", assertions[0].Grep, "func NewFoo()")
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems, got %v", items)
+	}
+}
+
+func TestDerivePromiseAssertions_FuncExists_EmptyString(t *testing.T) {
+	assertions, _ := derivePromiseAssertions([]arc.Promise{{FuncExists: ""}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions for empty FuncExists, got %d", len(assertions))
+	}
+}
+
+func TestDerivePromiseAssertions_TestExists(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{TestExists: "TestNewFoo"}})
+	if len(assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(assertions))
+	}
+	if assertions[0].TestExists != "TestNewFoo" {
+		t.Errorf("TestExists = %q, want %q", assertions[0].TestExists, "TestNewFoo")
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems")
+	}
+}
+
+func TestDerivePromiseAssertions_TestExists_WhitespaceOnly(t *testing.T) {
+	assertions, _ := derivePromiseAssertions([]arc.Promise{{TestExists: "   "}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions for whitespace-only TestExists, got %d", len(assertions))
+	}
+}
+
+func TestDerivePromiseAssertions_FileExists(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{FileExists: "foo.go"}})
+	if len(assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(assertions))
+	}
+	if assertions[0].FileExists != "foo.go" {
+		t.Errorf("FileExists = %q, want %q", assertions[0].FileExists, "foo.go")
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems")
+	}
+}
+
+func TestDerivePromiseAssertions_FileExists_WhitespaceOnly(t *testing.T) {
+	assertions, _ := derivePromiseAssertions([]arc.Promise{{FileExists: "  "}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions for whitespace-only FileExists, got %d", len(assertions))
+	}
+}
+
+func TestDerivePromiseAssertions_TestCovers(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{TestCovers: "NewFoo", Test: "TestNewFoo"}})
+	if len(assertions) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(assertions))
+	}
+	if assertions[0].TestExists != "TestNewFoo" {
+		t.Errorf("TestExists = %q, want TestNewFoo", assertions[0].TestExists)
+	}
+	if len(items) != 1 || items[0] != "NewFoo" {
+		t.Errorf("testCoversItems = %v, want [NewFoo]", items)
+	}
+}
+
+func TestDerivePromiseAssertions_TestCovers_MissingTest(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{TestCovers: "NewFoo"}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions when Test is missing, got %d", len(assertions))
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems")
+	}
+}
+
+func TestDerivePromiseAssertions_TestCovers_EmptyTest(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{TestCovers: "Foo", Test: ""}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions when Test is empty, got %d", len(assertions))
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems")
+	}
+}
+
+func TestDerivePromiseAssertions_MultipleTypes(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{
+		{FuncExists: "func A()"},
+		{TestExists: "TestA"},
+		{FileExists: "a.go"},
+		{TestCovers: "A", Test: "TestA"},
+	})
+	if len(assertions) != 4 {
+		t.Fatalf("expected 4 assertions, got %d", len(assertions))
+	}
+	if len(items) != 1 || items[0] != "A" {
+		t.Errorf("testCoversItems = %v, want [A]", items)
+	}
+}
+
+func TestDerivePromiseAssertions_MultipleTestCovers(t *testing.T) {
+	_, items := derivePromiseAssertions([]arc.Promise{
+		{TestCovers: "A", Test: "TestA"},
+		{TestCovers: "B", Test: "TestB"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected 2 testCoversItems, got %d: %v", len(items), items)
+	}
+}
+
+func TestDerivePromiseAssertions_MultipleFieldsSet(t *testing.T) {
+	// When both func_exists and test_exists are set, only first switch case triggers.
+	assertions, _ := derivePromiseAssertions([]arc.Promise{{FuncExists: "func A()", TestExists: "TestA"}})
+	if len(assertions) != 1 {
+		t.Fatalf("expected 1 assertion (first match wins), got %d", len(assertions))
+	}
+	if assertions[0].Grep != "func A()" {
+		t.Errorf("expected Grep assertion for FuncExists, got %+v", assertions[0])
+	}
+}
+
+func TestDerivePromiseAssertions_AllFieldsEmpty(t *testing.T) {
+	assertions, items := derivePromiseAssertions([]arc.Promise{{}})
+	if len(assertions) != 0 {
+		t.Errorf("expected 0 assertions for empty promise, got %d", len(assertions))
+	}
+	if len(items) != 0 {
+		t.Errorf("expected no testCoversItems")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// gate.Run — promise integration tests
+// ---------------------------------------------------------------------------
+
+func TestRun_Promise_FuncExists_Pass(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n\nfunc NewFoo() *Foo { return nil }\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - func_exists: "func NewFoo()"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass, got fail: %+v", result.Assertions)
+	}
+}
+
+func TestRun_Promise_FuncExists_Fail(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - func_exists: "func NewFoo()"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected fail, got pass")
+	}
+}
+
+func TestRun_Promise_FuncExists_SpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n\nfunc NewFoo(x int) *Foo { return nil }\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - func_exists: "func NewFoo(x int) *Foo"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass with special chars")
+	}
+}
+
+func TestRun_Promise_TestExists_Pass(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo_test.go", "package foo\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - test_exists: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass: %+v", result.Assertions)
+	}
+}
+
+func TestRun_Promise_TestExists_Fail(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo_test.go", "package foo\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - test_exists: TestMissing
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestRun_Promise_FileExists_Pass(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - file_exists: foo.go
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass: %+v", result.Assertions)
+	}
+}
+
+func TestRun_Promise_FileExists_Fail(t *testing.T) {
+	dir := t.TempDir()
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - file_exists: missing.go
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestRun_Promise_TestCovers_Derives_TestExists(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo_test.go", "package foo\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - test_covers: NewFoo
+    test: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass: %+v", result.Assertions)
+	}
+}
+
+func TestRun_Promise_TestCovers_Fail(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo_test.go", "package foo\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - test_covers: NewFoo
+    test: TestNewFoo
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestRun_Promise_TestCovers_PopulatesGateResult(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo_test.go", "package foo\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - test_covers: NewFoo
+    test: TestNewFoo
+  - test_covers: Bar
+    test: TestBar
+`)
+	writeFile(t, dir, "bar_test.go", "package foo\n\nfunc TestBar(t *testing.T) {}\n")
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.TestCoversQueue) != 2 {
+		t.Fatalf("TestCoversQueue = %v, want 2 items", result.TestCoversQueue)
+	}
+}
+
+func TestRun_PromisesAndExplicitAssertions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n\nfunc NewFoo() {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+gate:
+  assertions:
+    - file_exists: foo.go
+promises:
+  - func_exists: "func NewFoo()"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass: %+v", result.Assertions)
+	}
+	if len(result.Assertions) != 2 {
+		t.Errorf("expected 2 assertions (1 explicit + 1 promise), got %d", len(result.Assertions))
+	}
+}
+
+func TestRun_PromisesAndFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n\nfunc NewFoo() {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+files:
+  - foo.go
+promises:
+  - func_exists: "func NewFoo()"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass: %+v", result.Assertions)
+	}
+}
+
+func TestRun_OnlyPromises_NoFailFast(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "foo.go", "package foo\n\nfunc NewFoo() {}\n")
+	spec := parseSpec(t, `
+name: p
+spec: implement foo
+promises:
+  - func_exists: "func NewFoo()"
+`)
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected pass for promises-only spec")
+	}
+}
+
+func TestRun_EmptySpec_FailFast(t *testing.T) {
+	dir := t.TempDir()
+	spec := &arc.PhaseSpec{Name: "p"}
+	result, err := Run(context.Background(), spec, dir, WithVerifier(false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Passed {
+		t.Errorf("expected fail for empty spec (no assertions, no promises, no content)")
+	}
+}

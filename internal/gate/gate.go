@@ -76,14 +76,17 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 	}
 
 	// Build effective assertion list: explicit gate assertions + derived file_exists
-	// assertions from spec.Files (for files not already covered by an explicit assertion).
+	// assertions from spec.Files (for files not already covered by an explicit assertion)
+	// + promise-derived assertions.
 	effectiveAssertions := append([]arc.GateAssertion(nil), spec.Gate.Assertions...)
 	effectiveAssertions = append(effectiveAssertions, deriveFileExistsAssertions(spec.Files, spec.Gate.Assertions)...)
+	promiseAssertions, testCoversItems := derivePromiseAssertions(spec.Promises)
+	effectiveAssertions = append(effectiveAssertions, promiseAssertions...)
 
 	// Fail fast if the spec has nothing to verify — an empty gate is misconfigured,
 	// not passing. Require at least one assertion, checkpoint, or a non-empty spec/verify field.
 	hasContent := strings.TrimSpace(spec.Spec) != "" || strings.TrimSpace(spec.Verify) != ""
-	if len(effectiveAssertions) == 0 && len(spec.Checkpoints) == 0 && !hasContent {
+	if len(effectiveAssertions) == 0 && len(spec.Checkpoints) == 0 && len(spec.Promises) == 0 && !hasContent {
 		return &arc.GateResult{
 			Passed: false,
 			Assertions: []arc.AssertionResult{{
@@ -94,9 +97,10 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 	}
 
 	result := &arc.GateResult{
-		Passed:      true,
-		Assertions:  make([]arc.AssertionResult, 0, len(effectiveAssertions)),
-		Checkpoints: make([]arc.CheckpointStatus, 0, len(spec.Checkpoints)),
+		Passed:          true,
+		Assertions:      make([]arc.AssertionResult, 0, len(effectiveAssertions)),
+		Checkpoints:     make([]arc.CheckpointStatus, 0, len(spec.Checkpoints)),
+		TestCoversQueue: testCoversItems,
 	}
 
 	// Run assertions.
@@ -143,6 +147,40 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 	}
 
 	return result, nil
+}
+
+// derivePromiseAssertions converts promises into GateAssertions.
+// Does not deduplicate against existing assertions.
+// Returns assertions and a list of test_covers targets queued for the next phase.
+func derivePromiseAssertions(promises []arc.Promise) ([]arc.GateAssertion, []string) {
+	var assertions []arc.GateAssertion
+	var testCoversItems []string
+	for _, p := range promises {
+		switch {
+		case p.FuncExists != "" && strings.TrimSpace(p.FuncExists) != "":
+			assertions = append(assertions, arc.GateAssertion{
+				Description: fmt.Sprintf("func_exists: %s", p.FuncExists),
+				Grep:        p.FuncExists,
+			})
+		case p.TestExists != "" && strings.TrimSpace(p.TestExists) != "":
+			assertions = append(assertions, arc.GateAssertion{
+				Description: fmt.Sprintf("test_exists: %s", p.TestExists),
+				TestExists:  p.TestExists,
+			})
+		case p.FileExists != "" && strings.TrimSpace(p.FileExists) != "":
+			assertions = append(assertions, arc.GateAssertion{
+				Description: fmt.Sprintf("file_exists: %s (from promise)", p.FileExists),
+				FileExists:  p.FileExists,
+			})
+		case p.TestCovers != "" && p.Test != "":
+			assertions = append(assertions, arc.GateAssertion{
+				Description: fmt.Sprintf("test_exists: %s (covers %s)", p.Test, p.TestCovers),
+				TestExists:  p.Test,
+			})
+			testCoversItems = append(testCoversItems, p.TestCovers)
+		}
+	}
+	return assertions, testCoversItems
 }
 
 // deriveFileExistsAssertions returns file_exists assertions for each path in files
