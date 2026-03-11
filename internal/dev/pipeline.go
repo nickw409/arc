@@ -235,6 +235,33 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 	return result, nil
 }
 
+// SubmitPlan submits an existing plan to the daemon without blocking.
+func SubmitPlan(planName, projectDir, socketPath string) error {
+	if socketPath == "" {
+		socketPath = daemon.DefaultSocketPath()
+	}
+	if err := daemon.EnsureRunning(socketPath); err != nil {
+		return fmt.Errorf("starting daemon: %w", err)
+	}
+	client, err := daemon.Connect(socketPath, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting to daemon: %w", err)
+	}
+	defer client.Close()
+	resp, err := client.Submit(daemon.Request{
+		Plan:    planName,
+		Project: projectDir,
+	})
+	if err != nil {
+		return fmt.Errorf("submitting plan to daemon: %w", err)
+	}
+	if !resp.OK {
+		return fmt.Errorf("daemon rejected plan: %s", resp.Error)
+	}
+	fmt.Printf("[dispatch] Plan %q submitted (%d phases queued).\n", planName, resp.QueuedPhases)
+	return nil
+}
+
 func runReviewForPlan(ctx context.Context, opts DevOptions, planDir, planName, plansDir string, result *DevResult) error {
 	fmt.Println("[dispatch] Running adversarial review...")
 

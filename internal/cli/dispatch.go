@@ -63,6 +63,19 @@ func newDispatchCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
+			// If a single arg matches an existing plan directory, submit it directly.
+			if len(args) == 1 {
+				planDir := filepath.Join(plansDir, args[0])
+				if fi, err := os.Stat(planDir); err == nil && fi.IsDir() {
+					if err := dev.SubmitPlan(args[0], projectRoot, ""); err != nil {
+						return err
+					}
+					fmt.Printf("\n[dispatch] Plan %q submitted to daemon.\n", args[0])
+					fmt.Printf("[dispatch] Monitor with: arc daemon status %s\n", args[0])
+					return nil
+				}
+			}
+
 			result, err := dev.RunDev(ctx, dev.DevOptions{
 				TaskDescription: taskDescription,
 				ProjectDir:      projectRoot,

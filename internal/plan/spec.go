@@ -93,14 +93,6 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 		})
 	}
 
-	// Files listed but no file_exists gate assertions.
-	if len(spec.Files) > 0 && len(spec.Gate.Assertions) == 0 {
-		warnings = append(warnings, SpecWarning{
-			Field:   "gate",
-			Message: fmt.Sprintf("%d files listed but no gate assertions — consider adding file_exists assertions", len(spec.Files)),
-		})
-	}
-
 	// Gate assertions: each must have at least one recognized field set.
 	// Assertions without a recognized field silently hit "unknown assertion type"
 	// at runtime, causing the phase to block after exhausting retries.

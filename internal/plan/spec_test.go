@@ -645,18 +645,16 @@ func TestValidateSpec_EmptySpec(t *testing.T) {
 }
 
 func TestValidateSpec_FilesNoGate(t *testing.T) {
+	// Files listed without explicit gate assertions should NOT produce a warning
+	// because gate.Run auto-derives file_exists assertions from spec.Files.
 	spec := &arc.PhaseSpec{
 		Files:      []string{"main.go"},
 		Complexity: "simple",
 	}
 	warnings := ValidateSpec(spec)
-	found := false
 	for _, w := range warnings {
-		if w.Field == "gate" {
-			found = true
+		if w.Field == "gate" && strings.Contains(w.Message, "file_exists") {
+			t.Errorf("unexpected warning about files with no gate assertions: %s", w.Message)
 		}
-	}
-	if !found {
-		t.Error("expected warning about files with no gate assertions")
 	}
 }

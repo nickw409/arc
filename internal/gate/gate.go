@@ -75,10 +75,15 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 		defer cancel()
 	}
 
+	// Build effective assertion list: explicit gate assertions + derived file_exists
+	// assertions from spec.Files (for files not already covered by an explicit assertion).
+	effectiveAssertions := append([]arc.GateAssertion(nil), spec.Gate.Assertions...)
+	effectiveAssertions = append(effectiveAssertions, deriveFileExistsAssertions(spec.Files, spec.Gate.Assertions)...)
+
 	// Fail fast if the spec has nothing to verify — an empty gate is misconfigured,
 	// not passing. Require at least one assertion, checkpoint, or a non-empty spec/verify field.
 	hasContent := strings.TrimSpace(spec.Spec) != "" || strings.TrimSpace(spec.Verify) != ""
-	if len(spec.Gate.Assertions) == 0 && len(spec.Checkpoints) == 0 && !hasContent {
+	if len(effectiveAssertions) == 0 && len(spec.Checkpoints) == 0 && !hasContent {
 		return &arc.GateResult{
 			Passed: false,
 			Assertions: []arc.AssertionResult{{
@@ -90,12 +95,12 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 
 	result := &arc.GateResult{
 		Passed:      true,
-		Assertions:  make([]arc.AssertionResult, 0, len(spec.Gate.Assertions)),
+		Assertions:  make([]arc.AssertionResult, 0, len(effectiveAssertions)),
 		Checkpoints: make([]arc.CheckpointStatus, 0, len(spec.Checkpoints)),
 	}
 
 	// Run assertions.
-	for _, a := range spec.Gate.Assertions {
+	for _, a := range effectiveAssertions {
 		ar := runAssertion(a, workdir)
 		result.Assertions = append(result.Assertions, ar)
 		if !ar.Passed {
@@ -138,6 +143,31 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 	}
 
 	return result, nil
+}
+
+// deriveFileExistsAssertions returns file_exists assertions for each path in files
+// that is not already covered by an explicit assertion in existing.
+func deriveFileExistsAssertions(files []string, existing []arc.GateAssertion) []arc.GateAssertion {
+	if len(files) == 0 {
+		return nil
+	}
+	// Build set of paths already covered by explicit file_exists assertions.
+	covered := make(map[string]bool, len(existing))
+	for _, a := range existing {
+		switch {
+		case a.FileExists != "":
+			covered[a.FileExists] = true
+		case a.Type == "file_exists" && a.Target != "":
+			covered[a.Target] = true
+		}
+	}
+	var derived []arc.GateAssertion
+	for _, f := range files {
+		if !covered[f] {
+			derived = append(derived, arc.GateAssertion{FileExists: f})
+		}
+	}
+	return derived
 }
 
 // runAssertion evaluates a single GateAssertion against workdir and returns the result.
