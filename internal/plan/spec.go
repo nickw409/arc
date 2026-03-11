@@ -100,7 +100,7 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 		if isEmptyAssertion(a) {
 			warnings = append(warnings, SpecWarning{
 				Field:   "gate.assertions",
-				Message: fmt.Sprintf("assertion %d has no recognized field — use 'grep:', 'file_exists:', 'test_exists:', 'build_passes:', or 'no_untracked:' (or legacy type+target)", i+1),
+				Message: fmt.Sprintf("assertion %d has no recognized field — use 'grep:', 'file_exists:', 'test_exists:', 'build_passes:', 'no_untracked:', or 'spec_coverage:' (or legacy type+target)", i+1),
 				Fatal:   true,
 			})
 		}
@@ -158,6 +158,7 @@ func isEmptyAssertion(a arc.GateAssertion) bool {
 		a.GrepNot == "" &&
 		a.NoModified == "" &&
 		a.FilesOnly == "" &&
+		a.SpecCoverage == "" &&
 		!(a.Type != "" && a.Target != "")
 }
 

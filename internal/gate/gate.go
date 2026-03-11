@@ -103,8 +103,19 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 		TestCoversQueue: testCoversItems,
 	}
 
-	// Run assertions.
+	// Partition assertions into regular checks and spec_coverage checks.
+	var regularAssertions []arc.GateAssertion
+	var hasCoverageAssertions bool
 	for _, a := range effectiveAssertions {
+		if a.SpecCoverage != "" {
+			hasCoverageAssertions = true
+		} else {
+			regularAssertions = append(regularAssertions, a)
+		}
+	}
+
+	// Run regular assertions.
+	for _, a := range regularAssertions {
 		ar := runAssertion(a, workdir)
 		result.Assertions = append(result.Assertions, ar)
 		if !ar.Passed {
@@ -143,6 +154,17 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 			result.ScopedTestSkipped = false
 			result.ScopedTestPassed = false
 			result.ScopedTestOutput += fmt.Sprintf("Verifier FAILED:\n%s", reasoning)
+		}
+	}
+
+	// Run spec_coverage checks after regular assertions and verifier.
+	if hasCoverageAssertions {
+		coverageResults := RunSpecCoverage(effectiveAssertions, workdir)
+		for _, cr := range coverageResults {
+			result.Assertions = append(result.Assertions, cr)
+			if !cr.Passed {
+				result.Passed = false
+			}
 		}
 	}
 

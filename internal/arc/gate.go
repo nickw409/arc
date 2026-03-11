@@ -33,6 +33,9 @@ type GateAssertion struct {
 	// at least one of the comma-separated glob patterns. Fails if any changed file
 	// falls outside the allowed set.
 	FilesOnly string `json:"files_only,omitempty" yaml:"files_only,omitempty"`
+	// SpecCoverage checks that the given symbol or pattern appears in at least one
+	// _test.go file under workdir. Non-empty value enables this assertion.
+	SpecCoverage string `json:"spec_coverage,omitempty" yaml:"spec_coverage,omitempty"`
 }
 
 // AssertionResult is the outcome of a single assertion check.

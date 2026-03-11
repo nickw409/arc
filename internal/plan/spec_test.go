@@ -845,6 +845,25 @@ func TestValidateSpec_Promise_EmptyString(t *testing.T) {
 	}
 }
 
+// TestValidateSpec_SpecCoverage verifies that an assertion with only spec_coverage
+// set is not flagged as empty by ValidateSpec.
+func TestValidateSpec_SpecCoverage(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: "TestFoo"},
+			},
+		},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "gate.assertions" && w.Fatal {
+			t.Errorf("unexpected fatal gate.assertions warning for spec_coverage assertion: %s", w.Message)
+		}
+	}
+}
+
 func TestValidateSpec_Promises_NilVsEmptySlice(t *testing.T) {
 	nilSpec := &arc.PhaseSpec{Spec: "do something", Complexity: "simple", Promises: nil}
 	emptySpec := &arc.PhaseSpec{Spec: "do something", Complexity: "simple", Promises: []arc.Promise{}}
