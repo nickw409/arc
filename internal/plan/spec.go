@@ -117,6 +117,14 @@ func ValidateSpec(spec *arc.PhaseSpec) []SpecWarning {
 				Fatal:   true,
 			})
 		}
+		// spec_coverage assertion requires a non-empty spec field to search against.
+		if a.SpecCoverage != "" && strings.TrimSpace(spec.Spec) == "" {
+			warnings = append(warnings, SpecWarning{
+				Field:   "gate.assertions",
+				Message: fmt.Sprintf("assertion %d spec_coverage assertion requires a non-empty spec field — the gate searches spec text for the pattern, but spec is empty", i+1),
+				Fatal:   true,
+			})
+		}
 		// spec_coverage with a multi-word prose description is likely a mistake;
 		// use a concrete identifier (function name, type name, string literal).
 		if a.SpecCoverage != "" && strings.Contains(a.SpecCoverage, " ") {
