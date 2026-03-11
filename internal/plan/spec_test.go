@@ -645,18 +645,377 @@ func TestValidateSpec_EmptySpec(t *testing.T) {
 }
 
 func TestValidateSpec_FilesNoGate(t *testing.T) {
+	// Files listed without explicit gate assertions should NOT produce a warning
+	// because gate.Run auto-derives file_exists assertions from spec.Files.
 	spec := &arc.PhaseSpec{
 		Files:      []string{"main.go"},
 		Complexity: "simple",
 	}
 	warnings := ValidateSpec(spec)
+	for _, w := range warnings {
+		if w.Field == "gate" && strings.Contains(w.Message, "file_exists") {
+			t.Errorf("unexpected warning about files with no gate assertions: %s", w.Message)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ValidateSpec — promises tests
+// ---------------------------------------------------------------------------
+
+func TestValidateSpec_Promise_NoField(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{}},
+	}
+	warnings := ValidateSpec(spec)
 	found := false
 	for _, w := range warnings {
-		if w.Field == "gate" {
+		if w.Field == "promises" && w.Fatal {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected warning about files with no gate assertions")
+		t.Error("expected fatal warning for promise with no field")
+	}
+}
+
+func TestValidateSpec_Promise_MultipleFields(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: "func A()", TestExists: "TestA"}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for promise with multiple fields")
+	}
+}
+
+func TestValidateSpec_Promise_AllFieldsSet(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: "func A()", TestExists: "TestA", FileExists: "a.go"}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for promise with all fields set")
+	}
+}
+
+func TestValidateSpec_Promise_TestCovers_NoTest(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestCovers: "NewFoo"}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for test_covers without test")
+	}
+}
+
+func TestValidateSpec_Promise_TestCovers_EmptyString(t *testing.T) {
+	// test_covers with whitespace-only value → treated as no field
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestCovers: "   ", Test: "TestFoo"}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for whitespace-only test_covers (treated as no field)")
+	}
+}
+
+func TestValidateSpec_Promise_Valid_FuncExists(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: "func NewFoo()"}},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected promise warning: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_Promise_Valid_TestExists(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestExists: "TestFoo"}},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected promise warning: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_Promise_Valid_FileExists(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FileExists: "foo.go"}},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected promise warning: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_Promise_Valid_TestCovers(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestCovers: "NewFoo", Test: "TestNewFoo"}},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected promise warning: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_Promise_MultipleWarnings(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises: []arc.Promise{
+			{},
+			{},
+			{},
+		},
+	}
+	count := 0
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" && w.Fatal {
+			count++
+		}
+	}
+	if count != 3 {
+		t.Errorf("expected 3 promise warnings, got %d", count)
+	}
+}
+
+func TestValidateSpec_Promise_EmptyString(t *testing.T) {
+	// promise with empty string value in func_exists → treated as no field
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: ""}},
+	}
+	found := false
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for promise with empty func_exists")
+	}
+}
+
+// TestValidateSpec_SpecCoverage verifies that an assertion with only spec_coverage
+// set is not flagged as empty by ValidateSpec.
+func TestValidateSpec_SpecCoverage(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: "TestFoo"},
+			},
+		},
+	}
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "gate.assertions" && w.Fatal {
+			t.Errorf("unexpected fatal gate.assertions warning for spec_coverage assertion: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_Promises_NilVsEmptySlice(t *testing.T) {
+	nilSpec := &arc.PhaseSpec{Spec: "do something", Complexity: "simple", Promises: nil}
+	emptySpec := &arc.PhaseSpec{Spec: "do something", Complexity: "simple", Promises: []arc.Promise{}}
+
+	for _, w := range ValidateSpec(nilSpec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected warning for nil Promises: %s", w.Message)
+		}
+	}
+	for _, w := range ValidateSpec(emptySpec) {
+		if w.Field == "promises" {
+			t.Errorf("unexpected warning for empty Promises: %s", w.Message)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — combined features (Files, Promises, spec_coverage)
+// ---------------------------------------------------------------------------
+
+func TestValidateSpec_MultipleWarnings(t *testing.T) {
+	// Empty spec + empty assertion + invalid promise → at least 3 warnings.
+	spec := &arc.PhaseSpec{
+		Spec:       "",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: ""},
+			},
+		},
+		Promises: []arc.Promise{{}},
+	}
+	warnings := ValidateSpec(spec)
+	if len(warnings) < 2 {
+		t.Fatalf("expected at least 2 warnings, got %d: %v", len(warnings), warnings)
+	}
+	// Verify both spec-empty and promise-invalid warnings are present.
+	hasSpec := false
+	hasPromise := false
+	for _, w := range warnings {
+		if w.Field == "spec" {
+			hasSpec = true
+		}
+		if w.Field == "promises" && w.Fatal {
+			hasPromise = true
+		}
+	}
+	if !hasSpec {
+		t.Error("expected warning for empty spec field")
+	}
+	if !hasPromise {
+		t.Error("expected fatal warning for invalid promise")
+	}
+}
+
+func TestValidateSpec_TestCoversWithoutTestField_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{TestCovers: "handles nil input", Test: ""}},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for test_covers without test field")
+	}
+}
+
+func TestValidateSpec_PromiseWithEmptyString_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Promises:   []arc.Promise{{FuncExists: ""}},
+	}
+	found := false
+	for _, w := range ValidateSpec(spec) {
+		if w.Field == "promises" && w.Fatal {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected fatal warning for promise with empty func_exists value")
+	}
+}
+
+func TestValidateSpec_NilSpec_HandlesGracefully(t *testing.T) {
+	// ValidateSpec should return nil without panicking when given a nil spec.
+	warnings := ValidateSpec(nil)
+	if warnings != nil {
+		t.Errorf("expected nil warnings for nil spec, got %v", warnings)
+	}
+}
+
+func TestValidateSpec_NilGate_HandlesGracefully(t *testing.T) {
+	// GateSpec is a value type — "nil gate" means zero-value with empty Assertions.
+	// ValidateSpec should not panic and should not warn about an empty Gate.
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate:       arc.GateSpec{},
+	}
+	warnings := ValidateSpec(spec)
+	for _, w := range warnings {
+		if w.Field == "gate.assertions" {
+			t.Errorf("unexpected gate warning for empty Gate: %s", w.Message)
+		}
+	}
+}
+
+func TestValidateSpec_FilesWithInvalidPaths_Warns(t *testing.T) {
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Files:      []string{"../../../etc/passwd", "valid.go"},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "files" && strings.Contains(w.Message, "..") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning about path traversal in files list")
+	}
+}
+
+func TestValidateSpec_SpecCoverageWithNonEmptyValue_Warns(t *testing.T) {
+	// spec_coverage with a multi-word prose value should generate an advisory
+	// warning suggesting the use of a concrete identifier instead.
+	spec := &arc.PhaseSpec{
+		Spec:       "do something",
+		Complexity: "simple",
+		Gate: arc.GateSpec{
+			Assertions: []arc.GateAssertion{
+				{SpecCoverage: "should warn about this description"},
+			},
+		},
+	}
+	warnings := ValidateSpec(spec)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "gate.assertions" && !w.Fatal && strings.Contains(w.Message, "spec_coverage") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected non-fatal warning for spec_coverage with prose description value")
 	}
 }

@@ -33,6 +33,9 @@ type GateAssertion struct {
 	// at least one of the comma-separated glob patterns. Fails if any changed file
 	// falls outside the allowed set.
 	FilesOnly string `json:"files_only,omitempty" yaml:"files_only,omitempty"`
+	// SpecCoverage checks that the given symbol or pattern appears in at least one
+	// _test.go file under workdir. Non-empty value enables this assertion.
+	SpecCoverage string `json:"spec_coverage,omitempty" yaml:"spec_coverage,omitempty"`
 }
 
 // AssertionResult is the outcome of a single assertion check.
@@ -69,6 +72,9 @@ type GateResult struct {
 	ScopedTestOutput string `json:"scoped_test_output,omitempty"`
 	// ScopedTestSkipped is true when no scoped test command was configured.
 	ScopedTestSkipped bool `json:"scoped_test_skipped"`
+	// TestCoversQueue holds coverage targets collected from promise test_covers fields.
+	// These are queued for coverage verification in subsequent phases.
+	TestCoversQueue []string `json:"test_covers_queue,omitempty"`
 }
 
 // GateStatus is the persistent state written to gate-status.json.
