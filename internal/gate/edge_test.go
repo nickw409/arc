@@ -208,58 +208,18 @@ func TestMatchGlob_PrefixSlashNotSubdir(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RunSpecCoverage — edge cases
+// RunSpecCoverage — edge cases (early-exit only; agent calls not unit-tested)
 // ---------------------------------------------------------------------------
 
-// Target found only in a regular .go file (not _test.go) should FAIL because
-// RunSpecCoverage only reads _test.go files.
-func TestRunSpecCoverage_TargetOnlyInNonTestFile_Fails(t *testing.T) {
-	workdir := t.TempDir()
-	// Pattern exists in a regular .go file, NOT a _test.go file.
-	writeFile(t, workdir, "foo.go", "package foo\n\nfunc SpecialFunction() {}\n")
-
-	assertions := []arc.GateAssertion{
-		{SpecCoverage: "SpecialFunction"},
-	}
-	results := RunSpecCoverage(assertions, workdir)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Passed {
-		t.Errorf("expected fail — target is in .go file, not _test.go file")
-	}
-}
-
-// Multiple spec_coverage assertions with mixed results.
-func TestRunSpecCoverage_MixedPassFail(t *testing.T) {
-	workdir := t.TempDir()
-	writeFile(t, workdir, "foo_test.go", "package foo\n\nfunc TestPresent(t *testing.T) {}\n")
-
-	assertions := []arc.GateAssertion{
-		{SpecCoverage: "TestPresent"},
-		{SpecCoverage: "TestMissing"},
-	}
-	results := RunSpecCoverage(assertions, workdir)
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if !results[0].Passed {
-		t.Errorf("expected results[0] (TestPresent) to pass")
-	}
-	if results[1].Passed {
-		t.Errorf("expected results[1] (TestMissing) to fail")
-	}
-}
-
 // workdir doesn't exist — collectTestFiles returns an error; RunSpecCoverage
-// returns a single failed assertion.
+// returns a single failed assertion without spawning an agent.
 func TestRunSpecCoverage_WorkdirDoesNotExist(t *testing.T) {
 	workdir := filepath.Join(t.TempDir(), "nonexistent")
 
 	assertions := []arc.GateAssertion{
 		{SpecCoverage: "SomeFunc"},
 	}
-	results := RunSpecCoverage(assertions, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 error result, got %d", len(results))
 	}
@@ -268,21 +228,39 @@ func TestRunSpecCoverage_WorkdirDoesNotExist(t *testing.T) {
 	}
 }
 
-// Target appears in multiple test files — should still pass (first match wins).
-func TestRunSpecCoverage_TargetInMultipleTestFiles(t *testing.T) {
-	workdir := t.TempDir()
-	writeFile(t, workdir, "a_test.go", "package foo\n\nfunc TestThing(t *testing.T) {}\n")
-	writeFile(t, workdir, "b_test.go", "package foo\n\nfunc TestThing2(t *testing.T) { _ = \"TestThing\" }\n")
+// ---------------------------------------------------------------------------
+// parseSpecCoverageOutput — edge cases
+// ---------------------------------------------------------------------------
 
+// Mixed pass/fail output parsed correctly.
+func TestParseSpecCoverageOutput_MixedPassFail(t *testing.T) {
 	assertions := []arc.GateAssertion{
-		{SpecCoverage: "TestThing"},
+		{SpecCoverage: "TestPresent"},
+		{SpecCoverage: "TestMissing"},
 	}
-	results := RunSpecCoverage(assertions, workdir)
+	output := "PASS 1: TestPresent — found in foo_test.go\nFAIL 2: TestMissing — no test found\n"
+	results := parseSpecCoverageOutput(output, assertions)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if !results[0].Passed {
+		t.Errorf("expected results[0] to pass")
+	}
+	if results[1].Passed {
+		t.Errorf("expected results[1] to fail")
+	}
+}
+
+// Lines without PASS/FAIL prefix are ignored.
+func TestParseSpecCoverageOutput_IgnoresNonVerdictLines(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "func Foo"}}
+	output := "Here is my analysis:\nPASS 1: func Foo — found\nDone.\n"
+	results := parseSpecCoverageOutput(output, assertions)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 	if !results[0].Passed {
-		t.Errorf("expected pass — target appears in multiple test files: %s", results[0].Detail)
+		t.Error("expected pass")
 	}
 }
 
@@ -379,7 +357,8 @@ checkpoints:
 // The spec_coverage results should appear in the Assertions slice.
 func TestRun_SpecCoverage_RunsAfterFailedRegularAssertions(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo_test.go", "package foo\n\nfunc TestFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package foo\n\nfunc Foo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 name: test

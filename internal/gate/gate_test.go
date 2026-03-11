@@ -2216,7 +2216,8 @@ promises:
 
 func TestRun_SpecCoverageOnly_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 spec: "implement Foo"
@@ -2239,8 +2240,8 @@ gate:
 
 func TestRun_FilesAndSpecCoverage_Combined(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2266,8 +2267,8 @@ gate:
 
 func TestRun_PromisesAndSpecCoverage_Combined(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2293,8 +2294,8 @@ gate:
 
 func TestRun_AllThreeFeatures_Combined_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2361,7 +2362,8 @@ func TestRun_SpecCoverage_EmptySpec_NoTrigger(t *testing.T) {
 	// When SpecCoverage value is a valid identifier and the target exists in test
 	// files, spec_coverage passes even when the Spec prose field is empty.
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 gate:
@@ -2384,8 +2386,8 @@ gate:
 
 func TestRun_SpecCoverage_PopulatedSpec_Pass(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() {}\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
 
 	spec := parseSpec(t, `
 spec: "Implement Foo with error handling"

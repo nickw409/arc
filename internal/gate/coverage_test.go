@@ -55,95 +55,121 @@ func TestCollectTestFiles_SkipsVendor(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RunSpecCoverage
+// RunSpecCoverage — early-exit cases (no agent spawned)
 // ---------------------------------------------------------------------------
 
-func TestRunSpecCoverage_EmptySpec_ReturnsPass(t *testing.T) {
+func TestRunSpecCoverage_NoSpecCoverageAssertions_ReturnsNil(t *testing.T) {
 	workdir := t.TempDir()
-
-	// No assertions have SpecCoverage set — should return nil.
 	assertions := []arc.GateAssertion{
 		{FileExists: "main.go"},
 		{Grep: "package main"},
 	}
-	results := RunSpecCoverage(assertions, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir)
 	if results != nil {
 		t.Errorf("expected nil results for no spec_coverage assertions, got %v", results)
 	}
 }
 
-func TestRunSpecCoverage_NoAssertions(t *testing.T) {
+func TestRunSpecCoverage_NilAssertions_ReturnsNil(t *testing.T) {
 	workdir := t.TempDir()
-
-	results := RunSpecCoverage(nil, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, nil, workdir)
 	if results != nil {
 		t.Errorf("expected nil results for nil assertions, got %v", results)
 	}
 }
 
-func TestRunSpecCoverage_Pass(t *testing.T) {
-	workdir := t.TempDir()
+// ---------------------------------------------------------------------------
+// parseSpecCoverageOutput — unit tests for the verdict parser
+// ---------------------------------------------------------------------------
 
-	writeFile(t, workdir, "foo_test.go", "package foo\nfunc TestFoo(t *testing.T) {}\n")
-
-	assertions := []arc.GateAssertion{
-		{SpecCoverage: "TestFoo"},
-	}
-	results := RunSpecCoverage(assertions, workdir)
+func TestParseSpecCoverageOutput_Pass(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "func NewFoo"}}
+	output := "PASS 1: func NewFoo — tested in TestNewFoo\n"
+	results := parseSpecCoverageOutput(output, assertions)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 	if !results[0].Passed {
-		t.Errorf("expected pass, got: %s", results[0].Detail)
+		t.Errorf("expected pass, got detail: %s", results[0].Detail)
 	}
 }
 
-func TestRunSpecCoverage_Fail(t *testing.T) {
-	workdir := t.TempDir()
-
-	writeFile(t, workdir, "foo_test.go", "package foo\nfunc TestFoo(t *testing.T) {}\n")
-
-	assertions := []arc.GateAssertion{
-		{SpecCoverage: "TestMissing"},
-	}
-	results := RunSpecCoverage(assertions, workdir)
+func TestParseSpecCoverageOutput_Fail(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "func Missing"}}
+	output := "FAIL 1: func Missing — no test exercises this function\n"
+	results := parseSpecCoverageOutput(output, assertions)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 	if results[0].Passed {
-		t.Errorf("expected fail for missing target")
+		t.Errorf("expected fail")
 	}
 }
 
-func TestRunSpecCoverage_UsesDescription(t *testing.T) {
-	workdir := t.TempDir()
-
-	writeFile(t, workdir, "foo_test.go", "package foo\nfunc TestFoo(t *testing.T) {}\n")
-
-	desc := "custom description"
+func TestParseSpecCoverageOutput_MultipleTargets(t *testing.T) {
 	assertions := []arc.GateAssertion{
-		{Description: desc, SpecCoverage: "TestFoo"},
+		{SpecCoverage: "func Foo"},
+		{SpecCoverage: "func Bar"},
+		{SpecCoverage: "func Baz"},
 	}
-	results := RunSpecCoverage(assertions, workdir)
+	output := "PASS 1: func Foo — covered in TestFoo\nFAIL 2: func Bar — no test found\nPASS 3: func Baz — covered in TestBaz\n"
+	results := parseSpecCoverageOutput(output, assertions)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if !results[0].Passed {
+		t.Error("expected result[0] pass")
+	}
+	if results[1].Passed {
+		t.Error("expected result[1] fail")
+	}
+	if !results[2].Passed {
+		t.Error("expected result[2] pass")
+	}
+}
+
+func TestParseSpecCoverageOutput_NoVerdictDefaultsFail(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "func Foo"}}
+	results := parseSpecCoverageOutput("", assertions)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].Description != desc {
-		t.Errorf("expected description %q, got %q", desc, results[0].Description)
+	if results[0].Passed {
+		t.Error("expected fail when no verdict returned")
 	}
 }
 
-func TestRunSpecCoverage_DefaultDescription(t *testing.T) {
-	workdir := t.TempDir()
-
-	assertions := []arc.GateAssertion{
-		{SpecCoverage: "MyFunc"},
+func TestParseSpecCoverageOutput_UsesDescription(t *testing.T) {
+	assertions := []arc.GateAssertion{{Description: "custom desc", SpecCoverage: "func Foo"}}
+	results := parseSpecCoverageOutput("PASS 1: func Foo — ok\n", assertions)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	results := RunSpecCoverage(assertions, workdir)
+	if results[0].Description != "custom desc" {
+		t.Errorf("expected description %q, got %q", "custom desc", results[0].Description)
+	}
+}
+
+func TestParseSpecCoverageOutput_DefaultDescription(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "MyFunc"}}
+	results := parseSpecCoverageOutput("", assertions)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 	if results[0].Description == "" {
 		t.Error("expected non-empty default description")
+	}
+}
+
+func TestParseSpecCoverageOutput_OutOfRangeIndexIgnored(t *testing.T) {
+	assertions := []arc.GateAssertion{{SpecCoverage: "func Foo"}}
+	// Index 99 is out of range — should be ignored, result defaults to fail.
+	output := "PASS 99: func Whatever — ok\n"
+	results := parseSpecCoverageOutput(output, assertions)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Passed {
+		t.Error("out-of-range verdict should be ignored, result should default to fail")
 	}
 }

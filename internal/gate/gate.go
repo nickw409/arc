@@ -159,7 +159,7 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 
 	// Run spec_coverage checks after regular assertions and verifier.
 	if hasCoverageAssertions {
-		coverageResults := RunSpecCoverage(effectiveAssertions, workdir)
+		coverageResults := RunSpecCoverage(ctx, spec, effectiveAssertions, workdir)
 		for _, cr := range coverageResults {
 			result.Assertions = append(result.Assertions, cr)
 			if !cr.Passed {
