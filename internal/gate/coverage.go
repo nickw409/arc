@@ -39,7 +39,7 @@ func collectTestFiles(workdir string) ([]string, error) {
 // reads the spec and test files to determine whether each target is meaningfully
 // tested. Assertions without a SpecCoverage value are ignored.
 // Returns nil when no spec_coverage assertions are present.
-func RunSpecCoverage(ctx context.Context, spec *arc.PhaseSpec, assertions []arc.GateAssertion, workdir string) []arc.AssertionResult {
+func RunSpecCoverage(ctx context.Context, spec *arc.PhaseSpec, assertions []arc.GateAssertion, workdir string, commandName string) []arc.AssertionResult {
 	var coverageAssertions []arc.GateAssertion
 	for _, a := range assertions {
 		if a.SpecCoverage != "" {
@@ -98,7 +98,12 @@ PASS <number>: <target> — <one-line reason>
 FAIL <number>: <target> — <one-line reason>
 `, spec.Spec, strings.Join(targetLines, "\n"), fileList)
 
-	agentAdapter := adapter.Get("claude")
+	var agentAdapter arc.AgentAdapter
+	if commandName != "" {
+		agentAdapter = &adapter.ClaudeAdapter{CommandName: commandName}
+	} else {
+		agentAdapter = adapter.Get("claude")
+	}
 
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: 20,

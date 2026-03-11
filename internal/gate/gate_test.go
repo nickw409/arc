@@ -16,6 +16,17 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
+// buildMockAgent compiles the mockagent binary and returns its path.
+func buildMockAgent(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "mockagent")
+	cmd := exec.Command("go", "build", "-o", bin, "../../internal/agent/testdata/mockagent")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build mockagent: %v\n%s", err, out)
+	}
+	return bin
+}
+
 // parseSpec parses a YAML string into *arc.PhaseSpec for use in gate.Run.
 func parseSpec(t *testing.T, content string) *arc.PhaseSpec {
 	t.Helper()
@@ -2215,9 +2226,10 @@ promises:
 }
 
 func TestRun_SpecCoverageOnly_Pass(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestFoo — TestFoo calls Foo() and checks the result")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "implement Foo"
@@ -2226,7 +2238,7 @@ gate:
   assertions:
     - spec_coverage: TestFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -2239,9 +2251,11 @@ gate:
 }
 
 func TestRun_FilesAndSpecCoverage_Combined(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestNewFoo — TestNewFoo calls NewFoo() and verifies the return value")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo.go", "package main\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestNewFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2252,7 +2266,7 @@ gate:
   assertions:
     - spec_coverage: TestNewFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -2266,9 +2280,11 @@ gate:
 }
 
 func TestRun_PromisesAndSpecCoverage_Combined(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestNewFoo — TestNewFoo calls NewFoo() directly")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo.go", "package main\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestNewFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2279,7 +2295,7 @@ gate:
   assertions:
     - spec_coverage: TestNewFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -2293,9 +2309,11 @@ gate:
 }
 
 func TestRun_AllThreeFeatures_Combined_Pass(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestNewFoo — TestNewFoo calls NewFoo() and asserts the result")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {\n\tif got := NewFoo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo.go", "package main\nfunc NewFoo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestNewFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2309,7 +2327,7 @@ gate:
   assertions:
     - spec_coverage: TestNewFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -2323,9 +2341,11 @@ gate:
 }
 
 func TestRun_AllThreeFeatures_SpecCoverageFails(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "FAIL 1: TestEdgeCaseMissing — no test function named TestEdgeCaseMissing exists in any test file")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc NewFoo() {}\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestNewFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo.go", "package main\nfunc NewFoo() {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestNewFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "implement NewFoo"
@@ -2339,14 +2359,13 @@ gate:
   assertions:
     - spec_coverage: TestEdgeCaseMissing
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	if result.Passed {
-		t.Fatal("expected Passed=false (spec_coverage target not in test files)")
+		t.Fatal("expected Passed=false (spec_coverage target not covered)")
 	}
-	// Find the failed spec_coverage assertion
 	foundCovFail := false
 	for _, a := range result.Assertions {
 		if !a.Passed && strings.Contains(a.Description, "spec_coverage") {
@@ -2359,25 +2378,22 @@ gate:
 }
 
 func TestRun_SpecCoverage_EmptySpec_NoTrigger(t *testing.T) {
-	// When SpecCoverage value is a valid identifier and the target exists in test
-	// files, spec_coverage passes even when the Spec prose field is empty.
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestFoo — TestFoo exercises Foo()")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 gate:
   assertions:
     - spec_coverage: TestFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	// spec_coverage checks the target text in test files; with empty Spec field
-	// the gate still runs the coverage assertion (no AI trigger required).
 	if !result.Passed {
-		t.Fatalf("expected Passed=true (coverage target found), got false: %+v", result.Assertions)
+		t.Fatalf("expected Passed=true, got false: %+v", result.Assertions)
 	}
 	if len(result.Assertions) != 1 {
 		t.Fatalf("expected 1 assertion, got %d", len(result.Assertions))
@@ -2385,9 +2401,11 @@ gate:
 }
 
 func TestRun_SpecCoverage_PopulatedSpec_Pass(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestFoo — TestFoo calls Foo() and validates behavior")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package main\n\nfunc Foo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo.go", "package main\nfunc Foo() string { return \"foo\" }\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "Implement Foo with error handling"
@@ -2396,7 +2414,7 @@ gate:
   assertions:
     - spec_coverage: TestFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -2406,8 +2424,10 @@ gate:
 }
 
 func TestRun_SpecCoverage_PopulatedSpec_Fail(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "FAIL 1: TestEdgeCaseNotPresent — no test exercises this target")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+	writeFile(t, workdir, "foo_test.go", "package main\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 spec: "Implement Foo with edge cases"
@@ -2416,12 +2436,12 @@ gate:
   assertions:
     - spec_coverage: TestEdgeCaseNotPresent
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	if result.Passed {
-		t.Fatal("expected Passed=false (coverage target not in test files)")
+		t.Fatal("expected Passed=false (coverage target not covered)")
 	}
 }
 

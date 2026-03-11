@@ -64,7 +64,7 @@ func TestRunSpecCoverage_NoSpecCoverageAssertions_ReturnsNil(t *testing.T) {
 		{FileExists: "main.go"},
 		{Grep: "package main"},
 	}
-	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir, "")
 	if results != nil {
 		t.Errorf("expected nil results for no spec_coverage assertions, got %v", results)
 	}
@@ -72,7 +72,7 @@ func TestRunSpecCoverage_NoSpecCoverageAssertions_ReturnsNil(t *testing.T) {
 
 func TestRunSpecCoverage_NilAssertions_ReturnsNil(t *testing.T) {
 	workdir := t.TempDir()
-	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, nil, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, nil, workdir, "")
 	if results != nil {
 		t.Errorf("expected nil results for nil assertions, got %v", results)
 	}

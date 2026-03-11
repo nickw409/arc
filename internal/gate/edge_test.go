@@ -219,7 +219,7 @@ func TestRunSpecCoverage_WorkdirDoesNotExist(t *testing.T) {
 	assertions := []arc.GateAssertion{
 		{SpecCoverage: "SomeFunc"},
 	}
-	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir)
+	results := RunSpecCoverage(t.Context(), &arc.PhaseSpec{}, assertions, workdir, "")
 	if len(results) != 1 {
 		t.Fatalf("expected 1 error result, got %d", len(results))
 	}
@@ -356,9 +356,10 @@ checkpoints:
 // spec_coverage runs after regular assertions even when earlier assertions fail.
 // The spec_coverage results should appear in the Assertions slice.
 func TestRun_SpecCoverage_RunsAfterFailedRegularAssertions(t *testing.T) {
+	bin := buildMockAgent(t)
+	t.Setenv("MOCK_OUTPUT", "PASS 1: TestFoo — TestFoo exercises Foo()")
 	workdir := t.TempDir()
-	writeFile(t, workdir, "foo.go", "package foo\n\nfunc Foo() string { return \"foo\" }\n")
-	writeFile(t, workdir, "foo_test.go", "package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tif got := Foo(); got == \"\" { t.Fatal(\"empty\") }\n}\n")
+	writeFile(t, workdir, "foo_test.go", "package foo\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n")
 
 	spec := parseSpec(t, `
 name: test
@@ -368,7 +369,7 @@ gate:
     - file_exists: nonexistent.go
     - spec_coverage: TestFoo
 `)
-	result, err := Run(context.Background(), spec, workdir, WithVerifier(false))
+	result, err := Run(context.Background(), spec, workdir, WithVerifier(false), WithCoverageCommandName(bin))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -20,13 +20,22 @@ import (
 type RunOption func(*runOptions)
 
 type runOptions struct {
-	verifierOverride *bool // nil = use spec/auto logic; non-nil = force
+	verifierOverride     *bool  // nil = use spec/auto logic; non-nil = force
+	coverageCommandName  string // override agent binary for spec_coverage (tests)
 }
 
 // WithVerifier forces the verifier agent on or off, overriding spec and auto-detection.
 func WithVerifier(enabled bool) RunOption {
 	return func(o *runOptions) {
 		o.verifierOverride = &enabled
+	}
+}
+
+// WithCoverageCommandName overrides the agent binary used for spec_coverage checks.
+// Used in tests to inject a mock agent instead of the real claude CLI.
+func WithCoverageCommandName(name string) RunOption {
+	return func(o *runOptions) {
+		o.coverageCommandName = name
 	}
 }
 
@@ -159,7 +168,7 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 
 	// Run spec_coverage checks after regular assertions and verifier.
 	if hasCoverageAssertions {
-		coverageResults := RunSpecCoverage(ctx, spec, effectiveAssertions, workdir)
+		coverageResults := RunSpecCoverage(ctx, spec, effectiveAssertions, workdir, ro.coverageCommandName)
 		for _, cr := range coverageResults {
 			result.Assertions = append(result.Assertions, cr)
 			if !cr.Passed {
