@@ -191,8 +191,7 @@ arc validate [paths...]                    # AI-powered test quality audit
 arc daemon start|stop|list|status          # Manage background daemon
 arc cancel <plan-name>                     # Cancel a running plan
 arc cleanup <plan-name>                    # Clean up worktree/lock for a plan
-arc chat                                   # Interactive Claude session with Arc MCP tools
-arc serve                                  # Start MCP server on stdio
+arc chat                                   # Interactive Claude session with Arc guide as system context
 ```
 
 ### Gate-Based Execution

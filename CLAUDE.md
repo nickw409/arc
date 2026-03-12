@@ -38,7 +38,6 @@ internal/         All Go packages:
   guide/          Agent-facing reference guide (arc guide)
   intelligence/   Project intelligence store (test cmds, flaky tests, costs)
   logging/        Structured JSONL logger (PlanLogger, plan.jsonl)
-  mcp/            MCP server and tool handlers (arc chat / arc serve backend)
   migrate/        State migration utilities
   monitor/        Live TUI (bubbletea) for arc status --live
   orchestrator/   Orchestration engine:
@@ -71,9 +70,11 @@ docs/             Documentation
 
 Arc does **not** have (do not introduce these):
 - `internal/pipeline/`, `internal/workflow/`, `internal/block/`, `internal/runner/` packages
+- `internal/mcp/` package — MCP server was removed; `arc chat` uses CLI directly
 - Workflow YAML files or state machine definitions
 - Verdict extraction from agent output (`## Verdict` parsing)
 - `arc iterate` command
+- `arc serve` command — removed along with the MCP server
 - `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories
 - `IsGatedPlan()` function — all plans are gated, `Launch()` always calls `LaunchGated()`
 
@@ -105,11 +106,9 @@ arc guide                                   # Print agent-facing reference
 arc validate [paths...]                     # Audit test quality using AI agent
 arc dispatch <task description...>               # Auto-generate plan from description and run it
 
-# Interactive / MCP
-arc chat                                    # Launch Claude session with Arc MCP tools
+# Interactive
+arc chat                                    # Launch Claude session with Arc guide as system context
 arc chat --model opus                       # Use a specific model
-arc chat --no-register                      # Skip MCP registration (if already set up)
-arc serve                                   # Start MCP server on stdio (used internally by arc chat)
 
 # Phase management
 arc manage <plan> <phase> complete          # Mark phase complete

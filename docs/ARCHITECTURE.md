@@ -25,7 +25,6 @@ internal/
   guide/              Agent-facing reference guide (arc guide)
   intelligence/       Project intelligence store (test cmds, flaky tests, costs)
   logging/            Structured JSONL logger (PlanLogger, plan.jsonl)
-  mcp/                MCP server and tool handlers (arc chat / arc serve backend)
   migrate/            State migration utilities
   monitor/            Live TUI (bubbletea) for arc status --live
   orchestrator/       Orchestration engine:

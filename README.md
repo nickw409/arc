@@ -39,14 +39,14 @@ This detects your language and test runner, then creates:
 
 ### Interactive Mode with `arc chat`
 
-Launch an interactive Claude session with Arc tools available as MCP tools:
+Launch an interactive Claude session with the Arc guide injected as system context:
 
 ```bash
 arc chat                        # Start interactive session
 arc chat --model opus           # Use a specific model
 ```
 
-The chat agent can plan, review, run, and monitor Arc plans conversationally. Orchestrator runs are async — `arc_run` returns immediately and you can poll with `arc_run_status` or cancel with `arc_run_cancel`.
+The chat agent has full access to the `arc` CLI via Bash and the Arc reference guide as system context. It can plan, review, run, and monitor Arc plans conversationally.
 
 ### Quick Start with `arc dispatch`
 
@@ -446,7 +446,6 @@ arc/
 │   ├── guide/        Agent-facing reference guide
 │   ├── intelligence/ Project intelligence store
 │   ├── logging/      Structured logger
-│   ├── mcp/          MCP server and tool handlers (arc chat backend)
 │   ├── migrate/      State migration
 │   ├── monitor/      Live TUI (bubbletea)
 │   ├── orchestrator/ Top-level orchestrator loop

@@ -105,13 +105,12 @@ Suggestions are merged by priority and applied to `plan.md`. The loop repeats un
 
 Results are stored in `plan.json` as `review_status` and `review_results`.
 
-## Phase Dependencies (`arc_plan_update_deps`)
+## Phase Dependencies
 
 By default, all phases are independent and run in parallel. Add dependencies to sequence them:
 
-```
-# Via MCP tool (arc chat)
-arc_plan_update_deps(plan_name="my-plan", deps={"qa": ["impl"]})
+```bash
+arc plan update-deps my-plan qa --deps impl
 
 # Result in plan.json:
 "dependencies": {"qa": ["impl"]}

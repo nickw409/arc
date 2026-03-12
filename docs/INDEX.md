@@ -47,7 +47,6 @@ arc/
 │   ├── guide/        Agent-facing reference guide
 │   ├── intelligence/ Project intelligence store
 │   ├── logging/      Structured JSONL logger
-│   ├── mcp/          MCP server (arc chat / arc serve)
 │   ├── migrate/      State migration
 │   ├── monitor/      Live TUI
 │   ├── orchestrator/ Execution engine (LaunchGated, RunPhaseGated)
