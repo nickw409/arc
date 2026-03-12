@@ -22,7 +22,7 @@ const defaultReviewModel = "claude-sonnet-4-5-20250929"
 func newReviewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review <plan-name>",
-		Short: "Run adversarial review with auto-remediation",
+		Short: "Run adversarial review with synthesis pass",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planName := args[0]
@@ -157,7 +157,6 @@ func newReviewCmd() *cobra.Command {
 
 			// Print in phase order (only reviewed phases)
 			maxIteration := 0
-			totalSuggestions := 0
 			reviewResults := make(map[string]string)
 			for _, phase := range phasesToReview {
 				pr := phaseResults[phase]
@@ -170,28 +169,12 @@ func newReviewCmd() *cobra.Command {
 
 				fmt.Printf("Phase: %s\n", phase)
 
-				// Show iteration details if there were multiple
-				for _, detail := range pr.Result.IterationDetails {
-					fmt.Printf("  Iteration %d/%d:\n", detail.Iteration, review.MaxReviewIterations)
-					for name, status := range detail.Verdicts {
-						mark := "PASS"
-						if status == "failed" || status == "error" {
-							mark = "FAIL"
-						}
-						fmt.Printf("    [%s] %s\n", mark, name)
-					}
-					if detail.SuggestionsApplied > 0 {
-						fmt.Printf("    Applied %d suggestion(s)\n", detail.SuggestionsApplied)
-					}
-				}
-
 				if pr.Result.Iteration > maxIteration {
 					maxIteration = pr.Result.Iteration
 				}
-				totalSuggestions += pr.Result.SuggestionsApplied
 
-				// Show final verdicts
-				fmt.Printf("  Final verdicts:\n")
+				// Show verdicts
+				fmt.Printf("  Verdicts:\n")
 				for _, v := range pr.Result.Verdicts {
 					statusMark := "PASS"
 					if v.Status == "failed" || v.Status == "error" {
@@ -203,7 +186,11 @@ func newReviewCmd() *cobra.Command {
 					}
 					fmt.Printf("    [%s] %s: %s\n", statusMark, v.Name, v.Verdict)
 				}
-				fmt.Printf("  Phase result: %s\n\n", pr.Result.Status)
+				fmt.Printf("  Phase result: %s\n", pr.Result.Status)
+				if pr.Result.Synthesized {
+					fmt.Printf("  Synthesized: plan.md rewritten\n")
+				}
+				fmt.Println()
 
 				for _, v := range pr.Result.Verdicts {
 					effectiveStatus := v.Status
@@ -212,10 +199,6 @@ func newReviewCmd() *cobra.Command {
 					}
 					reviewResults[v.Name] = effectiveStatus
 				}
-			}
-
-			if totalSuggestions > 0 {
-				fmt.Printf("Total suggestions applied: %d\n", totalSuggestions)
 			}
 
 			// Update plan.json with per-phase review status and recompute plan-level status

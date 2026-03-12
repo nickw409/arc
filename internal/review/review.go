@@ -6,13 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
-	"github.com/nwiley/arc/internal/plan"
 )
 
 // MaxReviewIterations is the maximum number of review iterations per phase.
@@ -32,22 +29,12 @@ type ReviewOptions struct {
 
 // ReviewResult holds the outcome of a review.
 type ReviewResult struct {
-	Status             string
-	Verdicts           map[string]AdversaryResult
-	Iteration          int
-	SuggestionsApplied int
-	IterationDetails   []IterationDetail
-	Usage              arc.Usage
-	Hash               string // SHA-256 of the final plan.md content
-}
-
-// IterationDetail records what happened in a single iteration of the review loop.
-type IterationDetail struct {
-	Iteration          int
-	Status             string
-	SuggestionsFound   int
-	SuggestionsApplied int
-	Verdicts           map[string]string // adversary name -> status
+	Status      string
+	Verdicts    map[string]AdversaryResult
+	Iteration   int
+	Synthesized bool
+	Usage       arc.Usage
+	Hash        string // SHA-256 of the final plan.md content
 }
 
 // AdversaryResult holds the outcome of a single adversary agent.
@@ -61,16 +48,15 @@ type AdversaryResult struct {
 	Usage        arc.Usage
 }
 
-// Run executes the adversarial review loop with auto-remediation.
-// Each iteration: run all adversaries → parse suggestions from failures →
-// merge by priority → apply to plan.md → repeat until converged or limit hit.
+// Run executes a single-pass adversarial review with synthesis.
+// Runs scope first; if scope_too_large returns immediately.
+// Otherwise runs spec-quality, correctness, gate in parallel, then synthesizer if any failed.
 func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
 	planDir := filepath.Join(opts.PlansDir, opts.PlanName)
-	adversaries := DefaultAdversaries()
 	planMDPath := filepath.Join(planDir, "phases", opts.Phase, "plan.md")
 	histPath := filepath.Join(planDir, "reviews", "adversary_history.json")
 	reviewsDir := filepath.Join(planDir, "reviews")
@@ -82,246 +68,211 @@ func Run(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 		Verdicts: make(map[string]AdversaryResult),
 	}
 
-	// Track failure signatures for convergence detection.
-	// If the same set of failing adversaries appears twice, we're oscillating.
-	var failureSignatures []string
-
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		// Load plan.md for this iteration
-		planMDBytes, err := os.ReadFile(planMDPath)
-		if err != nil {
-			return nil, fmt.Errorf("reading plan.md for phase %s: %w", opts.Phase, err)
-		}
-		planMD := string(planMDBytes)
-
-		// Check iteration limit
-		history := LoadHistory(histPath)
-		maxIter := MaxReviewIterations
-		if opts.MaxIterations > 0 {
-			maxIter = opts.MaxIterations
-		}
-		if history.Iterations[opts.Phase] >= maxIter {
-			opts.Logger.Info("max review iterations reached, proceeding as conditional",
-				"phase", opts.Phase,
-				"iterations", history.Iterations[opts.Phase],
-			)
-			if result.Status == "" || result.Status == "needs_review" {
-				result.Status = "conditional"
-			}
-			result.Iteration = history.Iterations[opts.Phase]
-			// Populate verdicts from cache so the CLI can display results.
-			for _, adv := range adversaries {
-				if phaseHistory, ok := history.Phases[opts.Phase]; ok {
-					if entry, ok := phaseHistory[adv.Name]; ok {
-						result.Verdicts[adv.Name] = AdversaryResult{
-							Name:         adv.Name,
-							Verdict:      entry.Verdict,
-							Status:       "cached",
-							CachedStatus: entry.Status,
-							Required:     adv.Required,
-						}
+	// Check iteration limit — if already at max, return conditional from cache.
+	history := LoadHistory(histPath)
+	maxIter := MaxReviewIterations
+	if opts.MaxIterations > 0 {
+		maxIter = opts.MaxIterations
+	}
+	if history.Iterations[opts.Phase] >= maxIter {
+		opts.Logger.Info("max review iterations reached, proceeding as conditional",
+			"phase", opts.Phase,
+			"iterations", history.Iterations[opts.Phase],
+		)
+		result.Status = "conditional"
+		result.Iteration = history.Iterations[opts.Phase]
+		for _, adv := range DefaultAdversaries() {
+			if phaseHistory, ok := history.Phases[opts.Phase]; ok {
+				if entry, ok := phaseHistory[adv.Name]; ok {
+					result.Verdicts[adv.Name] = AdversaryResult{
+						Name:         adv.Name,
+						Verdict:      entry.Verdict,
+						Status:       "cached",
+						CachedStatus: entry.Status,
+						Required:     adv.Required,
 					}
 				}
 			}
-			break
 		}
+		if finalHash, err := computePlanHash(planMDPath); err == nil {
+			result.Hash = finalHash
+		}
+		return result, nil
+	}
 
-		// Run all adversaries in parallel
-		iteration := history.Iterations[opts.Phase] + 1
-		verdicts := runAdversaries(ctx, adversaries, planDir, opts.Phase, planMD, opts.Model, iteration, opts.ProjectContext)
+	// Load plan.md.
+	planMDBytes, err := os.ReadFile(planMDPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading plan.md for phase %s: %w", opts.Phase, err)
+	}
+	planMD := string(planMDBytes)
 
-		// Aggregate usage from this iteration's adversaries
-		for _, v := range verdicts {
-			result.Usage = result.Usage.Add(v.Usage)
-		}
+	// --- Scope pre-check ---
+	scopeAdv := ScopeAdversary()
+	scopeResult, _ := RunAdversary(ctx, scopeAdv, planDir, opts.Phase, planMD, opts.Model, opts.ProjectContext)
+	result.Usage = result.Usage.Add(scopeResult.Usage)
+	result.Verdicts[scopeAdv.Name] = *scopeResult
 
-		// Write output files and update history
-		hash, _ := computePlanHash(planMDPath)
-		if history.Phases[opts.Phase] == nil {
-			history.Phases[opts.Phase] = make(map[string]historyEntry)
+	// Write scope output file and update history.
+	hash, _ := computePlanHash(planMDPath)
+	if history.Phases[opts.Phase] == nil {
+		history.Phases[opts.Phase] = make(map[string]historyEntry)
+	}
+	scopeNonCached := scopeResult.Status != "cached" && scopeResult.Status != "error"
+	if scopeNonCached {
+		outPath := filepath.Join(reviewsDir, opts.Phase+"_"+scopeAdv.Name+".md")
+		if err := os.WriteFile(outPath, []byte(scopeResult.Output), 0644); err != nil {
+			opts.Logger.Warn("failed to write scope output file", "path", outPath, "error", err)
 		}
-		hasNonCached := false
-		for _, v := range verdicts {
-			if v.Status == "cached" || v.Status == "error" {
-				continue
-			}
-			hasNonCached = true
-			outPath := filepath.Join(reviewsDir, opts.Phase+"_"+v.Name+".md")
-			if err := os.WriteFile(outPath, []byte(v.Output), 0644); err != nil {
-				opts.Logger.Warn("failed to write adversary output file", "path", outPath, "error", err)
-			}
-			history.Phases[opts.Phase][v.Name] = historyEntry{
-				Hash:      hash,
-				Verdict:   v.Verdict,
-				Status:    v.Status,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
+		history.Phases[opts.Phase][scopeAdv.Name] = historyEntry{
+			Hash:      hash,
+			Verdict:   scopeResult.Verdict,
+			Status:    scopeResult.Status,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
-		if hasNonCached {
+	}
+
+	if scopeResult.Verdict == scopeAdv.FailVerdict {
+		// Increment iteration once for the scope-only run.
+		if scopeNonCached {
 			history.Iterations[opts.Phase]++
 		}
 		if err := SaveHistory(histPath, history); err != nil {
 			opts.Logger.Warn("failed to save adversary history", "error", err)
 		}
-
-		status := determineReviewStatus(verdicts)
-		currentIteration := history.Iterations[opts.Phase]
-
-		// Update result with latest verdicts
-		result.Verdicts = verdicts
-		result.Iteration = currentIteration
-		result.Status = status
-
-		// Convergence detection: if we've seen this failure pattern before, stop
-		converged := false
-		if status != "approved" && status != "conditional" {
-			sig := failureSignature(verdicts)
-			if sig != "" {
-				for _, prev := range failureSignatures {
-					if sig == prev {
-						opts.Logger.Info("convergence detected — same failure pattern repeating, stopping review",
-							"phase", opts.Phase,
-							"failing", sig,
-						)
-						converged = true
-						break
-					}
-				}
-				failureSignatures = append(failureSignatures, sig)
-			}
+		opts.Logger.Info("scope too large — plan must be split before continuing review",
+			"phase", opts.Phase,
+		)
+		result.Status = "scope_too_large"
+		result.Iteration = history.Iterations[opts.Phase]
+		if finalHash, err := computePlanHash(planMDPath); err == nil {
+			result.Hash = finalHash
 		}
+		return result, nil
+	}
 
-		// Collect suggestions from failed adversaries
-		var allSuggestions []Suggestion
-		for _, v := range verdicts {
-			if v.Status == "failed" {
-				suggestions := ParseSuggestions(v.Name, v.Output)
-				suggestions = FilterByConfidence(suggestions, DefaultConfidenceThreshold)
-				allSuggestions = append(allSuggestions, suggestions...)
-			}
+	// --- Run remaining adversaries in parallel ---
+	var parallelAdvs []Adversary
+	for _, adv := range DefaultAdversaries() {
+		if adv.Name != scopeAdv.Name {
+			parallelAdvs = append(parallelAdvs, adv)
 		}
+	}
 
-		// Merge and apply suggestions
-		merged := MergeSuggestions(allSuggestions)
-		applied := 0
-		if len(merged) > 0 {
-			planMD, applied = ApplySuggestions(planMD, merged)
-			if applied > 0 {
-				if err := os.WriteFile(planMDPath, []byte(planMD), 0644); err != nil {
-					return nil, fmt.Errorf("writing updated plan.md for phase %s: %w", opts.Phase, err)
-				}
-			}
+	verdicts := runAdversaries(ctx, parallelAdvs, planDir, opts.Phase, planMD, opts.Model, opts.ProjectContext)
+
+	// Merge scope result into verdicts.
+	for k, v := range verdicts {
+		result.Verdicts[k] = v
+	}
+
+	// Aggregate usage.
+	for _, v := range verdicts {
+		result.Usage = result.Usage.Add(v.Usage)
+	}
+
+	// Write output files and update history.
+	// history is already loaded above and has the scope entry written.
+	hasNonCached := scopeNonCached
+	for _, v := range verdicts {
+		if v.Status == "cached" || v.Status == "error" {
+			continue
 		}
+		hasNonCached = true
+		outPath := filepath.Join(reviewsDir, opts.Phase+"_"+v.Name+".md")
+		if err := os.WriteFile(outPath, []byte(v.Output), 0644); err != nil {
+			opts.Logger.Warn("failed to write adversary output file", "path", outPath, "error", err)
+		}
+		history.Phases[opts.Phase][v.Name] = historyEntry{
+			Hash:      hash,
+			Verdict:   v.Verdict,
+			Status:    v.Status,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+	// Increment iteration once for the whole run (scope + parallel).
+	if hasNonCached {
+		history.Iterations[opts.Phase]++
+	}
+	if err := SaveHistory(histPath, history); err != nil {
+		opts.Logger.Warn("failed to save adversary history", "error", err)
+	}
 
-		result.SuggestionsApplied += applied
+	status := determineReviewStatus(result.Verdicts)
+	result.Iteration = history.Iterations[opts.Phase]
+	result.Status = status
 
-		// Record iteration detail
-		verdictSummary := make(map[string]string, len(verdicts))
-		for name, v := range verdicts {
+	opts.Logger.Info("review complete",
+		"phase", opts.Phase,
+		"iteration", result.Iteration,
+		"status", status,
+	)
+
+	// Run synthesizer if any adversary failed.
+	if status != "approved" {
+		var failedNames []string
+		for _, v := range result.Verdicts {
 			effectiveStatus := v.Status
 			if v.Status == "cached" {
 				effectiveStatus = v.CachedStatus
 			}
-			verdictSummary[name] = effectiveStatus
+			if effectiveStatus == "failed" {
+				failedNames = append(failedNames, v.Name)
+			}
 		}
-		result.IterationDetails = append(result.IterationDetails, IterationDetail{
-			Iteration:          currentIteration,
-			Status:             status,
-			SuggestionsFound:   len(allSuggestions),
-			SuggestionsApplied: applied,
-			Verdicts:           verdictSummary,
-		})
-
-		opts.Logger.Info("review iteration complete",
-			"phase", opts.Phase,
-			"iteration", currentIteration,
-			"status", status,
-			"suggestions_found", len(allSuggestions),
-			"suggestions_applied", applied,
-		)
-
-		// Exit conditions
-		if status == "approved" || status == "conditional" {
-			break
+		if len(failedNames) > 0 {
+			synthesized, synthUsage, synthErr := RunSynthesizer(ctx, SynthesisOptions{
+				PlanDir:         planDir,
+				PhaseName:       opts.Phase,
+				FailedCritiques: failedNames,
+				Model:           opts.Model,
+				CommandName:     agentCommandName,
+				ProjectContext:  opts.ProjectContext,
+			})
+			result.Synthesized = synthesized
+			result.Usage = result.Usage.Add(synthUsage)
+			if synthErr != nil {
+				opts.Logger.Warn("synthesizer failed (non-blocking)", "phase", opts.Phase, "error", synthErr)
+			}
 		}
-		if converged || applied == 0 {
-			break
-		}
-		// Suggestions were applied, plan.md changed — loop for re-review
 	}
 
-	// When the review loop exits without full approval, allow the plan to
-	// proceed as conditional rather than blocking. The auto-remediation has
-	// done its best — remaining issues are logged but non-blocking.
+	// Downgrade needs_review to conditional — review is advisory, not blocking.
 	if result.Status == "needs_review" {
 		result.Status = "conditional"
 	}
 
-	// Sync spec.yaml from the final plan.md so the orchestrator always has
-	// up-to-date gate assertions and spec content. Adversaries only modify
-	// plan.md — without this, spec.yaml can silently diverge.
-	if synced, err := plan.SyncSpecFromPlanMD(opts.PlansDir, opts.PlanName, opts.Phase); err != nil {
-		opts.Logger.Warn("failed to sync spec.yaml from plan.md", "phase", opts.Phase, "error", err)
-	} else if synced {
-		opts.Logger.Info("synced spec.yaml from plan.md", "phase", opts.Phase)
-	}
-
-	// Compute hash of the final plan.md for incremental review skip tracking.
 	if finalHash, err := computePlanHash(planMDPath); err == nil {
 		result.Hash = finalHash
 	}
 
-	opts.Logger.Info("review complete", "status", result.Status, "phase", opts.Phase)
 	return result, nil
 }
 
-// failureSignature returns a deterministic string identifying which adversaries
-// are currently failing, used for convergence/oscillation detection.
-func failureSignature(verdicts map[string]AdversaryResult) string {
-	var names []string
-	for _, v := range verdicts {
-		effectiveStatus := v.Status
-		if v.Status == "cached" {
-			effectiveStatus = v.CachedStatus
-		}
-		if effectiveStatus == "failed" {
-			names = append(names, v.Name)
-		}
+// runAdversaries runs adversaries concurrently and returns their results by name.
+func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, projectContext string) map[string]AdversaryResult {
+	type result struct {
+		name string
+		r    AdversaryResult
 	}
-	sort.Strings(names)
-	return strings.Join(names, ",")
-}
-
-// runAdversaries spawns adversary groups concurrently and returns their results.
-// Each group runs as a single agent call; results are merged by adversary name.
-func runAdversaries(ctx context.Context, adversaries []Adversary, planDir string, phase string, planMD string, model string, iteration int, projectContext string) map[string]AdversaryResult {
-	groups := DefaultGroups()
-
-	type groupResults []AdversaryResult
-	resultsCh := make(chan groupResults, len(groups))
+	resultsCh := make(chan result, len(adversaries))
 
 	var wg sync.WaitGroup
-	for _, grp := range groups {
+	for _, adv := range adversaries {
 		wg.Add(1)
-		go func(g AdversaryGroup) {
+		go func(a Adversary) {
 			defer wg.Done()
-			results := RunAdversaryGroup(ctx, g, planDir, phase, planMD, model, iteration, projectContext)
-			resultsCh <- results
-		}(grp)
+			r, _ := RunAdversary(ctx, a, planDir, phase, planMD, model, projectContext)
+			resultsCh <- result{name: a.Name, r: *r}
+		}(adv)
 	}
 
 	wg.Wait()
 	close(resultsCh)
 
 	verdicts := make(map[string]AdversaryResult, len(adversaries))
-	for results := range resultsCh {
-		for _, r := range results {
-			verdicts[r.Name] = r
-		}
+	for r := range resultsCh {
+		verdicts[r.name] = r.r
 	}
 	return verdicts
 }
