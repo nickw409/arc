@@ -115,9 +115,23 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 			line += fmt.Sprintf(" iter %d", iter)
 		}
 
+		// Add attempt info if there have been gate attempts
+		if n := len(state.AttemptLog); n > 0 {
+			last := state.AttemptLog[n-1]
+			line += fmt.Sprintf(" attempt %d", n)
+			if last.ErrorTier != "" {
+				line += fmt.Sprintf(" (last: %s)", last.ErrorTier)
+			}
+		}
+
 		// Add test counts if present
 		if state.TestsTotal > 0 {
 			line += fmt.Sprintf(" %d/%d", state.TestsPassing, state.TestsTotal)
+		}
+
+		// Add cost if non-zero
+		if state.Usage.CostUSD > 0 {
+			line += fmt.Sprintf(" $%.2f", state.Usage.CostUSD)
 		}
 
 		// For terminal phases, show status summary instead of stale activity.

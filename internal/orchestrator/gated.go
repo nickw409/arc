@@ -225,12 +225,31 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			}
 		}
 
-		// Handle spawn-level failures
-		if spawnErr != nil {
+		// Handle spawn-level failures — both explicit errors and silent crashes.
+		// agent.Spawn returns (result, nil) for crashes (non-zero exit), so we
+		// must also check result.ExitCode when spawnErr is nil.
+		if spawnErr != nil || (result != nil && result.ExitCode != 0) {
 			tier := classifySpawnError(result, spawnErr)
+			crashDesc := "spawn error"
+			if spawnErr == nil {
+				crashDesc = fmt.Sprintf("agent exited %d", result.ExitCode)
+				if result.InactivityKill {
+					crashDesc = "agent killed (inactivity timeout)"
+				} else if result.TimedOut {
+					crashDesc = "agent timed out"
+				}
+			}
+			opts.Logger.Warn(crashDesc,
+				"attempt", attempt,
+				"tier", tierString(tier),
+				"exit_code", exitCode(result),
+				"has_output", result != nil && result.Output != "",
+				"error", spawnErr,
+			)
+			if pl != nil {
+				pl.RetryTriggered(opts.PhaseName, attempt, fmt.Sprintf("%s (tier: %s)", crashDesc, tierString(tier)))
+			}
 			if tier == TierTransient && attempt < effectiveMax {
-				opts.Logger.Warn("transient spawn error, retrying",
-					"attempt", attempt, "error", spawnErr)
 				isRateLimit := result != nil && result.RateLimit
 				if isRateLimit && opts.OnRateLimit != nil {
 					opts.OnRateLimit()
@@ -243,13 +262,13 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 				}
 				continue
 			}
-			// Agent failed hard — still run gate in case it made partial progress
-			opts.Logger.Warn("agent spawn failed, running gate anyway",
-				"attempt", attempt, "error", spawnErr)
+			// Agent failed but may have made partial progress — run gate anyway.
+			fmt.Printf("[%s] Agent failed (%s), checking gate for partial progress\n",
+				opts.PhaseName, crashDesc)
 		}
 
-		// Back off if the agent was rate-limited but exited without a spawn error.
-		if spawnErr == nil && result != nil && result.RateLimit && attempt < effectiveMax {
+		// Back off if the agent was rate-limited but exited cleanly (exit 0).
+		if spawnErr == nil && result != nil && result.RateLimit && result.ExitCode == 0 && attempt < effectiveMax {
 			opts.Logger.Warn("agent rate-limited, backing off", "attempt", attempt)
 			if opts.OnRateLimit != nil {
 				opts.OnRateLimit()
@@ -341,6 +360,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		// Classify failure
 		tier := classifyGateFailure(gateResult, attempt, effectiveMax)
 
+		// Determine which gate component caused the failure for logging.
+		gateFailReason := describeGateFailure(gateResult)
+
 		// Capture attempt diagnostic for arc_manage show
 		summary := arc.AttemptSummary{
 			Attempt:   attempt,
@@ -354,8 +376,13 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 		opts.Logger.Info("gate failed",
 			"attempt", attempt,
-			"tier", tier,
+			"tier", tierString(tier),
+			"reason", gateFailReason,
 		)
+		if pl != nil {
+			pl.RetryTriggered(opts.PhaseName, attempt,
+				fmt.Sprintf("gate failed: %s (tier: %s)", gateFailReason, tierString(tier)))
+		}
 
 		switch tier {
 		case TierGiveUp:
@@ -724,6 +751,61 @@ func tierString(t ErrorTier) string {
 	default:
 		return "unknown"
 	}
+}
+
+// exitCode safely extracts the exit code from an AgentResult (0 if nil).
+func exitCode(r *arc.AgentResult) int {
+	if r == nil {
+		return 0
+	}
+	return r.ExitCode
+}
+
+// describeGateFailure returns a human-readable string explaining which gate
+// component caused the failure: assertions, verifier, spec_coverage, or a mix.
+func describeGateFailure(gr *arc.GateResult) string {
+	if gr == nil {
+		return "nil gate result"
+	}
+
+	// Check if verifier failed (assertions passed but gate failed)
+	assertionsFailed := 0
+	coverageFailed := 0
+	for _, a := range gr.Assertions {
+		if !a.Passed {
+			if strings.Contains(a.Detail, "coverage") || strings.Contains(a.Detail, "spec_coverage") {
+				coverageFailed++
+			} else {
+				assertionsFailed++
+			}
+		}
+	}
+
+	// Verifier failure: assertions all passed but gate still failed
+	if assertionsFailed == 0 && coverageFailed == 0 && !gr.Passed {
+		if gr.ScopedTestOutput != "" {
+			return "verifier rejected"
+		}
+		if !gr.ScopedTestPassed {
+			return "spec_coverage check failed"
+		}
+		return "verifier or post-assertion check failed"
+	}
+
+	var parts []string
+	if assertionsFailed > 0 {
+		parts = append(parts, fmt.Sprintf("%d assertion(s) failed", assertionsFailed))
+	}
+	if coverageFailed > 0 {
+		parts = append(parts, fmt.Sprintf("%d coverage check(s) failed", coverageFailed))
+	}
+	if !gr.ScopedTestPassed && gr.ScopedTestOutput != "" {
+		parts = append(parts, "verifier rejected")
+	}
+	if len(parts) == 0 {
+		return "unknown"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // blockPhaseOnStartupError writes a blocked state to disk when RunPhaseGated
