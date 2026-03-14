@@ -44,6 +44,15 @@ git:
   co_author: false
   base_branch: dev
 
+agents:
+  default: claude
+
+models:
+  default: sonnet
+  planner: opus
+  orchestrator: opus
+  review: sonnet
+
 # Review settings for adversarial plan review agents
 review:
   max_turns: 25     # max agent turns per adversary (default: 15)

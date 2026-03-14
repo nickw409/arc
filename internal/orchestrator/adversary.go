@@ -86,9 +86,14 @@ func RunAdversary(ctx context.Context, opts LaunchOptions, workDir string, planL
 		}
 
 		// Spawn adversary
+		adversaryModel := ""
+		if opts.Config != nil {
+			adversaryModel = opts.Config.ModelForRole("adversary")
+		}
 		sessionCfg := arc.SessionConfig{
 			MaxTurns: 100,
 			Timeout:  30 * time.Minute,
+			Model:    adversaryModel,
 		}
 		spawnResult, spawnErr := agentAdapter.Spawn(ctx, adversaryPrompt, workDir, sessionCfg)
 
@@ -355,14 +360,17 @@ func routeAdversaryFix(ctx context.Context, opts LaunchOptions, workDir string, 
 	)
 
 	adapterName := "claude"
+	implModel := ""
 	if opts.Config != nil {
 		adapterName = opts.Config.AgentForRole("impl")
+		implModel = opts.Config.ModelForRole("impl")
 	}
 	agentAdapter := adapter.Get(adapterName)
 
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: 50,
 		Timeout:  15 * time.Minute,
+		Model:    implModel,
 	}
 
 	_, err = agentAdapter.Spawn(ctx, fixPrompt, workDir, sessionCfg)

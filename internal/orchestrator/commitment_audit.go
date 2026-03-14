@@ -70,10 +70,12 @@ func RunCommitmentAudit(
 
 	fullAuditPrompt := string(auditPromptBytes) + "\n\n# Plan Files\n" + planContext.String()
 
-	// Determine agent adapter
+	// Determine agent adapter and model
 	adapterName := "claude"
+	implModel := ""
 	if opts.Config != nil {
 		adapterName = opts.Config.AgentForRole("impl")
+		implModel = opts.Config.ModelForRole("impl")
 	}
 	agentAdapter := adapter.Get(adapterName)
 
@@ -88,6 +90,7 @@ func RunCommitmentAudit(
 			MaxTurns:     30,
 			Timeout:      10 * time.Minute,
 			WorkingDir:   workDir,
+			Model:        implModel,
 		})
 		if spawnErr != nil {
 			opts.Logger.Warn("commitment audit spawn failed, skipping", "round", round, "error", spawnErr)
@@ -128,6 +131,7 @@ func RunCommitmentAudit(
 		_, fixSpawnErr := agentAdapter.Spawn(ctx, fullFixPrompt, workDir, arc.SessionConfig{
 			MaxTurns: 150,
 			Timeout:  2 * time.Hour,
+			Model:    implModel,
 		})
 		if fixSpawnErr != nil {
 			opts.Logger.Warn("commitment audit fix agent failed", "round", round, "error", fixSpawnErr)

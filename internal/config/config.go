@@ -28,12 +28,13 @@ type Config struct {
 
 	// v2 fields
 	Agents      AgentsConfig `yaml:"agents"`
+	Models      ModelsConfig `yaml:"models"`
 	MaxParallel int          `yaml:"max_parallel"`
 	Budget      BudgetConfig `yaml:"budget"`
 	Verifier    string       `yaml:"verifier"` // "always", "never", or "auto" (default: auto — enabled for medium/complex phases)
 }
 
-// AgentsConfig maps role names to agent adapter names.
+// AgentsConfig maps role names to agent adapter names (claude, codex, generic).
 type AgentsConfig struct {
 	Default      string `yaml:"default"`
 	Planner      string `yaml:"planner"`
@@ -41,6 +42,19 @@ type AgentsConfig struct {
 	Adversary    string `yaml:"adversary"`
 	Verifier     string `yaml:"verifier"`
 	Orchestrator string `yaml:"orchestrator"`
+}
+
+// ModelsConfig maps role names to model identifiers (e.g. "opus", "sonnet", "haiku",
+// or full model IDs like "claude-sonnet-4-5-20250929").
+// An empty string means "use the adapter/CLI default".
+type ModelsConfig struct {
+	Default      string `yaml:"default"`
+	Planner      string `yaml:"planner"`
+	Impl         string `yaml:"impl"`
+	Adversary    string `yaml:"adversary"`
+	Verifier     string `yaml:"verifier"`
+	Orchestrator string `yaml:"orchestrator"`
+	Review       string `yaml:"review"`
 }
 
 // BudgetConfig holds cost limit settings.
@@ -86,6 +100,31 @@ func (c *Config) AgentForRole(role string) string {
 		return c.Agents.Default
 	}
 	return "claude"
+}
+
+// ModelForRole returns the configured model for a given role.
+// Falls back to the default model, then to "" (adapter default).
+// Valid roles: "planner", "impl", "adversary", "verifier", "orchestrator", "review".
+func (c *Config) ModelForRole(role string) string {
+	var specific string
+	switch role {
+	case "planner":
+		specific = c.Models.Planner
+	case "impl":
+		specific = c.Models.Impl
+	case "adversary":
+		specific = c.Models.Adversary
+	case "verifier":
+		specific = c.Models.Verifier
+	case "orchestrator":
+		specific = c.Models.Orchestrator
+	case "review":
+		specific = c.Models.Review
+	}
+	if specific != "" {
+		return specific
+	}
+	return c.Models.Default
 }
 
 // Load reads .arc.yaml from the given project root.

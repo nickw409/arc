@@ -709,8 +709,10 @@ func routeRegressionFailure(
 
 	// Spawn fix sessions per phase.
 	adapterName := "claude"
+	implModel := ""
 	if opts.Config != nil {
 		adapterName = opts.Config.AgentForRole("impl")
+		implModel = opts.Config.ModelForRole("impl")
 	}
 	agentAdapter := adapter.Get(adapterName)
 
@@ -719,6 +721,7 @@ func routeRegressionFailure(
 		sessionCfg := arc.SessionConfig{
 			MaxTurns: 50,
 			Timeout:  15 * time.Minute,
+			Model:    implModel,
 		}
 		fmt.Printf("Routing regression fix to phase %q (%d failing tests)\n", phase, len(tests))
 		if _, spawnErr := agentAdapter.Spawn(ctx, fixPrompt, workDir, sessionCfg); spawnErr != nil {

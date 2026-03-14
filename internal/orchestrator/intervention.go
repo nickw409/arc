@@ -89,9 +89,14 @@ func runOrchestratorIntervention(
 		opts.PlanLogger.PhaseStarted(opts.PhaseName+" (orchestrator)", 0)
 	}
 
+	orchestratorModel := ""
+	if opts.Config != nil {
+		orchestratorModel = opts.Config.ModelForRole("orchestrator")
+	}
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: 30,
 		Timeout:  3 * time.Minute,
+		Model:    orchestratorModel,
 	}
 
 	_, spawnErr := agentAdapter.Spawn(ctx, agentPrompt, workDir, sessionCfg)

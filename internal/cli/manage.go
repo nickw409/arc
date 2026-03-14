@@ -46,6 +46,7 @@ Actions:
 		newManageResetReviewCmd(),
 		newManageActivityCmd(),
 		newManageResetCmd(),
+		newManageModelCmd(),
 	)
 
 	return cmd
@@ -293,6 +294,24 @@ func newManageResetCmd() *cobra.Command {
 				}
 				fmt.Printf("Reset all phases in %s\n", planName)
 			}
+			return nil
+		},
+	}
+}
+
+func newManageModelCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "model <plan> <phase> <model-name>",
+		Short: "Set model override for a phase",
+		Long:  "Set the model override for a phase (e.g. opus, sonnet, haiku, or a full model ID). Takes precedence over .arc.yaml models config.",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := baseManageOpts(args)
+			opts.Model = args[2]
+			if err := plan.ManageModel(opts); err != nil {
+				return err
+			}
+			fmt.Printf("Set model for %s/%s to %q\n", args[0], args[1], args[2])
 			return nil
 		},
 	}

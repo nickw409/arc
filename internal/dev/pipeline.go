@@ -69,6 +69,11 @@ func RunDev(ctx context.Context, opts DevOptions) (*DevResult, error) {
 
 	plansDir := filepath.Join(opts.ProjectDir, ".plans", "active")
 
+	// Resolve model: CLI flag > config planner role > empty.
+	if opts.Model == "" && opts.Config != nil {
+		opts.Model = opts.Config.ModelForRole("planner")
+	}
+
 	result := &DevResult{}
 
 	// 1. Discovery

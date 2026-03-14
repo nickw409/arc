@@ -14,7 +14,8 @@ import (
 // RunVerifier spawns an agent to verify that the implementation matches the spec.
 // The agent has read/search tools so it can inspect files directly rather than
 // relying solely on the diff. Returns a pass/fail assessment with reasoning.
-func RunVerifier(ctx context.Context, spec *arc.PhaseSpec, workdir string) (passed bool, reasoning string, err error) {
+// The model parameter selects which model to use (empty = adapter default).
+func RunVerifier(ctx context.Context, spec *arc.PhaseSpec, workdir string, model string) (passed bool, reasoning string, err error) {
 	// Get diff as orientation context — not the primary verification mechanism.
 	diff, diffErr := getDiff(workdir)
 	if diffErr != nil || diff == "" {
@@ -63,6 +64,7 @@ Respond with PASS or FAIL on the first line, followed by your reasoning.
 		MaxTurns: 15,
 		Timeout:  5 * time.Minute,
 		Tools:    []string{"Read", "Grep", "Glob", "Bash"},
+		Model:    model,
 	}
 
 	result, spawnErr := agentAdapter.Spawn(ctx, prompt, workdir, sessionCfg)

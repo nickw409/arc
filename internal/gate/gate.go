@@ -22,6 +22,7 @@ type RunOption func(*runOptions)
 type runOptions struct {
 	verifierOverride     *bool  // nil = use spec/auto logic; non-nil = force
 	coverageCommandName  string // override agent binary for spec_coverage (tests)
+	verifierModel        string // model for verifier agent (empty = adapter default)
 }
 
 // WithVerifier forces the verifier agent on or off, overriding spec and auto-detection.
@@ -36,6 +37,13 @@ func WithVerifier(enabled bool) RunOption {
 func WithCoverageCommandName(name string) RunOption {
 	return func(o *runOptions) {
 		o.coverageCommandName = name
+	}
+}
+
+// WithModel sets the model for the verifier agent.
+func WithModel(model string) RunOption {
+	return func(o *runOptions) {
+		o.verifierModel = model
 	}
 }
 
@@ -152,7 +160,7 @@ func Run(ctx context.Context, spec *arc.PhaseSpec, workdir string, opts ...RunOp
 	if runVerifier && result.Passed {
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer verifyCancel()
-		passed, reasoning, verifyErr := RunVerifier(verifyCtx, spec, workdir)
+		passed, reasoning, verifyErr := RunVerifier(verifyCtx, spec, workdir, ro.verifierModel)
 		if verifyErr != nil {
 			// Verifier error is non-fatal — log but don't fail.
 			result.ScopedTestSkipped = false

@@ -87,9 +87,19 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 
 	role := arc.DefaultRole(spec.Role)
 
+	// Resolve model: phase-level ModelOverride > config role default.
+	model := ""
+	if opts.Config != nil {
+		model = opts.Config.ModelForRole(role)
+	}
+	if ps, _ := sf.Read(); ps != nil && ps.ModelOverride != "" {
+		model = ps.ModelOverride
+	}
+
 	sessionCfg := arc.SessionConfig{
 		MaxTurns: turnBudget,
 		Timeout:  time.Duration(turnBudget) * 30 * time.Second,
+		Model:    model,
 		OnTurn: func(ev arc.TurnEvent) {
 			_ = state.SetActivity(sf, formatTurnActivity(ev))
 			if turnsFile != nil {
@@ -258,7 +268,11 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 		if role != "impl" {
 			// Non-impl roles: run verifier as the primary gate, skip assertions.
 			fmt.Printf("[%s] Running verifier check\n", opts.PhaseName)
-			passed, reasoning, verifyErr := gate.RunVerifier(ctx, spec, workDir)
+			verifierModel := ""
+			if opts.Config != nil {
+				verifierModel = opts.Config.ModelForRole("verifier")
+			}
+			passed, reasoning, verifyErr := gate.RunVerifier(ctx, spec, workDir, verifierModel)
 			if verifyErr != nil {
 				opts.Logger.Warn("verifier execution error", "error", verifyErr)
 				if attempt < effectiveMax {
@@ -281,6 +295,9 @@ func RunPhaseGated(ctx context.Context, opts RunPhaseOptions) error {
 			if opts.Config != nil {
 				gateOpts = append(gateOpts, gate.WithVerifier(
 					gate.ShouldRunVerifier(nil, opts.Config.Verifier, spec.Gate.VerifierAgent, spec.Complexity)))
+				if vm := opts.Config.ModelForRole("verifier"); vm != "" {
+					gateOpts = append(gateOpts, gate.WithModel(vm))
+				}
 			}
 			var gateErr error
 			gateResult, gateErr = gate.Run(ctx, spec, workDir, gateOpts...)

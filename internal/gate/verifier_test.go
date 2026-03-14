@@ -190,7 +190,7 @@ func TestRunVerifier_NoDiff_ReturnsPass(t *testing.T) {
 		Spec: "Implement a simple function",
 	}
 
-	passed, reasoning, err := RunVerifier(context.Background(), spec, dir)
+	passed, reasoning, err := RunVerifier(context.Background(), spec, dir, "")
 	if err != nil {
 		t.Fatalf("RunVerifier: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRunVerifier_SkipsAgentWhenNoDiff(t *testing.T) {
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	passed, reasoning, err := RunVerifier(cancelledCtx, spec, dir)
+	passed, reasoning, err := RunVerifier(cancelledCtx, spec, dir, "")
 	if err != nil {
 		t.Fatalf("RunVerifier: %v", err)
 	}

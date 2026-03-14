@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwiley/arc/internal/arc"
+	"github.com/nwiley/arc/internal/config"
 	"github.com/nwiley/arc/internal/plan"
 	"github.com/nwiley/arc/internal/project"
 	"github.com/nwiley/arc/internal/review"
@@ -29,6 +30,12 @@ func newReviewCmd() *cobra.Command {
 			plansDir := filepath.Join(".plans", "active")
 
 			model, _ := cmd.Flags().GetString("model")
+			if model == "" {
+				// Try config-based model for review role.
+				if cfg, cfgErr := config.Load("."); cfgErr == nil {
+					model = cfg.ModelForRole("review")
+				}
+			}
 			if model == "" {
 				model = defaultReviewModel
 			}

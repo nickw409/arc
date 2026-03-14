@@ -53,6 +53,7 @@ type ManageOptions struct {
 	Iteration   int
 	SourcePhase string
 	Activity    string
+	Model       string
 }
 
 func stateFileFor(opts ManageOptions) *state.StateFile {
@@ -217,6 +218,17 @@ func ManageIteration(opts ManageOptions) error {
 	}
 	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
 		s.Iteration.Current = opts.Iteration
+		return nil
+	})
+}
+
+// ManageModel sets the model override for a phase.
+func ManageModel(opts ManageOptions) error {
+	if err := validateManageOpts(opts); err != nil {
+		return err
+	}
+	return stateFileFor(opts).Update(func(s *arc.PhaseState) error {
+		s.ModelOverride = opts.Model
 		return nil
 	})
 }
