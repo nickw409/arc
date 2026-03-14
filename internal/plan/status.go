@@ -120,13 +120,42 @@ func statusForPlan(w io.Writer, plansDir, planName string) error {
 			line += fmt.Sprintf(" %d/%d", state.TestsPassing, state.TestsTotal)
 		}
 
-		// Add activity if present
-		if state.Activity != "" {
-			activity := state.Activity
-			if len(activity) > 60 {
-				activity = activity[:57] + "..."
+		// For terminal phases, show status summary instead of stale activity.
+		switch state.PhaseStatus {
+		case "complete":
+			line += " — complete"
+			if state.CompletedAt != "" {
+				line += fmt.Sprintf(" (%s)", state.CompletedAt)
 			}
-			line += fmt.Sprintf(" — %s", activity)
+		case "blocked":
+			reason := state.BlockedReason
+			if reason == "" {
+				reason = "unknown reason"
+			}
+			if len(reason) > 50 {
+				reason = reason[:47] + "..."
+			}
+			line += fmt.Sprintf(" — blocked: %s", reason)
+		case "deferred":
+			reason := state.DeferredReason
+			if reason == "" {
+				reason = "no reason given"
+			}
+			if len(reason) > 50 {
+				reason = reason[:47] + "..."
+			}
+			line += fmt.Sprintf(" — deferred: %s", reason)
+		case "split":
+			line += " — split"
+		default:
+			// Non-terminal: show live activity.
+			if state.Activity != "" {
+				activity := state.Activity
+				if len(activity) > 60 {
+					activity = activity[:57] + "..."
+				}
+				line += fmt.Sprintf(" — %s", activity)
+			}
 		}
 
 		// Check blocked-by deps
@@ -238,6 +267,57 @@ func AllPhasesTerminal(opts StatusOptions) bool {
 		}
 	}
 	return true
+}
+
+// WaitSummary returns a one-line summary of the plan's final state and whether
+// any phase is blocked. Used by `arc wait` to report results.
+func WaitSummary(plansDir, planName string) (summary string, hasBlocked bool) {
+	planDir := filepath.Join(plansDir, planName)
+	planData, err := os.ReadFile(filepath.Join(planDir, "plan.json"))
+	if err != nil {
+		return fmt.Sprintf("plan %q: cannot read plan.json", planName), false
+	}
+	var meta arc.PlanMeta
+	if err := json.Unmarshal(planData, &meta); err != nil {
+		return fmt.Sprintf("plan %q: cannot parse plan.json", planName), false
+	}
+
+	var complete, blocked, deferred, other int
+	for _, phase := range meta.Phases {
+		statePath := filepath.Join(planDir, "phases", phase, "state.json")
+		stateData, readErr := os.ReadFile(statePath)
+		if readErr != nil {
+			other++
+			continue
+		}
+		var st arc.PhaseState
+		if jsonErr := json.Unmarshal(stateData, &st); jsonErr != nil {
+			other++
+			continue
+		}
+		switch st.PhaseStatus {
+		case "complete", "split":
+			complete++
+		case "blocked":
+			blocked++
+			hasBlocked = true
+		case "deferred":
+			deferred++
+		default:
+			other++
+		}
+	}
+
+	total := len(meta.Phases)
+	if hasBlocked {
+		summary = fmt.Sprintf("plan %q: %d/%d complete, %d blocked", planName, complete, total, blocked)
+	} else {
+		summary = fmt.Sprintf("plan %q: %d/%d complete", planName, complete, total)
+	}
+	if deferred > 0 {
+		summary += fmt.Sprintf(", %d deferred", deferred)
+	}
+	return summary, hasBlocked
 }
 
 // isProcessAlive returns true if a process with the given PID is alive.

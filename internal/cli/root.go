@@ -33,6 +33,7 @@ func NewRootCmd() *cobra.Command {
 		newCancelCmd(),
 		newCleanupCmd(),
 		newDaemonCmd(),
+		newWaitCmd(),
 	)
 	return cmd
 }
