@@ -57,7 +57,7 @@ internal/         All Go packages:
     enforcement/  Hook scripts
     guides/       Agent-facing reference docs
     recipes/      Built-in recipe definitions (.yaml)
-  review/         Adversarial plan review (5 adversaries, auto-remediation)
+  review/         Adversarial plan review (4 adversaries, auto-remediation)
   selfupdate/     Self-update (GitHub releases, SHA256 verification)
   state/          Phase state.json read/write/update
   testcmd/        Test command resolution and execution
@@ -97,7 +97,7 @@ arc init --force                            # Re-initialize existing project
 # Plan lifecycle
 arc plan <name> <phase1> [phase2] ...       # Create plan scaffolding
 arc plan --type bugfix <name> <phases...>   # Create with specific workflow type
-arc review <plan-name>                      # Run adversarial review (5 adversaries, max 5 iterations)
+arc review <plan-name>                      # Run adversarial review (4 adversaries, max 5 iterations)
 arc review <plan-name> --phase <phase>      # Review a single phase
 arc run <plan-name>                         # Launch orchestrator for all phases
 arc status [plan-name]                      # Show plan/phase status
@@ -120,6 +120,7 @@ arc manage <plan> <phase> packages <pkg...> # Set packages list
 arc manage <plan> <phase> note <text>       # Set phase notes
 arc manage <plan> <phase> iteration <n>     # Set iteration number
 arc manage <plan> <phase> copy-from <src>   # Copy state from another phase
+arc manage <plan> <phase> model <model>    # Set per-phase model override
 arc manage <plan> <phase> show              # Show phase state.json
 arc manage reset-review <plan> <phase>     # Clear review cache and iteration counter
 ```

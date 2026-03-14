@@ -45,9 +45,17 @@ git:
   base_branch: main           # branch worktrees diverge from and merge into
 
 agents:
-  default: claude             # default agent adapter
+  default: claude             # agent adapter: claude, codex, or generic
   impl: claude                # override per role: impl, adversary, verifier, orchestrator
   verifier: claude
+  # NOTE: These are adapter names (claude/codex/generic), NOT model names.
+  # To set which model each role uses, use the "models" section below.
+
+models:
+  default: sonnet             # model for all roles unless overridden below
+  planner: opus               # planning agents — high-stakes structural decisions
+  # Values: "opus", "sonnet", "haiku", or full model IDs like "claude-sonnet-4-5-20250929"
+  # Per-phase override: arc manage model <plan> <phase> <model>
 
 max_parallel: 3               # max phases running concurrently
 verifier: auto                # always, never, or auto (auto enables for medium/complex phases)
@@ -56,6 +64,24 @@ budget:
   max_cost: 0                 # USD hard limit (0 = unlimited)
   warn_cost: 0                # USD warning threshold
 ```
+
+### Model Selection Guide
+
+The `models` section in `.arc.yaml` controls which AI model each role uses. Values are Claude model shorthands (`opus`, `sonnet`, `haiku`) or full model IDs.
+
+**Do NOT put model names in the `agents` section** — that section is for adapter selection (`claude`, `codex`, `generic`).
+
+| Role | Recommended | Why |
+|------|-------------|-----|
+| `default` | `sonnet` | Good balance of speed, cost, and quality for most tasks |
+| `planner` | `opus` | Planning agents make structural decisions that are expensive to recover from — worth the extra reasoning |
+| `impl` | `sonnet` | Gate loop catches mistakes; retries are cheap. Opus is overkill here. |
+| `adversary` | `sonnet` | Adversary testing is iterative; sonnet finds bugs effectively |
+| `verifier` | `sonnet` | Read-only verification with limited scope |
+| `orchestrator` | `opus` | Last-chance intervention after all attempts fail — low volume, high stakes |
+| `review` | `sonnet` | Adversarial plan review; sonnet is thorough enough |
+
+**Resolution order:** `PhaseState.ModelOverride` (per-phase, via `arc manage model`) > `models.<role>` in `.arc.yaml` > `models.default` > empty (adapter default).
 
 <!-- /section: setup -->
 
@@ -183,6 +209,7 @@ arc manage <plan> <phase> packages <pkgs>
 arc manage <plan> <phase> note <text>
 arc manage <plan> <phase> iteration <n>
 arc manage <plan> <phase> copy-from <src>
+arc manage <plan> <phase> model <model>    # Set per-phase model override
 arc manage <plan> <phase> show             # Print state.json
 
 # Other
@@ -214,15 +241,14 @@ The working directory is preserved across retries — agents build on prior work
 
 ### Adversarial Review
 
-`arc review` validates each phase plan using 5 parallel adversaries with auto-remediation:
+`arc review` validates each phase plan using 4 adversaries with auto-remediation. Scope runs once as a pre-check; the remaining 3 run in parallel:
 
-| Adversary | Focus | Blocking |
-|-----------|-------|----------|
-| **executability** | No blockers that prevent agent execution | Yes |
-| **consistency** | Types, names, contracts match across phases | Yes |
-| **coverage** | Every function and error variant has tests | Yes |
-| **ambiguity** | Nothing an agent could misinterpret | Yes |
-| **scope** | Phase isn't too large to execute reliably | No (warning) |
+| Adversary | Focus | When |
+|-----------|-------|------|
+| **scope** | Phase isn't too large to execute reliably | Once at start (pre-check) |
+| **spec-quality** | Spec is concrete, unambiguous, and actionable | Parallel, every iteration |
+| **correctness** | Types, names, contracts are consistent and correct | Parallel, every iteration |
+| **gate** | Gate assertions cover every integration point | Parallel, every iteration |
 
 Review runs up to 5 auto-remediation iterations. If unresolved after 5, status is set to `"conditional"` — `arc run` accepts both `"approved"` and `"conditional"`.
 
