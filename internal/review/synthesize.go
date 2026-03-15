@@ -1,3 +1,6 @@
+// synthesize.go implements the synthesizer agent for the review package.
+// It is called by review.go when adversaries flag issues, and rewrites plan.md
+// based on their critique output files.
 package review
 
 import (

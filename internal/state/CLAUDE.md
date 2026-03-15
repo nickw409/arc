@@ -8,7 +8,7 @@ Persistence layer for Arc's runtime data. Owns all read/write access to `state.j
 |------|---------|
 | `file.go` | `StateFile` — core I/O primitive. `Read`/`Write`/`Update` with in-process mutex. Uses atomic temp-file-then-rename writes. |
 | `flock.go` | `FlockUpdate` — cross-process locking via POSIX `flock(2)`. Used by parallel pipeline agents. |
-| `update.go` | High-level mutation API: `SetStatus`, `RecordVerdict`, `UpdateTests`, `IncrementIteration`, `StartParallel`, `UpdateParallelBranch`, `FinishParallel`, `FileDispute`, `SetActivity`, etc. |
+| `update.go` | High-level mutation API: `SetStatus`, `SetActivity`, `UpdateTests`, `IncrementIteration`, `AddTestFile`, `IncrementWatchAttempts`, `ResetToRetry`, `AppendAttemptLog`. |
 | `plan.go` | `ReadPlan`/`WritePlan` for `plan.json`. `NextPhase`/`PhasesReady` for dependency-aware scheduling. |
 | `history.go` | `AppendHistory` — best-effort append-only audit log at `{phaseDir}/history.md`. |
 

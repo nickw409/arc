@@ -37,27 +37,26 @@ internal/         All Go packages:
   gitops/         Git commit operations
   guide/          Agent-facing reference guide (arc guide)
   intelligence/   Project intelligence store (test cmds, flaky tests, costs)
-  logging/        Structured JSONL logger (PlanLogger, plan.jsonl)
-  migrate/        State migration utilities
   monitor/        Live TUI (bubbletea) for arc status --live
   orchestrator/   Orchestration engine:
     orchestrator.go   Launch() entry point, LaunchOptions, lock management
     launch_gated.go   LaunchGated(): phase scheduling, worktrees, regression suite
     gated.go          RunPhaseGated(): per-phase session→gate→retry loop
     phase_types.go    RunPhaseOptions, commitPhase, discoverNewTestFiles
-    strategic.go      RunStrategicIntervention(): AI agent for stuck phases
+    intervention.go   Post-exhaustion orchestrator intervention for stuck phases
     adversary.go      Post-plan adversarial test session
-    classify.go       Error tier classification (Transient/Feedback/Strategic/GiveUp)
+    classify.go       Error tier classification (Transient/Feedback/GiveUp)
+    commitment_audit.go Post-completion commitment audit
   plan/           Plan creation, status, manage mutations, archival, summaries
   project/        Project detection & init (.arc.yaml, .plans/)
   prompt/         Prompt rendering (Handlebars shim over Go templates)
   resources/      Embedded static assets:
-    prompts/      Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/
+    prompts/      Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/, commitment-audit/
     templates/    Plan scaffolding templates (.md)
     enforcement/  Hook scripts
     guides/       Agent-facing reference docs
     recipes/      Built-in recipe definitions (.yaml)
-  review/         Adversarial plan review (4 adversaries, auto-remediation)
+  review/         Adversarial plan review (4 adversaries with synthesizer)
   selfupdate/     Self-update (GitHub releases, SHA256 verification)
   state/          Phase state.json read/write/update
   testcmd/        Test command resolution and execution
@@ -75,7 +74,7 @@ Arc does **not** have (do not introduce these):
 - Verdict extraction from agent output (`## Verdict` parsing)
 - `arc iterate` command
 - `arc serve` command — removed along with the MCP server
-- `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories
+- `feature/`, `bugfix/`, `blocks/`, `common/` prompt directories — prompt namespace is: `gate/`, `dev/`, `adversaries/`, `validate/`, `commitment-audit/`
 - `IsGatedPlan()` function — all plans are gated, `Launch()` always calls `LaunchGated()`
 
 ## Key Conventions

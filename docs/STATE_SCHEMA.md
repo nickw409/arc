@@ -31,11 +31,12 @@ These fields are actively written and read by the gate orchestration system:
   "test_files": ["internal/auth/handler_test.go"],
 
   "last_commit": "abc1234",
+  "model_override": "",
+  "split_into": [],
   "notes": "Human-set notes for this phase",
   "deferred_reason": "",
   "deferred_at": "",
   "parent_phase": "",
-  "split_into": [],
   "completed_at": "",
   "blocked_reason": "",
   "blocked_at": "",
@@ -50,6 +51,9 @@ These fields are actively written and read by the gate orchestration system:
   "activity_updated_at": "2025-01-15T10:30:00Z",
 
   "agent_pid": 12345,
+  "watch_attempts": 0,
+  "attempt_log": [],
+  "checksum": "",
 
   "adversary_round": 0,
   "adversary_tests": {}
@@ -65,7 +69,7 @@ These fields are actively written and read by the gate orchestration system:
 | `complete` | Gate passed, phase committed |
 | `blocked` | Exhausted retries or requires human intervention |
 | `deferred` | Intentionally skipped |
-| `split` | Replaced by sub-phases |
+| `split` | Replaced by sub-phases (split_into populated) |
 
 ### `iteration` object
 
@@ -91,8 +95,10 @@ These fields are actively written and read by the gate orchestration system:
   "reviewed_at": "2025-01-15T09:05:00Z",
   "review_iterations": 2,
   "review_results": {
-    "executability": "pass",
-    "consistency": "pass"
+    "scope": "pass",
+    "spec-quality": "pass",
+    "correctness": "pass",
+    "gate": "pass"
   },
   "adversary_bugs": {}
 }
@@ -157,23 +163,4 @@ Written after each gate run. Not used as input to the orchestrator — informati
 
 ## Legacy / Unused Fields in `state.json`
 
-The following fields exist in the `PhaseState` struct for backwards compatibility but are **not written or read by the current gate system**:
-
-| Field | Was used for |
-|-------|-------------|
-| `current_state` | State machine position (which YAML state the phase was in) |
-| `state_iterations` | Per-state visit counts |
-| `stuck_iterations` | State machine retry counter |
-| `hang_count` | Detected agent hangs |
-| `executed_escalations` | List of escalation actions tried |
-| `rollback_count` | Git rollback counter |
-| `global_iterations` | Cross-state iteration total |
-| `verdicts_history` | Agent verdict sequence |
-| `last_verdict` | Last verdict token emitted |
-| `parallel_execution` | Parallel state machine branch tracking |
-| `intervention_request` | Escalation to human |
-| `chunks` | Work chunking for large phases |
-| `disputes` | Test dispute records |
-| `last_cleared_disputes` | Resolved disputes |
-| `last_reviewed_iteration` | State machine review sync |
-| `last_qa_reviewed_iteration` | State machine QA sync |
+Older `state.json` files written by prior versions of arc may contain fields that have since been removed from the `PhaseState` struct (e.g. `current_state`, `stuck_iterations`, `hang_count`, `verdicts_history`, `disputes`). These fields are silently ignored on read.

@@ -14,7 +14,7 @@ Handles prompt rendering for gate-based phases and verdict extraction for AI ver
 
 ## Key Design Decisions
 
-- **Handlebars shim over Go templates**: Prompt `.md` files use `{{phase}}`, `{{state.current_state}}`, `{{#if params.foo}}` syntax. `preprocessHandlebars` translates this to Go `text/template` syntax via ordered regex replacements. The order matters — pipe-default must run before dot-access.
+- **Handlebars shim over Go templates**: Prompt `.md` files use `{{phase}}`, `{{state.iteration}}`, `{{#if params.foo}}` syntax. `preprocessHandlebars` translates this to Go `text/template` syntax via ordered regex replacements. The order matters — pipe-default must run before dot-access.
 - **Partial includes**: `{{> path/to/partial.md}}` inlines other embedded prompt files at preprocessing time. Silently dropped if not found.
 - **`StateToTemplateMap` flattens everything to strings** — avoids Go template type-switch complexity. All `PhaseState` fields become string map entries accessible as `{{state.field_name}}`.
 - **Both capitalized and lowercase keys** in `contextToMap` — `.Phase` for Go template tests, `{{phase}}` for Handlebars prompts.
@@ -25,7 +25,7 @@ Handles prompt rendering for gate-based phases and verdict extraction for AI ver
 
 ```
 {{phase}}, {{plan}}, {{iteration}}, {{plan_md}}
-{{state.current_state}}, {{state.iteration}}, {{state.tests_passing}}, ...
+{{state.iteration}}, {{state.tests_passing}}, {{state.phase_status}}, ...
 {{params.key}} — per-state custom params from workflow YAML
 {{previous_memory}} — loopback memory from prior run of same state
 {{mode}}, {{dispute_count}}, {{dispute_list}}

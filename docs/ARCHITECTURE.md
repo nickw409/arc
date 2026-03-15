@@ -33,7 +33,7 @@ internal/
     intervention.go       Post-exhaustion orchestrator intervention for stuck phases
     adversary.go          Post-plan adversarial test session
     classify.go           Error tier classification (Transient/Feedback/GiveUp)
-    observe.go            Agent output streaming and PID tracking
+    observe.go            LoadPhaseState() and state observation helpers
     report.go             COMPLETION_REPORT.md generation
     commitment_audit.go   Post-completion commitment audit
   plan/               Plan creation, status, manage mutations, archival, summaries

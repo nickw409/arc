@@ -88,20 +88,16 @@ arc review my-plan --phase impl  # review one phase
 
 ### How it works
 
-Five adversary agents attack the plan simultaneously, each from a different angle:
+Four adversary agents examine the plan, each from a different angle:
 
 | Adversary | Question |
 |-----------|----------|
-| `executability` | Can this actually be done? Are instructions actionable? |
-| `consistency` | Does this contradict itself or other phases? |
-| `coverage` | Are all cases handled? Missing edge cases? |
-| `ambiguity` | Could this be misinterpreted? |
-| `scope` | Is this too large for one phase? |
-| `integration` | Does this conflict with other phases' assumptions? |
+| `scope` | Is this phase small enough to execute reliably? (pre-check, runs first) |
+| `spec-quality` | Is the spec concrete, unambiguous, and actionable? |
+| `correctness` | Are types, names, and contracts consistent and correct? |
+| `gate` | Do gate assertions cover every integration point? |
 
-Each adversary either passes (no issues) or emits `FIND/REPLACE` suggestions to fix the plan.md.
-
-Suggestions are merged by priority and applied to `plan.md`. The loop repeats until all adversaries pass or 5 iterations are hit.
+If any adversary fails, a synthesizer agent rewrites `plan.md` based on the critique files. The loop repeats until all adversaries pass or max iterations are reached.
 
 Results are stored in `plan.json` as `review_status` and `review_results`.
 
