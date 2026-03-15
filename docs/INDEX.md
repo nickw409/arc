@@ -46,8 +46,6 @@ arc/
 │   ├── gitops/       Git commit operations
 │   ├── guide/        Agent-facing reference guide
 │   ├── intelligence/ Project intelligence store
-│   ├── logging/      Structured JSONL logger
-│   ├── migrate/      State migration
 │   ├── monitor/      Live TUI
 │   ├── orchestrator/ Execution engine (LaunchGated, RunPhaseGated)
 │   ├── plan/         Plan/phase lifecycle management
