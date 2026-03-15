@@ -31,6 +31,7 @@ func NewRootCmd() *cobra.Command {
 		newAuditCmd(),
 		newRecipeCmd(),
 		newCancelCmd(),
+		newResetCmd(),
 		newCleanupCmd(),
 		newDaemonCmd(),
 		newWaitCmd(),
