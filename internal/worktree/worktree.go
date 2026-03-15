@@ -88,12 +88,22 @@ func Create(projectDir, planName, phaseName, baseBranch string) (*Worktree, erro
 			}, nil
 		}
 
-		// Scenario B: branch exists but worktree was removed — create
-		// worktree on the existing branch (without -b).
-		cmd2 := exec.Command("git", "worktree", "add", dir, branch)
+		// Scenario B: branch exists but worktree was removed. The stale
+		// branch may contain commits from a previous (possibly failed) run.
+		// Delete and recreate the branch from baseBranch to guarantee a
+		// clean starting point.
+		delCmd := exec.Command("git", "branch", "-D", branch)
+		delCmd.Dir = projectDir
+		delCmd.CombinedOutput() // best-effort; may fail if already deleted
+
+		retryArgs := []string{"worktree", "add", "-b", branch, dir}
+		if baseBranch != "" {
+			retryArgs = append(retryArgs, baseBranch)
+		}
+		cmd2 := exec.Command("git", retryArgs...)
 		cmd2.Dir = projectDir
 		if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
-			return nil, fmt.Errorf("git worktree add (existing branch): %s: %w", strings.TrimSpace(string(out2)), err2)
+			return nil, fmt.Errorf("git worktree add (recreated branch): %s: %w", strings.TrimSpace(string(out2)), err2)
 		}
 		return &Worktree{
 			Branch:     branch,
