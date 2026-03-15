@@ -28,30 +28,3 @@ func TestStringOrDefaultEmptyString(t *testing.T) {
 }
 
 
-func TestTruncateShortString(t *testing.T) {
-	got := truncate("hello", 10)
-	if got != "hello" {
-		t.Fatalf("truncate(%q, 10) = %q, want %q", "hello", got, "hello")
-	}
-}
-
-func TestTruncateExactLength(t *testing.T) {
-	got := truncate("hello", 5)
-	if got != "hello" {
-		t.Fatalf("truncate(%q, 5) = %q, want %q", "hello", got, "hello")
-	}
-}
-
-func TestTruncateLongString(t *testing.T) {
-	got := truncate("hello world", 5)
-	if got != "hello" {
-		t.Fatalf("truncate(%q, 5) = %q, want %q", "hello world", got, "hello")
-	}
-}
-
-func TestTruncateEmptyString(t *testing.T) {
-	got := truncate("", 5)
-	if got != "" {
-		t.Fatalf("truncate(%q, 5) = %q, want %q", "", got, "")
-	}
-}

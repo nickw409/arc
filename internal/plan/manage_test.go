@@ -427,13 +427,8 @@ func TestManageReset(t *testing.T) {
 	sf := stateFileFor(opts)
 	if err := sf.Update(func(s *arc.PhaseState) error {
 		s.Iteration.Current = 5
-		s.VerdictsHistory = []arc.VerdictEntry{{Iteration: 1, State: "impl.act", Verdict: "done"}}
-		s.StateIterations = map[string]int{"impl.act": 3}
-		s.LastVerdict = "done"
-		s.GlobalIterations = 7
 		s.PhaseStatus = "blocked"
 		s.BlockedReason = "stuck"
-		s.CurrentState = "impl.act"
 		s.ParentPhase = "parent-phase"
 		return nil
 	}); err != nil {
@@ -464,23 +459,8 @@ func TestManageReset(t *testing.T) {
 	if s.PhaseStatus != "pending" {
 		t.Fatalf("phase_status = %q, want %q", s.PhaseStatus, "pending")
 	}
-	if s.CurrentState != "" {
-		t.Fatalf("current_state = %q, want empty", s.CurrentState)
-	}
 	if s.Iteration.Current != 0 {
 		t.Fatalf("iteration.current = %d, want 0", s.Iteration.Current)
-	}
-	if len(s.VerdictsHistory) != 0 {
-		t.Fatalf("verdicts_history len = %d, want 0", len(s.VerdictsHistory))
-	}
-	if len(s.StateIterations) != 0 {
-		t.Fatalf("state_iterations len = %d, want 0", len(s.StateIterations))
-	}
-	if s.LastVerdict != "" {
-		t.Fatalf("last_verdict = %q, want empty", s.LastVerdict)
-	}
-	if s.GlobalIterations != 0 {
-		t.Fatalf("global_iterations = %d, want 0", s.GlobalIterations)
 	}
 	if s.BlockedReason != "" {
 		t.Fatalf("blocked_reason = %q, want empty", s.BlockedReason)
@@ -501,8 +481,6 @@ func TestManageResetPlan(t *testing.T) {
 		}
 		ps := arc.NewPhaseState("multi-plan", p, "feature")
 		ps.Iteration.Current = 10
-		ps.LastVerdict = "done"
-		ps.StateIterations = map[string]int{"impl.act": 5}
 		ps.PhaseStatus = "complete"
 		data, _ := json.MarshalIndent(ps, "", "  ")
 		if err := os.WriteFile(filepath.Join(phaseDir, "state.json"), data, 0644); err != nil {
@@ -538,12 +516,6 @@ func TestManageResetPlan(t *testing.T) {
 		}
 		if s.Iteration.Current != 0 {
 			t.Fatalf("phase %s: iteration.current = %d, want 0", p, s.Iteration.Current)
-		}
-		if s.LastVerdict != "" {
-			t.Fatalf("phase %s: last_verdict = %q, want empty", p, s.LastVerdict)
-		}
-		if len(s.StateIterations) != 0 {
-			t.Fatalf("phase %s: state_iterations len = %d, want 0", p, len(s.StateIterations))
 		}
 	}
 }

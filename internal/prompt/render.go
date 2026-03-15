@@ -337,40 +337,20 @@ func ValidateTemplate(tmplStr string) error {
 	return t.Execute(&buf, data)
 }
 
-// FormatDisputeList formats a slice of Disputes into a markdown list for templates.
-func FormatDisputeList(disputes []arc.Dispute) string {
-	if len(disputes) == 0 {
-		return "(none)"
-	}
-	var b strings.Builder
-	for _, d := range disputes {
-		fmt.Fprintf(&b, "- **%s**: %s\n", d.TestName, d.Reason)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // StateToTemplateMap converts a PhaseState into a flat map[string]string.
 func StateToTemplateMap(state *arc.PhaseState) map[string]string {
 	m := map[string]string{
-		"phase":                      state.Phase,
-		"plan":                       state.Plan,
-		"workflow_type":              state.WorkflowType,
-		"phase_status":               state.PhaseStatus,
-		"current_state":              state.CurrentState,
-		"iteration":                  strconv.Itoa(state.Iteration.Current),
-		"max_iterations":             strconv.Itoa(state.Iteration.Max),
-		"tests_passing":              strconv.Itoa(state.TestsPassing),
-		"tests_total":                strconv.Itoa(state.TestsTotal),
-		"stuck_iterations":           strconv.Itoa(state.StuckIterations),
-		"hang_count":                 strconv.Itoa(state.HangCount),
-		"last_verdict":               state.LastVerdict,
-		"last_reviewed_iteration":    strconv.Itoa(state.LastReviewedIter),
-		"last_qa_reviewed_iteration": strconv.Itoa(state.LastQAReviewedIter),
-		"rollback_count":             strconv.Itoa(state.RollbackCount),
-		"global_iterations":          strconv.Itoa(state.GlobalIterations),
-		"last_commit":                state.LastCommit,
-		"model_override":             state.ModelOverride,
-		"adversary_round":            strconv.Itoa(state.AdversaryRound),
+		"phase":           state.Phase,
+		"plan":            state.Plan,
+		"workflow_type":   state.WorkflowType,
+		"phase_status":    state.PhaseStatus,
+		"iteration":       strconv.Itoa(state.Iteration.Current),
+		"max_iterations":  strconv.Itoa(state.Iteration.Max),
+		"tests_passing":   strconv.Itoa(state.TestsPassing),
+		"tests_total":     strconv.Itoa(state.TestsTotal),
+		"last_commit":     state.LastCommit,
+		"model_override":  state.ModelOverride,
+		"adversary_round": strconv.Itoa(state.AdversaryRound),
 	}
 
 	// Serialize adversary test files for template access

@@ -122,6 +122,8 @@ arc manage <plan> <phase> iteration <n>     # Set iteration number
 arc manage <plan> <phase> copy-from <src>   # Copy state from another phase
 arc manage <plan> <phase> model <model>    # Set per-phase model override
 arc manage <plan> <phase> show              # Show phase state.json
+arc manage <plan> <phase> activity <text>  # Set agent activity message
+arc manage <plan> [phase] reset            # Fully reset a phase (or all phases) to initial state
 arc manage reset-review <plan> <phase>     # Clear review cache and iteration counter
 ```
 

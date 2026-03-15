@@ -24,31 +24,28 @@ internal/
   gitops/             Git commit operations
   guide/              Agent-facing reference guide (arc guide)
   intelligence/       Project intelligence store (test cmds, flaky tests, costs)
-  logging/            Structured JSONL logger (PlanLogger, plan.jsonl)
-  migrate/            State migration utilities
   monitor/            Live TUI (bubbletea) for arc status --live
   orchestrator/       Orchestration engine:
-    orchestrator.go   Launch() entry point, LaunchOptions, lock management
-    launch_gated.go   LaunchGated(): phase scheduling, worktrees, regression suite
-    gated.go          RunPhaseGated(): per-phase session→gate→retry loop
-    phase_types.go    RunPhaseOptions, commitPhase, discoverNewTestFiles
-    strategic.go      RunStrategicIntervention(): AI agent for stuck phases
-    adversary.go      Post-plan adversarial test session
-    classify.go       Error tier classification (Transient/Feedback/Strategic/GiveUp)
-    judge.go          AI dispute resolution for contested test failures
-    observe.go        Agent output streaming and PID tracking
-    report.go         COMPLETION_REPORT.md generation
-    commitment_audit  Post-completion commitment audit
+    orchestrator.go       Launch() entry point, LaunchOptions, lock management
+    launch_gated.go       LaunchGated(): phase scheduling, worktrees, regression suite
+    gated.go              RunPhaseGated(): per-phase session→gate→retry loop
+    phase_types.go        RunPhaseOptions, commitPhase, discoverNewTestFiles
+    intervention.go       Post-exhaustion orchestrator intervention for stuck phases
+    adversary.go          Post-plan adversarial test session
+    classify.go           Error tier classification (Transient/Feedback/GiveUp)
+    observe.go            Agent output streaming and PID tracking
+    report.go             COMPLETION_REPORT.md generation
+    commitment_audit.go   Post-completion commitment audit
   plan/               Plan creation, status, manage mutations, archival, summaries
   project/            Project detection & init (.arc.yaml, .plans/)
   prompt/             Prompt rendering (Handlebars shim over Go templates)
   resources/          Embedded static assets:
-    prompts/          Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/
+    prompts/          Agent prompt templates (.md) — gate/, dev/, adversaries/, validate/, commitment-audit/
     templates/        Plan scaffolding templates (.md)
     enforcement/      Hook scripts
     guides/           Agent-facing reference docs
     recipes/          Built-in recipe definitions (.yaml)
-  review/             Adversarial plan review (5 adversaries, auto-remediation)
+  review/             Adversarial plan review (4 adversaries with synthesizer)
   selfupdate/         Self-update (GitHub releases, SHA256 verification)
   state/              Phase state.json read/write/update
   testcmd/            Test command resolution and execution
@@ -62,7 +59,7 @@ docs/                 Documentation
 ```
 Plan: fix-wasm-rng
 ├── Phase: investigate-variance    status: complete
-├── Phase: port-pcg-algorithm      status: in-progress  (attempt 2/4)
+├── Phase: port-pcg-algorithm      status: in-progress  (attempt 2/2)
 └── Phase: verify-cross-engine     status: pending
 ```
 
@@ -120,7 +117,7 @@ If `StopOnFailure` is set (default), one blocked phase cancels all siblings.
 
 ### 3. Per-phase execution (`RunPhaseGated` in `gated.go`)
 
-Each phase loops up to `MaxGatedAttempts` (4) times:
+Each phase loops up to `MaxGatedAttempts` (2) times:
 
 ```
 Attempt N
@@ -133,8 +130,7 @@ Attempt N
   4b. Gate failed → classify error tier, decide next step:
         TierTransient  (rate limit, crash) → retry same attempt
         TierFeedback   (gate failed, has context) → next attempt with feedback
-        TierStrategic  (no progress after N attempts) → call RunStrategicIntervention
-        TierGiveUp     (attempts exhausted) → mark blocked, stop
+        TierGiveUp     (attempts exhausted) → orchestrator intervention, then mark blocked
 ```
 
 ### 4. After all phases complete
@@ -197,8 +193,7 @@ The `role` field in `spec.yaml` determines the agent prompt and gate behavior:
 |------|-----------|----------|
 | `TierTransient` (1) | Rate limit, timeout, process crash with no output | Retry immediately |
 | `TierFeedback` (2) | Gate failed with actionable context | Retry with gate failure details injected |
-| `TierStrategic` (3) | Multiple retries, no progress | Invoke strategic intervention agent |
-| `TierGiveUp` (4) | Attempts exhausted | Mark phase blocked, stop |
+| `TierGiveUp` (3) | Attempts exhausted | Run orchestrator intervention, then mark phase blocked |
 
 ## Adapter System (`internal/adapter/`)
 
@@ -208,13 +203,29 @@ Arc supports multiple AI providers through `arc.AgentAdapter`:
 type AgentAdapter interface {
     Name() string
     Spawn(ctx context.Context, prompt string, workdir string, config SessionConfig) (*AgentResult, error)
-    Preflight(ctx context.Context, workdir string) error
 }
 ```
 
 Built-in adapters: `claude` (Claude Code CLI), `codex` (OpenAI Codex CLI), `generic` (any CLI tool).
 
 Adapter selection: per-role in `.arc.yaml` (e.g. `agents.impl: claude`, `agents.adversary: claude`), or per-phase via `spec.yaml`.
+
+### Model Routing
+
+Model selection is configured in `.arc.yaml` under `models:` and resolved per agent role:
+
+```yaml
+models:
+  default: sonnet       # fallback for all roles
+  planner: opus         # arc dispatch discovery/architecture agents
+  impl: sonnet          # impl phase agents
+  adversary: sonnet     # adversarial test agents
+  verifier: sonnet      # gate verifier agents
+  orchestrator: opus    # orchestrator intervention agent
+  review: sonnet        # arc review adversary agents
+```
+
+Per-phase override: `arc manage <plan> <phase> model <model>` sets `model_override` in `state.json`, taking precedence over role-based routing.
 
 ## Worktree Isolation (`internal/worktree/`)
 
@@ -271,30 +282,6 @@ Arc learns from runs and uses that knowledge to improve future runs:
 - File coupling (which files change together)
 - Cost tracking per plan/complexity
 - Failure pattern recording
-
-## Dead Code in `internal/arc/`
-
-The `internal/arc/` package contains several types that are no longer used after the state machine was removed. They compile but serve no purpose:
-
-| File | Dead types |
-|------|-----------|
-| `workflow.go` | `Workflow`, `StateConfig`, `Transition`, `ParallelGroup`, `EscalationRule`, `HookConfig` |
-| `unmarshal.go` | `UnmarshalYAML` for `Transition` |
-| `result.go` | `IterationResult`, `ResultAction`, `ActionContinue`, `ActionRetry`, `ActionAbort` |
-
-Still-used types in `arc/` that look related but aren't dead:
-- `VerdictEntry`, `VerdictsHistory`, `ParseVerdict` — used by `internal/review/` (adversarial *plan* review, not phase execution)
-- `Verdict`, `VerdictUnknown` — same
-- `Usage`, `PhaseError`, `AgentAdapter`, `GateResult`, `PhaseSpec`, `PhaseState`, `PlanMeta` — all actively used
-
-Fields in `PhaseState` that are dead (written but never read by the gate system):
-- `CurrentState`, `StateIterations` — state machine position tracking
-- `StuckIterations`, `HangCount`, `ExecutedEscalations`, `RollbackCount`, `GlobalIterations` — state machine retry logic
-- `VerdictsHistory`, `LastVerdict` — verdict-based state transitions
-- `ParallelExecution`, `InterventionRequest` — state machine escalation paths
-- `Chunks` — state machine chunking
-
-These fields are preserved in `state.json` for backwards compatibility but the gate system does not write or read them.
 
 ## Key Invariants
 

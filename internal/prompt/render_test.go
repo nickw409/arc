@@ -117,33 +117,22 @@ func TestStateToTemplateMap(t *testing.T) {
 
 func TestStateToTemplateMapAllKeys(t *testing.T) {
 	state := &arc.PhaseState{
-		Phase:              "test-phase",
-		Plan:               "test-plan",
-		WorkflowType:       "feature",
-		PhaseStatus:        "implementing",
-		CurrentState:       "impl",
-		Iteration:          arc.Iteration{Current: 3, Max: 25},
-		TestsPassing:       5,
-		TestsTotal:         10,
-		StuckIterations:    2,
-		HangCount:          1,
-		LastVerdict:        "approved",
-		LastReviewedIter:   2,
-		LastQAReviewedIter: 1,
-		RollbackCount:      0,
-		GlobalIterations:   15,
-		LastCommit:         "abc123",
-		ModelOverride:      "sonnet",
+		Phase:         "test-phase",
+		Plan:          "test-plan",
+		WorkflowType:  "feature",
+		PhaseStatus:   "implementing",
+		Iteration:     arc.Iteration{Current: 3, Max: 25},
+		TestsPassing:  5,
+		TestsTotal:    10,
+		LastCommit:    "abc123",
+		ModelOverride: "sonnet",
 	}
 	m := StateToTemplateMap(state)
 
 	expectedKeys := []string{
-		"phase", "plan", "workflow_type", "phase_status", "current_state",
+		"phase", "plan", "workflow_type", "phase_status",
 		"iteration", "max_iterations", "tests_passing", "tests_total",
-		"stuck_iterations", "hang_count", "last_verdict",
-		"last_reviewed_iteration", "last_qa_reviewed_iteration",
-		"rollback_count", "global_iterations", "last_commit", "model_override",
-		"adversary_round",
+		"last_commit", "model_override", "adversary_round",
 	}
 
 	for _, key := range expectedKeys {
@@ -169,27 +158,15 @@ func TestStateToTemplateMapAllKeys(t *testing.T) {
 
 func TestStateToTemplateMapExactCount(t *testing.T) {
 	state := &arc.PhaseState{
-		Phase:              "p",
-		Plan:               "pl",
-		WorkflowType:       "feature",
-		PhaseStatus:        "implementing",
-		CurrentState:       "impl",
-		Iteration:          arc.Iteration{Current: 1, Max: 25},
-		TestsPassing:       0,
-		TestsTotal:         0,
-		StuckIterations:    0,
-		HangCount:          0,
-		LastVerdict:        "",
-		LastReviewedIter:   0,
-		LastQAReviewedIter: 0,
-		RollbackCount:      0,
-		GlobalIterations:   0,
-		LastCommit:         "",
-		ModelOverride:      "",
+		Phase:        "p",
+		Plan:         "pl",
+		WorkflowType: "feature",
+		PhaseStatus:  "implementing",
+		Iteration:    arc.Iteration{Current: 1, Max: 25},
 	}
 	m := StateToTemplateMap(state)
-	if len(m) != 19 {
-		t.Fatalf("got %d keys, want exactly 19", len(m))
+	if len(m) != 11 {
+		t.Fatalf("got %d keys, want exactly 11", len(m))
 	}
 }
 
@@ -330,45 +307,4 @@ func TestAdversaryPromptRendersUndefinedParam(t *testing.T) {
 	}
 }
 
-func TestFormatDisputeList(t *testing.T) {
-	tests := []struct {
-		name     string
-		disputes []arc.Dispute
-		want     string
-	}{
-		{
-			name:     "empty",
-			disputes: nil,
-			want:     "(none)",
-		},
-		{
-			name:     "empty slice",
-			disputes: []arc.Dispute{},
-			want:     "(none)",
-		},
-		{
-			name: "single dispute",
-			disputes: []arc.Dispute{
-				{TestName: "TestFoo", Reason: "wrong assertion"},
-			},
-			want: "- **TestFoo**: wrong assertion",
-		},
-		{
-			name: "multiple disputes",
-			disputes: []arc.Dispute{
-				{TestName: "TestFoo", Reason: "wrong assertion"},
-				{TestName: "TestBar", Reason: "missing edge case"},
-			},
-			want: "- **TestFoo**: wrong assertion\n- **TestBar**: missing edge case",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := FormatDisputeList(tt.disputes)
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
 

@@ -68,9 +68,6 @@ func generateCompletionReport(planDir, planName string, meta *arc.PlanMeta, phas
 		if ps.LastCommit != "" {
 			b.WriteString(fmt.Sprintf("- **Last commit**: %s\n", ps.LastCommit))
 		}
-		if ps.RollbackCount > 0 {
-			b.WriteString(fmt.Sprintf("- **Rollbacks**: %d\n", ps.RollbackCount))
-		}
 		if ps.Usage.CostUSD > 0 {
 			b.WriteString(fmt.Sprintf("- **Cost**: $%.4f\n", ps.Usage.CostUSD))
 			b.WriteString(fmt.Sprintf("- **Tokens**: %d in / %d out\n", ps.Usage.InputTokens, ps.Usage.OutputTokens))

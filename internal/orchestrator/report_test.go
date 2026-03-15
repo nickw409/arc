@@ -91,11 +91,10 @@ func TestGenerateCompletionReportWithBlocked(t *testing.T) {
 			TestsTotal:   5,
 		},
 		"phase-b": {
-			PhaseStatus:   "blocked",
-			Iteration:     arc.Iteration{Current: 8},
-			TestsPassing:  1,
-			TestsTotal:    3,
-			RollbackCount: 2,
+			PhaseStatus:  "blocked",
+			Iteration:    arc.Iteration{Current: 8},
+			TestsPassing: 1,
+			TestsTotal:   3,
 		},
 	}
 
@@ -121,10 +120,6 @@ func TestGenerateCompletionReportWithBlocked(t *testing.T) {
 		t.Error("expected report to contain [X] for blocked phases")
 	}
 
-	// Should show rollback count
-	if !strings.Contains(report, "Rollbacks") {
-		t.Error("expected report to show rollback count for phase-b")
-	}
 }
 
 func TestGenerateCompletionReportNilPhaseState(t *testing.T) {

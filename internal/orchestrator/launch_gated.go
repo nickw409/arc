@@ -890,7 +890,6 @@ func rerunPhaseInTree(
 	sf := state.NewStateFile(filepath.Join(phaseDir, "state.json"))
 	if updateErr := sf.Update(func(s *arc.PhaseState) error {
 		s.PhaseStatus = "pending"
-		s.CurrentState = ""
 		return nil
 	}); updateErr != nil {
 		return fmt.Errorf("resetting phase state: %w", updateErr)

@@ -11,20 +11,6 @@ import (
 func TestNewPhaseStateNoNilSlices(t *testing.T) {
 	s := NewPhaseState("myplan", "01-foundation", "feature")
 
-	if s.Disputes == nil {
-		t.Fatal("Disputes should not be nil")
-	}
-	if len(s.Disputes) != 0 {
-		t.Fatalf("Disputes should be empty, got %d", len(s.Disputes))
-	}
-
-	if s.VerdictsHistory == nil {
-		t.Fatal("VerdictsHistory should not be nil")
-	}
-	if len(s.VerdictsHistory) != 0 {
-		t.Fatalf("VerdictsHistory should be empty, got %d", len(s.VerdictsHistory))
-	}
-
 	if s.TestFiles == nil {
 		t.Fatal("TestFiles should not be nil")
 	}
@@ -39,43 +25,13 @@ func TestNewPhaseStateNoNilSlices(t *testing.T) {
 		t.Fatalf("Packages should be empty, got %d", len(s.Packages))
 	}
 
-	if s.ExecutedEscalations == nil {
-		t.Fatal("ExecutedEscalations should not be nil")
+	if s.AttemptLog == nil {
+		t.Fatal("AttemptLog should not be nil")
 	}
-	if len(s.ExecutedEscalations) != 0 {
-		t.Fatalf("ExecutedEscalations should be empty, got %d", len(s.ExecutedEscalations))
-	}
-
-	if s.LastClearedDisputes == nil {
-		t.Fatal("LastClearedDisputes should not be nil")
-	}
-	if len(s.LastClearedDisputes) != 0 {
-		t.Fatalf("LastClearedDisputes should be empty, got %d", len(s.LastClearedDisputes))
+	if len(s.AttemptLog) != 0 {
+		t.Fatalf("AttemptLog should be empty, got %d", len(s.AttemptLog))
 	}
 
-	if s.Chunks.Completed == nil {
-		t.Fatal("Chunks.Completed should not be nil")
-	}
-	if len(s.Chunks.Completed) != 0 {
-		t.Fatalf("Chunks.Completed should be empty, got %d", len(s.Chunks.Completed))
-	}
-
-	if s.Chunks.Remaining == nil {
-		t.Fatal("Chunks.Remaining should not be nil")
-	}
-	if len(s.Chunks.Remaining) != 0 {
-		t.Fatalf("Chunks.Remaining should be empty, got %d", len(s.Chunks.Remaining))
-	}
-
-	if s.ParallelExecution != nil {
-		t.Fatal("ParallelExecution should be nil")
-	}
-	if s.InterventionRequest != nil {
-		t.Fatal("InterventionRequest should be nil")
-	}
-	if s.Chunks.Current != nil {
-		t.Fatal("Chunks.Current should be nil")
-	}
 	if s.Blocked.Reason != nil {
 		t.Fatal("Blocked.Reason should be nil")
 	}
@@ -117,31 +73,14 @@ func TestPhaseStateJSONRoundtrip(t *testing.T) {
 
 	// Verify empty slices marshal as [] not null
 	raw := string(data)
-	if strings.Contains(raw, `"disputes":null`) {
-		t.Fatal("Disputes should marshal as [] not null")
-	}
-	if strings.Contains(raw, `"verdicts_history":null`) {
-		t.Fatal("VerdictsHistory should marshal as [] not null")
-	}
 	if strings.Contains(raw, `"test_files":null`) {
 		t.Fatal("TestFiles should marshal as [] not null")
 	}
 	if strings.Contains(raw, `"packages":null`) {
 		t.Fatal("Packages should marshal as [] not null")
 	}
-	if strings.Contains(raw, `"executed_escalations":null`) {
-		t.Fatal("ExecutedEscalations should marshal as [] not null")
-	}
-	if strings.Contains(raw, `"completed":null`) {
-		t.Fatal("Chunks.Completed should marshal as [] not null")
-	}
-	if strings.Contains(raw, `"remaining":null`) {
-		t.Fatal("Chunks.Remaining should marshal as [] not null")
-	}
-
-	// Chunks.Current should marshal as null
-	if !strings.Contains(raw, `"current":null`) {
-		t.Fatal("Chunks.Current should marshal as null")
+	if strings.Contains(raw, `"attempt_log":null`) {
+		t.Fatal("AttemptLog should marshal as [] not null")
 	}
 
 	// Blocked.Reason should marshal as null
@@ -253,13 +192,6 @@ func TestNewPlanMetaDuplicatePhases(t *testing.T) {
 	}
 }
 
-func TestNewPhaseStateInitialCurrentState(t *testing.T) {
-	s := NewPhaseState("p", "ph", "feature")
-	if s.CurrentState != "" {
-		t.Fatalf("CurrentState = %q, want empty string", s.CurrentState)
-	}
-}
-
 func TestNewPlanMetaEmptyName(t *testing.T) {
 	m := NewPlanMeta("", "feature", []string{"a"})
 	if m.Name != "" {
@@ -311,19 +243,3 @@ func TestPhaseStateJSONRoundtripBlockedInfo(t *testing.T) {
 	}
 }
 
-func TestPhaseStateChunksCompletedJSON(t *testing.T) {
-	s := NewPhaseState("core", "my-plan", "feature")
-
-	data, err := json.Marshal(s)
-	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
-	}
-
-	raw := string(data)
-	if strings.Contains(raw, `"completed":null`) {
-		t.Fatal("Chunks.Completed should marshal as [] not null")
-	}
-	if !strings.Contains(raw, `"completed":[]`) {
-		t.Fatal("Chunks.Completed should marshal as []")
-	}
-}

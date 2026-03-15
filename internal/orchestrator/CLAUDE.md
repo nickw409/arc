@@ -17,7 +17,6 @@ Top-level execution engine that drives an entire plan run. Manages phase schedul
 | `commitment_audit.go` | `CommitmentAudit` — verifies agent committed promised changes. |
 | `observe.go` | `LoadPhaseState()` and state observation helpers. |
 | `report.go` | `generateCompletionReport()` — writes `COMPLETION_REPORT.md` with per-phase status, iterations, tests, costs. |
-| `judge.go` | `JudgeDispute()` — spawns a minimal AI agent to resolve test disputes. |
 
 ## Key Design Decisions
 
@@ -38,7 +37,6 @@ Launch (orchestrator.go)
         └── RunPhaseGated (gated.go)     ← concurrent per phase
               ├── classifyGateFailure / classifySpawnError (classify.go)
               ├── CommitmentAudit (commitment_audit.go)
-              ├── JudgeDispute (judge.go)
               ├── gitops.Commit
               └── commitPhase / discoverNewTestFiles (phase_types.go)
   └── generateCompletionReport (report.go)

@@ -174,7 +174,7 @@ func TestStateFileUpdateConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := sf.Update(func(s *arc.PhaseState) error {
-				s.GlobalIterations++
+				s.WatchAttempts++
 				return nil
 			})
 			if err != nil {
@@ -188,8 +188,8 @@ func TestStateFileUpdateConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
-	if got.GlobalIterations != 10 {
-		t.Fatalf("GlobalIterations = %d, want 10", got.GlobalIterations)
+	if got.WatchAttempts != 10 {
+		t.Fatalf("WatchAttempts = %d, want 10", got.WatchAttempts)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestFlockConcurrentUpdates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := FlockUpdate(path, func(s *arc.PhaseState) error {
-				s.GlobalIterations++
+				s.WatchAttempts++
 				return nil
 			})
 			if err != nil {
@@ -230,8 +230,8 @@ func TestFlockConcurrentUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
-	if got.GlobalIterations != 10 {
-		t.Fatalf("GlobalIterations = %d, want 10", got.GlobalIterations)
+	if got.WatchAttempts != 10 {
+		t.Fatalf("WatchAttempts = %d, want 10", got.WatchAttempts)
 	}
 }
 

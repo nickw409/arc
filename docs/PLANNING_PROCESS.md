@@ -66,9 +66,9 @@ arc dispatch "Add JWT authentication to the user API"
               → GeneratePlan with architect's phase content
 
 6. arc review (optional, skip with --skip-review)
-   → 5 adversary agents attack the plan.md files
-   → Auto-remediation applies suggested fixes
-   → Loop until all pass or max iterations (5)
+   → 4 adversary agents review the plan.md files
+   → Synthesizer rewrites plan.md based on adversary critiques
+   → Loop until all pass or max iterations
 
 7. orchestrator.Launch
    → Runs the plan end-to-end

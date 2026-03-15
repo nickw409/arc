@@ -64,9 +64,7 @@ func TestStatusDisplayMixed(t *testing.T) {
 	phase2State := arc.NewPhaseState("test-plan", "phase2", "feature")
 	phase2State.PhaseStatus = "implementing"
 	phase2State.Iteration.Current = 3
-	phase2State.CurrentState = "impl"
-	phase2State.StateIterations = map[string]int{"impl": 3}
-	phase2State.TestsPassing = 5
+phase2State.TestsPassing = 5
 	phase2State.TestsTotal = 10
 	writeStateFile(t, filepath.Join(dir, "test-plan", "phases", "phase2", "state.json"), phase2State)
 

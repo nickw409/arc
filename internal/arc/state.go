@@ -9,28 +9,12 @@ type PhaseState struct {
 	Plan                string          `json:"plan"`
 	WorkflowType        string          `json:"workflow_type"`
 	PhaseStatus         string          `json:"phase_status"`
-	CurrentState        string          `json:"current_state"`
 	Iteration           Iteration       `json:"iteration"`
-	Chunks              Chunks          `json:"chunks"`
 	Blocked             BlockedInfo     `json:"blocked"`
 	Packages            []string        `json:"packages"`
 	TestsPassing        int             `json:"tests_passing"`
 	TestsTotal          int             `json:"tests_total"`
-	StuckIterations     int             `json:"stuck_iterations"`
-	HangCount           int             `json:"hang_count"`
-	Disputes            []Dispute       `json:"disputes"`
-	LastClearedDisputes []Dispute       `json:"last_cleared_disputes"`
-	LastReviewedIter    int             `json:"last_reviewed_iteration"`
-	LastQAReviewedIter  int             `json:"last_qa_reviewed_iteration"`
-	VerdictsHistory     []VerdictEntry  `json:"verdicts_history"`
-	LastVerdict         string          `json:"last_verdict"`
 	TestFiles           []string        `json:"test_files"`
-	ParallelExecution   *ParallelExec   `json:"parallel_execution"`
-	InterventionRequest *Intervention   `json:"intervention_request"`
-	ExecutedEscalations []string        `json:"executed_escalations"`
-	RollbackCount       int             `json:"rollback_count"`
-	GlobalIterations    int             `json:"global_iterations"`
-	StateIterations     map[string]int  `json:"state_iterations,omitempty"`
 	LastCommit          string          `json:"last_commit,omitempty"`
 	ModelOverride       string          `json:"model_override,omitempty"`
 	SplitInto           []string        `json:"split_into,omitempty"`
@@ -57,60 +41,9 @@ type Iteration struct {
 	Max     int `json:"max"`
 }
 
-type Chunks struct {
-	Total     int           `json:"total"`
-	Completed []ChunkResult `json:"completed"`
-	Current   *ChunkCurrent `json:"current"`
-	Remaining []int         `json:"remaining"`
-}
-
-type ChunkResult struct {
-	ID     int    `json:"id"`
-	Commit string `json:"commit"`
-}
-
-type ChunkCurrent struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-}
-
 type BlockedInfo struct {
 	IsBlocked bool    `json:"is_blocked"`
 	Reason    *string `json:"reason"`
-}
-
-type Dispute struct {
-	TestName         string  `json:"test_name"`
-	Reason           string  `json:"reason"`
-	Resolution       *string `json:"resolution"`
-	ResolutionReason string  `json:"resolution_reason,omitempty"`
-}
-
-type VerdictEntry struct {
-	Iteration int    `json:"iteration"`
-	State     string `json:"state"`
-	Verdict   string `json:"verdict"`
-	Timestamp string `json:"timestamp"`
-}
-
-type ParallelExec struct {
-	ResultsDir string                  `json:"results_dir"`
-	Branches   map[string]BranchStatus `json:"branches"`
-	Verdict    string                  `json:"verdict,omitempty"`
-	StartedAt  string                  `json:"started_at"`
-	FinishedAt string                  `json:"finished_at,omitempty"`
-}
-
-type BranchStatus struct {
-	Status   string `json:"status"`
-	ExitCode int    `json:"exit_code,omitempty"`
-}
-
-type Intervention struct {
-	Reason      string   `json:"reason"`
-	RequestedAt string   `json:"requested_at"`
-	Options     []string `json:"options,omitempty"`
 }
 
 // AttemptSummary records diagnostic info from a single agent attempt.
@@ -126,20 +59,15 @@ type AttemptSummary struct {
 // NewPhaseState creates a PhaseState with all slices/maps initialized (never nil).
 func NewPhaseState(plan, phase, workflowType string) *PhaseState {
 	return &PhaseState{
-		Phase:               phase,
-		Plan:                plan,
-		WorkflowType:        workflowType,
-		PhaseStatus:         "pending",
-		Iteration:           Iteration{Current: 0, Max: 25},
-		Chunks:              Chunks{Completed: []ChunkResult{}, Remaining: []int{}},
-		Blocked:             BlockedInfo{},
-		Packages:            []string{},
-		Disputes:            []Dispute{},
-		LastClearedDisputes: []Dispute{},
-		VerdictsHistory:     []VerdictEntry{},
-		TestFiles:           []string{},
-		ExecutedEscalations: []string{},
-		AttemptLog:          []AttemptSummary{},
+		Phase:        phase,
+		Plan:         plan,
+		WorkflowType: workflowType,
+		PhaseStatus:  "pending",
+		Iteration:    Iteration{Current: 0, Max: 25},
+		Blocked:      BlockedInfo{},
+		Packages:     []string{},
+		TestFiles:    []string{},
+		AttemptLog:   []AttemptSummary{},
 	}
 }
 
