@@ -16,7 +16,7 @@ internal/
   adapter/            Multi-provider AI adapter (claude, codex, generic)
   agent/              Agent spawning (claude CLI subprocess)
   arc/                Core types: PhaseSpec, PhaseState, GateResult, PlanMeta
-  cli/                Cobra command definitions (arc plan, arc run, arc manage, ...)
+  cli/                Cobra command definitions (arc plan, arc daemon, arc manage, ...)
   config/             .arc.yaml parsing
   daemon/             Background orchestration daemon (persistent, multi-plan)
   dev/                arc dispatch pipeline (discovery → architecture → plan generation)
@@ -271,7 +271,7 @@ Optional persistent background process for running multiple plans concurrently:
 - **File locking** — exclusive flock on `~/.arc/daemon.lock` prevents duplicates
 - **Auto-start** — `arc daemon submit` starts the daemon if not already running
 
-Contrast with `arc run`: the daemon handles multiple plans concurrently as a persistent service; `arc run` blocks the terminal for one plan.
+`arc daemon submit` is the primary way to execute plans. The daemon handles multiple plans concurrently with dependency-aware scheduling.
 
 ## Intelligence Store (`internal/intelligence/`)
 

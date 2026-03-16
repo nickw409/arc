@@ -71,7 +71,7 @@ arc plan my-feature phase1 phase2 integration   # Create a plan with phases
 vim .plans/active/my-feature/phases/phase1/plan.md  # Write phase plans
 arc review my-feature                            # Adversarial review (auto-remediates)
 arc review my-feature --phase phase1             # Review a single phase
-arc run my-feature                               # Execute through orchestrator
+arc daemon submit my-feature                     # Submit to daemon for execution
 ```
 
 ### Manual Mode
@@ -255,7 +255,7 @@ arc plan             Create plan directory structure and phase scaffolding
 arc review           Adversarial review validates each phase plan
     │
     ▼
-arc run              Launch the orchestrator (submits to daemon)
+arc daemon submit    Submit plan to daemon for execution
     │
     ▼
   ┌────────────────────────────────────────────┐
@@ -308,7 +308,7 @@ Gates enforce objective acceptance criteria after each agent session. Five asser
 Agents can run in isolated git worktrees so developers can keep working in the main tree:
 
 ```bash
-arc run my-plan --worktree    # Each phase gets its own worktree branch
+arc daemon submit my-plan --per-phase-worktree   # Each phase gets its own worktree branch
 ```
 
 Each phase gets a branch like `arc/my-plan/phase-name` in a temp directory. On completion, the worktree branch is merged back into the main branch. On failure, the branch is preserved for inspection but the worktree directory is cleaned up.

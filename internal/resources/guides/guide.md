@@ -7,7 +7,7 @@ Arc is a workflow engine for orchestrating multi-phase software engineering task
 - **Plan** — The overall work request (e.g., `fix-auth`). Contains one or more phases.
 - **Phase** — A self-contained unit of work with a `spec.yaml` (machine-readable spec), `plan.md` (human-readable instructions), `state.json` (runtime state), and gate assertions.
 
-There is no state machine. There are no workflows. Execution flow is: `arc plan` → `arc review` → `arc run`.
+There is no state machine. There are no workflows. Execution flow is: `arc plan` → `arc review` → `arc daemon submit`.
 
 <!-- section: setup -->
 
@@ -194,7 +194,7 @@ arc plan <name> <phase1> [phase2] ...      # Create plan scaffolding
 arc plan --type bugfix <name> <phases...>  # Create with workflow type label
 arc review <plan-name>                     # Adversarial review with auto-remediation
 arc review <plan-name> --phase <phase>     # Review a single phase
-arc run <plan-name>                        # Launch orchestrator for all phases
+arc daemon submit <plan-name>              # Submit plan to daemon for execution
 arc status [plan-name]                     # Show plan/phase status
 arc archive [--force] <plan-name>          # Archive completed plan
 arc dispatch <task description...>         # Auto-generate plan and run it
@@ -250,7 +250,7 @@ The working directory is preserved across retries — agents build on prior work
 | **correctness** | Types, names, contracts are consistent and correct | Parallel, every iteration |
 | **gate** | Gate assertions cover every integration point | Parallel, every iteration |
 
-Review runs up to 5 auto-remediation iterations. If unresolved after 5, status is set to `"conditional"` — `arc run` accepts both `"approved"` and `"conditional"`.
+Review runs up to 5 auto-remediation iterations. If unresolved after 5, status is set to `"conditional"` — `arc daemon submit` accepts both `"approved"` and `"conditional"`.
 
 ### State Tracking
 
@@ -293,7 +293,7 @@ Use `arc manage <plan> <phase> show` to print a phase's `state.json`.
 
 ### Worktree Behavior
 
-By default `arc run` creates a **shared git worktree** — a separate branch where all phases execute, merged back on completion.
+By default the daemon creates a **shared git worktree** — a separate branch where all phases execute, merged back on completion.
 
 | Option | Behavior |
 |--------|---------|
@@ -314,7 +314,7 @@ When a run stops with a blocked phase:
    - **Phase too large** — split into smaller phases.
    - **Wrong gate assertions** — tighten or fix assertions.
    - **Environment issue** — fix the underlying problem.
-4. **Reset and resume** — `arc manage <plan> <phase> pending`, then `arc run <plan>`.
+4. **Reset and resume** — `arc manage <plan> <phase> pending`, then `arc daemon submit <plan>`.
 
 <!-- /section: execution -->
 

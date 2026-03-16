@@ -22,7 +22,7 @@ This command:
   3. Removes stale orchestrator lock and PID files
   4. Removes log files
 
-After reset, the plan is ready for 'arc run' or 'arc daemon submit'.`,
+After reset, the plan is ready for 'arc daemon submit'.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planName := args[0]

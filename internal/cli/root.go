@@ -13,7 +13,6 @@ func NewRootCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newInitCmd(),
-		newRunCmd(),
 		newPlanCmd(),
 		newReviewCmd(),
 		newStatusCmd(),

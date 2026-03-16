@@ -48,10 +48,10 @@ Runs adversarial review with auto-remediation. Catches obvious problems. You'll 
 ### Step 5: Execute
 
 ```bash
-arc run <plan-name>
+arc daemon submit <plan-name>
 ```
 
-Returns immediately — the orchestrator runs in the background. Check status only when needed.
+Submits to the daemon — runs in the background. Check status only when needed.
 
 ```bash
 arc status <plan-name>
@@ -65,7 +65,7 @@ When a run stops with a blocked phase:
 2. Inspect worktree and failing files with your normal tools
 3. Diagnose the real problem — ambiguous spec, phase too large, wrong gates, environment issue
 4. Reset: `arc manage <plan> <phase> pending`
-5. Resume: `arc run <plan-name>`
+5. Resume: `arc daemon submit <plan-name>`
 
 When you see a failure, immediately investigate. Do not just report it and wait.
 
@@ -82,7 +82,7 @@ arc archive <plan-name>
 arc plan <name> <phase1> [phase2] ...       # Create plan scaffolding
 arc review <plan-name>                      # Adversarial review
 arc review <plan-name> --phase <phase>      # Review a single phase
-arc run <plan-name>                         # Launch orchestrator (background)
+arc daemon submit <plan-name>               # Submit plan to daemon for execution
 arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 

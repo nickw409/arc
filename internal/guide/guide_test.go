@@ -47,8 +47,8 @@ func TestRenderExecutionSection(t *testing.T) {
 		t.Fatalf("Render('execution') error: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "arc run") {
-		t.Fatal("execution section does not contain 'arc run'")
+	if !strings.Contains(content, "arc daemon submit") {
+		t.Fatal("execution section does not contain 'arc daemon submit'")
 	}
 }
 

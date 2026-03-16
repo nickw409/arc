@@ -98,7 +98,7 @@ arc plan <name> <phase1> [phase2] ...       # Create plan scaffolding
 arc plan --type bugfix <name> <phases...>   # Create with specific workflow type
 arc review <plan-name>                      # Run adversarial review (4 adversaries, max 5 iterations)
 arc review <plan-name> --phase <phase>      # Review a single phase
-arc run <plan-name>                         # Launch orchestrator for all phases
+arc daemon submit <plan-name>               # Submit plan to daemon for execution
 arc status [plan-name]                      # Show plan/phase status
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
