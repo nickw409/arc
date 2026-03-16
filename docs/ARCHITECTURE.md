@@ -263,7 +263,7 @@ Task description
 
 ## Daemon (`internal/daemon/`)
 
-Optional persistent background process for running multiple plans concurrently:
+Persistent background process for plan execution:
 
 - **Unix socket** at `~/.arc/daemon.sock` — JSON newline-delimited protocol
 - **Bounded worker pool** (default: 3 parallel phases), dependency-aware FIFO dispatch

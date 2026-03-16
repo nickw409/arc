@@ -217,7 +217,8 @@ arc guide                                  # Print this guide
 arc validate [paths...]                    # AI-powered test quality audit
 arc daemon start|stop|list|status          # Manage background daemon
 arc cancel <plan-name>                     # Cancel a running plan
-arc cleanup <plan-name>                    # Clean up worktree/lock for a plan
+arc reset <plan-name>                      # Reset plan: clean worktrees, reset states, remove locks
+arc wait <plan-name>                       # Block until plan completes or blocks
 arc chat                                   # Interactive Claude session with Arc guide as system context
 ```
 

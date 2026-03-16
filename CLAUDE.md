@@ -100,6 +100,8 @@ arc review <plan-name>                      # Run adversarial review (4 adversar
 arc review <plan-name> --phase <phase>      # Review a single phase
 arc daemon submit <plan-name>               # Submit plan to daemon for execution
 arc status [plan-name]                      # Show plan/phase status
+arc wait <plan-name>                        # Block until plan completes or blocks
+arc reset <plan-name>                       # Reset plan: clean worktrees, reset states, remove locks
 arc archive [--force] <plan-name>           # Archive completed plan
 arc guide                                   # Print agent-facing reference
 arc validate [paths...]                     # Audit test quality using AI agent

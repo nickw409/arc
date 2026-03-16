@@ -139,12 +139,12 @@ arc daemon submit my-plan         # Submit plan to daemon for execution
 arc daemon cancel my-plan         # Cancel a plan running in daemon
 ```
 
-### Cleanup and Cancellation
+### Reset and Cancellation
 
 ```bash
-arc cleanup my-plan               # Remove failed worktrees and stale logs
-arc cleanup my-plan --ttl 24h    # Keep only logs newer than 24h
+arc reset my-plan                 # Reset plan: clean worktrees, reset states, remove locks
 arc cancel my-plan                # Stop a running orchestrator process
+arc wait my-plan                  # Block until plan completes or any phase is blocked
 ```
 
 ### Gate Checks
