@@ -150,8 +150,8 @@ deps:
 | Type | Field | What it checks |
 |------|-------|---------------|
 | `file_exists` | path relative to workdir | File or directory exists |
-| `grep` | pattern string | Pattern found in any `.go` file in workdir |
-| `test_exists` | function name | Test function found in `_test.go` files |
+| `grep` | pattern string | Pattern found in any source file in workdir |
+| `test_exists` | function name | Test function/name found in any test file |
 | `build_passes` | shell command | Command exits with code 0 |
 | `no_untracked` | any value | No debug/temp artifact files untracked in git |
 

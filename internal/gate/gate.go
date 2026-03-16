@@ -309,7 +309,7 @@ func checkFileExists(desc, target, workdir string) arc.AssertionResult {
 	}
 }
 
-// checkGrep searches all .go files in workdir for the given pattern.
+// checkGrep searches all source files in workdir for the given pattern.
 // Returns a passing result if the pattern is found in at least one file.
 func checkGrep(desc, pattern, workdir string) arc.AssertionResult {
 	found := false
@@ -320,14 +320,13 @@ func checkGrep(desc, pattern, workdir string) arc.AssertionResult {
 			return err
 		}
 		if info.IsDir() {
-			// Skip hidden and vendor directories.
 			base := info.Name()
-			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor") {
+			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" || base == "target" || base == "__pycache__") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		if !isSourceFile(path) {
 			return nil
 		}
 		content, readErr := os.ReadFile(path)
@@ -359,13 +358,17 @@ func checkGrep(desc, pattern, workdir string) arc.AssertionResult {
 	return arc.AssertionResult{
 		Description: desc,
 		Passed:      false,
-		Detail:      fmt.Sprintf("pattern %q not found in any .go file", pattern),
+		Detail:      fmt.Sprintf("pattern %q not found in any source file", pattern),
 	}
 }
 
-// checkTestExists searches all _test.go files for a function named funcName.
+// checkTestExists searches all test files for a function/test named funcName.
+// Recognizes test file conventions for Go (_test.go), Rust (_test.rs, tests/),
+// Python (test_*.py, *_test.py), TypeScript (*.test.ts, *.spec.ts), and JavaScript.
 func checkTestExists(desc, funcName, workdir string) arc.AssertionResult {
-	needle := "func " + funcName
+	needle := "func " + funcName // Go convention
+	// Also search for the bare name to support non-Go test frameworks
+	// (e.g. Python's "def test_foo", Rust's "fn test_foo", JS's "test('foo')")
 	found := false
 	matchFile := ""
 
@@ -375,19 +378,20 @@ func checkTestExists(desc, funcName, workdir string) arc.AssertionResult {
 		}
 		if info.IsDir() {
 			base := info.Name()
-			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor") {
+			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" || base == "target" || base == "__pycache__") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, "_test.go") {
+		if !isTestFile(path) {
 			return nil
 		}
 		content, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return nil
 		}
-		if strings.Contains(string(content), needle) {
+		s := string(content)
+		if strings.Contains(s, needle) || strings.Contains(s, funcName) {
 			found = true
 			rel, _ := filepath.Rel(workdir, path)
 			matchFile = rel
@@ -412,7 +416,7 @@ func checkTestExists(desc, funcName, workdir string) arc.AssertionResult {
 	return arc.AssertionResult{
 		Description: desc,
 		Passed:      false,
-		Detail:      fmt.Sprintf("%q not found in any _test.go file", funcName),
+		Detail:      fmt.Sprintf("%q not found in any test file", funcName),
 	}
 }
 
@@ -538,7 +542,7 @@ func checkFileAbsent(desc, target, workdir string) arc.AssertionResult {
 	}
 }
 
-// checkGrepNot searches all .go files in workdir and fails if pattern is found.
+// checkGrepNot searches all source files in workdir and fails if pattern is found.
 func checkGrepNot(desc, pattern, workdir string) arc.AssertionResult {
 	found := false
 	matchFile := ""
@@ -549,12 +553,12 @@ func checkGrepNot(desc, pattern, workdir string) arc.AssertionResult {
 		}
 		if info.IsDir() {
 			base := info.Name()
-			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor") {
+			if base != "." && (strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" || base == "target" || base == "__pycache__") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		if !isSourceFile(path) {
 			return nil
 		}
 		content, readErr := os.ReadFile(path)
@@ -581,7 +585,7 @@ func checkGrepNot(desc, pattern, workdir string) arc.AssertionResult {
 	return arc.AssertionResult{
 		Description: desc,
 		Passed:      true,
-		Detail:      fmt.Sprintf("pattern %q not found in any .go file", pattern),
+		Detail:      fmt.Sprintf("pattern %q not found in any source file", pattern),
 	}
 }
 
@@ -679,6 +683,80 @@ func matchGlob(file, pattern string) bool {
 	}
 	matched, _ := filepath.Match(pattern, file)
 	return matched
+}
+
+// sourceExtensions lists file extensions considered source code for grep/grep_not assertions.
+var sourceExtensions = map[string]bool{
+	".go":    true,
+	".rs":    true,
+	".ts":    true,
+	".tsx":   true,
+	".js":    true,
+	".jsx":   true,
+	".py":    true,
+	".rb":    true,
+	".java":  true,
+	".kt":    true,
+	".swift": true,
+	".c":     true,
+	".cpp":   true,
+	".h":     true,
+	".hpp":   true,
+	".cs":    true,
+	".lua":   true,
+	".sh":    true,
+	".yaml":  true,
+	".yml":   true,
+	".toml":  true,
+	".json":  true,
+	".md":    true,
+}
+
+// isSourceFile returns true if the file has a recognized source extension.
+func isSourceFile(path string) bool {
+	return sourceExtensions[filepath.Ext(path)]
+}
+
+// isTestFile returns true if the file matches common test file naming conventions.
+func isTestFile(path string) bool {
+	base := filepath.Base(path)
+	switch {
+	// Go
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	// Rust
+	case strings.HasSuffix(base, "_test.rs"):
+		return true
+	// Python
+	case strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py"):
+		return true
+	case strings.HasSuffix(base, "_test.py"):
+		return true
+	// TypeScript / JavaScript
+	case strings.HasSuffix(base, ".test.ts") || strings.HasSuffix(base, ".spec.ts"):
+		return true
+	case strings.HasSuffix(base, ".test.tsx") || strings.HasSuffix(base, ".spec.tsx"):
+		return true
+	case strings.HasSuffix(base, ".test.js") || strings.HasSuffix(base, ".spec.js"):
+		return true
+	case strings.HasSuffix(base, ".test.jsx") || strings.HasSuffix(base, ".spec.jsx"):
+		return true
+	// Java / Kotlin
+	case (strings.HasSuffix(base, ".java") || strings.HasSuffix(base, ".kt")) && strings.HasPrefix(base, "Test"):
+		return true
+	case (strings.HasSuffix(base, ".java") || strings.HasSuffix(base, ".kt")) && strings.HasSuffix(strings.TrimSuffix(base, filepath.Ext(base)), "Test"):
+		return true
+	// Ruby
+	case strings.HasSuffix(base, "_test.rb") || strings.HasSuffix(base, "_spec.rb"):
+		return true
+	}
+	// Also match files inside a tests/ or test/ directory
+	dir := filepath.Dir(path)
+	dirBase := filepath.Base(dir)
+	if dirBase == "tests" || dirBase == "test" || dirBase == "__tests__" {
+		return isSourceFile(path)
+	}
+	return false
 }
 
 // HasAssertions reads a spec YAML and returns true if it defines any gate
