@@ -29,20 +29,20 @@ If the plan has NO integration commitments AND all verifiable promises are cover
 3. List every verifiable promise. For each, check whether a gate assertion or checkpoint would fail if the promise were broken.
 4. Flag any integration commitment or promise without covering assertion.
 
-Note: a passing test suite (`go test ./...`) implicitly covers compilation and basic correctness. Apply judgment — flag gaps where a broken promise would NOT cause any existing assertion to fail.
+Note: a passing test suite implicitly covers compilation and basic correctness. Apply judgment — flag gaps where a broken promise would NOT cause any existing assertion to fail.
 
 ## Gate Assertion Syntax Reference
 
-Always use shorthand assertion types:
+Always use shorthand assertion types. Examples (adapt commands to the project's language):
 
-  - build_passes: "go build ./internal/foo/"
-  - build_passes: "go test ./internal/foo/ -run TestX"
-  - build_passes: "grep -q 'funcName' internal/foo/bar.go"
-  - file_exists: path/to/file.go
-  - file_absent: path/to/file.go
+  - build_passes: "<build command>"           # e.g. "go build ./...", "cargo build", "npm run build"
+  - build_passes: "<test command>"            # e.g. "go test ./pkg/ -run TestX", "pytest tests/test_x.py"
+  - build_passes: "grep -q 'pattern' file"   # verify content exists in a specific file
+  - file_exists: path/to/file
+  - file_absent: path/to/file
   - test_exists: TestFunctionName
   - no_untracked: ""
-  - no_modified: path/to/file.go
+  - no_modified: path/to/file
   - files_only: "docs/**, README.md"
   - grep_not: "forbiddenPattern"
   - spec_coverage: ""

@@ -16,7 +16,7 @@ You are an adversarial reviewer focused on plan correctness. Your job is to find
 For EVERY type referenced across phases:
 - [ ] Does the type name match exactly?
 - [ ] Do field names and types match?
-- [ ] Are Option/Result wrappings consistent?
+- [ ] Are optional/nullable/error wrappings consistent?
 
 For every error handling approach:
 - [ ] Are error types compatible across phases?

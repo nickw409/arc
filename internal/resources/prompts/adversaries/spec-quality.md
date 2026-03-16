@@ -35,8 +35,8 @@ For EVERY function that can return errors:
 ### Specification Clarity
 
 For every type specification:
-- [ ] Every field has an explicit type (`field: String`, not just `field`)
-- [ ] Return types are complete (`Result<Vec<u8>, MyError>`, not `Result`)
+- [ ] Every field has an explicit type (e.g. `field: string`, not just `field`)
+- [ ] Return types are complete (include error types, not just the success type)
 
 For every behavioral specification:
 - [ ] Error behavior is explicit (panic? return Err? log and continue?)
