@@ -101,8 +101,10 @@ This scaffolds a plan directory with a `plan.md` and `spec.yaml` for each phase.
 **Plan file paths:**
 
 ```
-.plans/active/<plan-name>/<phase-name>/plan.md
-.plans/active/<plan-name>/<phase-name>/spec.yaml
+.plans/active/<plan-name>/phases/<phase-name>/plan.md
+.plans/active/<plan-name>/phases/<phase-name>/spec.yaml
+.plans/active/<plan-name>/phases/<phase-name>/state.json
+.plans/active/<plan-name>/plan.json
 ```
 
 ### Phase Roles
@@ -125,20 +127,20 @@ spec: |
 verify: |
   Acceptance criteria for the AI verifier (review/investigate/audit roles only).
 files:
-  - internal/foo/bar.go
+  - src/foo/bar.ext
 checkpoints:
   - name: builds
-    description: Package compiles
-    test: go build ./internal/foo/
+    description: Project compiles
+    test: <build command>     # e.g. "go build ./...", "cargo build", "npm run build"
   - name: tests-pass
     description: All tests pass
-    test: go test ./internal/foo/
+    test: <test command>      # e.g. "go test ./...", "pytest", "npm test"
 gate:
   assertions:
-    - file_exists: internal/foo/bar.go
-    - grep: "func NewBar"
-    - test_exists: TestNewBar
-    - build_passes: go build ./...
+    - file_exists: src/foo/bar.ext
+    - grep: "functionName"
+    - test_exists: TestFunctionName
+    - build_passes: <build command>
     - no_untracked: "true"
   verifier_agent: false
 deps:
@@ -150,22 +152,27 @@ deps:
 | Type | Field | What it checks |
 |------|-------|---------------|
 | `file_exists` | path relative to workdir | File or directory exists |
+| `file_absent` | path relative to workdir | File or directory does NOT exist |
 | `grep` | pattern string | Pattern found in any source file in workdir |
+| `grep_not` | pattern string | Pattern NOT found in any source file |
 | `test_exists` | function name | Test function/name found in any test file |
 | `build_passes` | shell command | Command exits with code 0 |
 | `no_untracked` | any value | No debug/temp artifact files untracked in git |
+| `no_modified` | path relative to workdir | File has no uncommitted changes |
+| `files_only` | comma-separated globs | Only files matching these patterns were changed |
+| `spec_coverage` | empty string | AI agent verifies test files cover spec targets |
 
 Both explicit-field and `type`+`target` formats are accepted:
 
 ```yaml
 # Explicit field (preferred):
-- file_exists: internal/foo/bar.go
-- grep: "func NewBar"
-- build_passes: go build ./...
+- file_exists: src/foo/bar.ext
+- grep: "functionName"
+- build_passes: <build command>
 
 # Legacy type+target:
 - type: file_exists
-  target: internal/foo/bar.go
+  target: src/foo/bar.ext
   description: Optional human-readable label
 ```
 
@@ -262,19 +269,24 @@ Each phase maintains `state.json`:
   "phase": "my-phase",
   "plan": "my-plan",
   "workflow_type": "feature",
-  "phase_status": "in_progress",
+  "phase_status": "implementing",
   "iteration": {"current": 2, "max": 25},
   "tests_passing": 8,
   "tests_total": 12,
-  "last_verdict": "",
   "notes": "Working on error handling",
+  "model_override": "",
   "blocked_reason": "",
+  "usage": {"input_tokens": 5000, "output_tokens": 2000, "cost_usd": 0.42},
+  "activity": "editing handler.go",
+  "agent_pid": 12345,
   "watch_attempts": 0,
-  "attempt_log": []
+  "attempt_log": [
+    {"attempt": 1, "error_tier": "feedback", "timestamp": "2026-03-15T10:00:00Z"}
+  ]
 }
 ```
 
-Key `phase_status` values: `pending`, `in_progress`, `complete`, `blocked`, `deferred`.
+Key `phase_status` values: `pending`, `implementing`, `complete`, `blocked`, `deferred`, `split`.
 
 Use `arc manage <plan> <phase> show` to print a phase's `state.json`.
 
@@ -309,7 +321,7 @@ Branch names: `arc/<plan-name>` (shared) or `arc/<plan-name>/<phase-name>` (per-
 When a run stops with a blocked phase:
 
 1. **Inspect the failed phase** — `arc manage <plan> <phase> show` reads `state.json`. Check `attempt_log` for gate feedback from the last attempt.
-2. **Find the worktree** — `git worktree list` to locate `arc-worktree-*`.
+2. **Find the worktree** — `git worktree list` to locate `.arc/worktrees/<plan-name>`.
 3. **Diagnose:**
    - **Ambiguous spec** — edit `spec.yaml` and `plan.md` to be more concrete.
    - **Phase too large** — split into smaller phases.
@@ -330,8 +342,8 @@ A phase implementing a new system should assert on **every integration point** �
 ```yaml
 gate:
   assertions:
-    - build_passes: go build ./...
-    - grep: "daemon\\.Submit"       # existing CLI must reference the new daemon
+    - build_passes: <build command>
+    - grep: "daemon\\.Submit"       # existing code must reference the new daemon
     - test_exists: TestDaemonSubmit
 ```
 
