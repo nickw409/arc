@@ -5,7 +5,7 @@ Arc is a workflow engine for orchestrating multi-phase software engineering task
 ## Core Concepts
 
 - **Plan** — The overall work request (e.g., `fix-auth`). Contains one or more phases.
-- **Phase** — A self-contained unit of work with a `spec.yaml` (machine-readable spec), `plan.md` (human-readable instructions), `state.json` (runtime state), and gate assertions.
+- **Phase** — A self-contained unit of work with a `plan.md` (instructions + embedded spec YAML), `state.json` (runtime state), and gate assertions.
 
 There is no state machine. There are no workflows. Execution flow is: `arc plan` → `arc review` → `arc daemon submit`.
 
@@ -96,15 +96,14 @@ arc plan <plan-name> <phase1> [phase2] ...
 arc plan --type bugfix <plan-name> <phase1> [phase2] ...
 ```
 
-This scaffolds a plan directory with a `plan.md` and `spec.yaml` for each phase. Write the phase specification to `plan.md` before running `arc review`.
+This scaffolds a plan directory with a `plan.md` for each phase. The spec is embedded as a `## Spec` YAML block inside `plan.md`. Write the phase specification there before running `arc review`.
 
 **Plan file paths:**
 
 ```
-.plans/active/<plan-name>/phases/<phase-name>/plan.md
-.plans/active/<plan-name>/phases/<phase-name>/spec.yaml
-.plans/active/<plan-name>/phases/<phase-name>/state.json
 .plans/active/<plan-name>/plan.json
+.plans/active/<plan-name>/phases/<phase-name>/plan.md       # instructions + ## Spec YAML block
+.plans/active/<plan-name>/phases/<phase-name>/state.json    # runtime state (managed by arc)
 ```
 
 ### Phase Roles
@@ -116,7 +115,9 @@ This scaffolds a plan directory with a `plan.md` and `spec.yaml` for each phase.
 | `investigate` | Research questions | AI verifier agent |
 | `audit` | Security/quality audit | AI verifier agent |
 
-### PhaseSpec Fields (spec.yaml)
+### PhaseSpec Fields (## Spec block in plan.md)
+
+The spec is embedded as a ```yaml code block under the `## Spec` heading in `plan.md`. Arc reads the spec from this block — do NOT create a separate `spec.yaml` file.
 
 ```yaml
 name: my-phase
@@ -323,7 +324,7 @@ When a run stops with a blocked phase:
 1. **Inspect the failed phase** — `arc manage <plan> <phase> show` reads `state.json`. Check `attempt_log` for gate feedback from the last attempt.
 2. **Find the worktree** — `git worktree list` to locate `.arc/worktrees/<plan-name>`.
 3. **Diagnose:**
-   - **Ambiguous spec** — edit `spec.yaml` and `plan.md` to be more concrete.
+   - **Ambiguous spec** — edit the ## Spec block in `plan.md` to be more concrete.
    - **Phase too large** — split into smaller phases.
    - **Wrong gate assertions** — tighten or fix assertions.
    - **Environment issue** — fix the underlying problem.
